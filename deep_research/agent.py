@@ -34,8 +34,7 @@ INSTRUCTIONS = (
         + "\n\n"
         + SUBAGENT_DELEGATION_INSTRUCTIONS.format(
     max_concurrent_research_units=max_concurrent_research_units,
-    max_researcher_iterations=max_researcher_iterations,
-)
+    max_researcher_iterations=max_researcher_iterations)
 )
 
 # Create research sub-agent
@@ -61,6 +60,7 @@ model = init_chat_model(model=f"ollama:{os.getenv("MODEL_NAME")}", base_url=os.g
 
 # Using AzureOpenAI
 # import httpx
+# from research_agent.tools import VERIFY_SSL
 # from langchain_openai import AzureChatOpenAI
 # endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
 # deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
@@ -72,7 +72,7 @@ model = init_chat_model(model=f"ollama:{os.getenv("MODEL_NAME")}", base_url=os.g
 #     azure_deployment=deployment,
 #     api_version=api_version,
 #     api_key=subscription_key,
-#     http_client=httpx.Client(verify=False) # Disable SSL verification for httpx
+#     http_client=httpx.Client(verify=VERIFY_SSL) # Enable/Disable SSL verification for httpx
 # )
 # Create the agent
 agent = create_deep_agent(

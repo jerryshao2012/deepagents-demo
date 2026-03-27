@@ -13,9 +13,10 @@ from pypdf import PdfReader
 from tavily import TavilyClient
 from typing_extensions import Annotated, Literal
 
+VERIFY_SSL = os.getenv("VERIFY_SSL", "True") == "True"
 tavily_client = TavilyClient()
 # Disable SSL verification for Tavily API requests as well
-if hasattr(tavily_client, "session"):
+if not VERIFY_SSL and hasattr(tavily_client, "session"):
     tavily_client.session.verify = False
 
 
@@ -34,7 +35,10 @@ def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
     }
 
     try:
-        response = httpx.get(url, headers=headers, timeout=timeout, verify=False)
+        response = httpx.get(url=url,
+                             headers=headers,
+                             timeout=timeout,
+                             verify=VERIFY_SSL)
         response.raise_for_status()
         return markdownify(response.text)
     except Exception as e:

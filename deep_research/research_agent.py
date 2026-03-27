@@ -1,4 +1,5 @@
 import argparse
+import re
 from datetime import datetime
 
 from deepagents.backends.utils import file_data_to_string
@@ -25,8 +26,11 @@ def generate_research_title(research_content):
         response = model.invoke([HumanMessage(content=prompt)])
         title = response.content.strip()
 
-        # Sanitize filename
-        title = "".join(c for c in title if c.isalnum() or c in ("-", "_")).strip("-").strip("_")
+        # Sanitize filename: replace spaces with underscores, preserve existing underscores,
+        # and only allow alphanumeric characters, hyphens, and underscores
+        title = re.sub(r'[^\w\-]', '_', title)
+        # Collapse multiple consecutive underscores into a single one and trim edges
+        title = re.sub(r'_+', '_', title).strip('_')
         return title if title else "research-report"
     except Exception as e:
         print(f"Warning: Could not generate title ({e}). Using default.")
