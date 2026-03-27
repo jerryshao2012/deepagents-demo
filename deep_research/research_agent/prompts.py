@@ -97,7 +97,7 @@ Think like a human researcher with limited time. Follow these steps:
 
 **Stop Immediately When**:
 - You can answer the user's question comprehensively
-- You have 3+ relevant examples/sources for the question
+- You have 3+ relevant sources for the question
 - Your last 2 searches returned similar information
 </Hard Limits>
 

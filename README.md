@@ -55,8 +55,8 @@ flowchart TB
 
 5. **Context Engineering**
    - Decides what the model sees, when it sees it, and what stays out of context.
-   - Includes planning, skill loading, delegation, context resets, and progressive disclosure.
-   - Prevents context bloat so the model can stay focused on the active task.
+   - Includes planning, skill loading, delegation, context resets/compression, and progressive disclosure.
+   - Prevents context bloat/rot so the model can stay focused on the active task.
 
 6. **Orchestration + Hooks**
    - Coordinates subagents, tools, routing, approvals, and runtime policies.
@@ -134,7 +134,7 @@ export OLLAMA_API_BASE=http://localhost:11434
 export MODEL_NAME=glm-4.7-flash:latest
 
 # Navigate to any demo and follow its README
-cd examples/deep_research
+cd deep_research
 uv sync
 # See the demo's README for next steps
 ```

@@ -16,28 +16,20 @@ The `content_writer.py` script shows how to combine these into a working agent.
 ```bash
 # Set API keys
 
-# Option 1: Using Ollama (LOCAL - FREE)
+# Ollama is currently required for the main writing model
 export OLLAMA_API_BASE=http://localhost:11434
 export MODEL_NAME=glm-4.7-flash:latest  # Note: Image generation requires Google API
 export TAVILY_API_KEY="..."      # For web search (optional)
-
-# Option 2: Using Cloud APIs
-export ANTHROPIC_API_KEY="..."
 export GOOGLE_API_KEY="..."      # For image generation
-export TAVILY_API_KEY="..."      # For web search (optional)
 
 # Run (uv automatically installs dependencies on first run)
-cd examples/content-builder-agent
-uv run python content_writer.py "Write a blog post about prompt engineering"
+cd content-builder-agent
+uv sync
+uv run python content_writer.py "Write a blog post about harness engineering"
 ```
 
 **More examples:**
 ```bash
-# With Ollama
-uv run python content_writer.py "Create a LinkedIn post about AI agents" --model ollama:qwen3.5:latest
-uv run python content_writer.py "Write a Twitter thread about the future of coding" --model ollama:glm-4.7-flash:latest
-
-# With Cloud APIs (default)
 uv run python content_writer.py "Create a LinkedIn post about AI agents"
 uv run python content_writer.py "Write a Twitter thread about the future of coding"
 ```
@@ -77,7 +69,7 @@ agent = create_deep_agent(
     skills=["./skills/"],                          # ← Middleware loads on demand
     tools=[generate_cover, generate_social_image], # ← Image generation tools
     subagents=load_subagents("./subagents.yaml"),  # ← See note below
-    backend=FilesystemBackend(root_dir="./"),
+    backend=FilesystemBackend(root_dir="./", virtual_mode=True),
 )
 ```
 
@@ -153,6 +145,8 @@ This agent has filesystem access and can read, write, and delete files on your m
 ## Requirements
 
 - Python 3.11+
-- `ANTHROPIC_API_KEY` - For the main agent
+- Ollama - For the main writing model
+- `MODEL_NAME` - Ollama model name for the main writing model
+- `OLLAMA_API_BASE` - Ollama base URL for the main writing model
 - `GOOGLE_API_KEY` - For image generation (uses Gemini's [Imagen / "nano banana"](https://ai.google.dev/gemini-api/docs/image-generation) via `gemini-2.5-flash-image`)
 - `TAVILY_API_KEY` - For web search (optional, research still works without it)

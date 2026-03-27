@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import warnings
+
 warnings.filterwarnings("ignore", message="Core Pydantic V1 functionality")
 
 """
@@ -31,24 +32,30 @@ from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.spinner import Spinner
-from rich.text import Text
 
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
+from langchain_ollama import ChatOllama
 
 # Load environment variables
-load_dotenv()
+load_dotenv("../.env", override=True)
 
 EXAMPLE_DIR = Path(__file__).parent
 console = Console()
+
+# Initialize Ollama model from environment
+model = ChatOllama(
+    model=os.getenv("MODEL_NAME", "glm-4.7-flash:latest"),
+    base_url=os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
+)
 
 
 # Web search tool for the researcher subagent
 @tool
 def web_search(
-    query: str,
-    max_results: int = 5,
-    topic: Literal["general", "news"] = "general",
+        query: str,
+        max_results: int = 5,
+        topic: Literal["general", "news"] = "general",
 ) -> dict:
     """Search the web for current information.
 
@@ -169,11 +176,12 @@ def load_subagents(config_path: Path) -> list:
 def create_content_writer():
     """Create a content writer agent configured by filesystem files."""
     return create_deep_agent(
-        memory=["./AGENTS.md"],           # Loaded by MemoryMiddleware
-        skills=["./skills/"],             # Loaded by SkillsMiddleware
+        memory=["./AGENTS.md"],  # Loaded by MemoryMiddleware
+        skills=["./skills/"],  # Loaded by SkillsMiddleware
         tools=[generate_cover, generate_social_image],  # Image generation
         subagents=load_subagents(EXAMPLE_DIR / "subagents.yaml"),  # Custom helper
-        backend=FilesystemBackend(root_dir=EXAMPLE_DIR),
+        backend=FilesystemBackend(root_dir=EXAMPLE_DIR, virtual_mode=True),
+        model=model,
     )
 
 
@@ -259,9 +267,9 @@ async def main():
     # Use Live display for spinner during waiting periods
     with Live(display.spinner, console=console, refresh_per_second=10, transient=True) as live:
         async for chunk in agent.astream(
-            {"messages": [("user", task)]},
-            config={"configurable": {"thread_id": "content-writer-demo"}},
-            stream_mode="values",
+                {"messages": [("user", task)]},
+                config={"configurable": {"thread_id": "content-writer-demo"}},
+                stream_mode="values",
         ):
             if "messages" in chunk:
                 messages = chunk["messages"]

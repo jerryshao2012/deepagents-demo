@@ -11,7 +11,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 Ensure you are in the `deep_research` directory:
 
 ```bash
-cd examples/deep_research
+cd deep_research
 ```
 
 Install packages:
