@@ -20,6 +20,8 @@ Install packages:
 uv sync
 ```
 
+*(If `uv` is not available on your system, you can use traditional pip: `pip install -r requirements.txt`)*
+
 Set your API keys in your environment:
 
 ```bash
@@ -32,17 +34,31 @@ export TAVILY_API_KEY=your_tavily_api_key_here  # ✅ Required for web search
 export ANTHROPIC_API_KEY=your_anthropic_api_key_here  # For Claude model
 export GOOGLE_API_KEY=your_google_api_key_here        # For Gemini model ([get one here](https://ai.google.dev/gemini-api/docs))
 export TAVILY_API_KEY=your_tavily_api_key_here        # Required for web search ([get one here](https://www.tavily.com/)) with a generous free tier
-export LANGSMITH_API_KEY=your_langsmith_api_key_here  # [LangSmith API key](https://smith.langchain.com/settings) (free to sign up)
+export LANGCHAIN_TRACING_V2=true                       # Enable LangSmith tracing
+export LANGSMITH_ENDPOINT=https://api.smith.langchain.com # LangSmith endpoint
+export LANGCHAIN_API_KEY=your_langsmith_api_key_here   # [LangSmith API key](https://smith.langchain.com/settings) (free to sign up)
+export LANGCHAIN_PROJECT=deep-research-deepagents      # The project name to log traces to
 ```
 
 ## Usage Options
 
 You can run this example in two ways:
 
-### Option 1: Jupyter Notebook
+### Option 1: Command Line Script
 
-Run the interactive notebook to step through the research agent:
+Run the standalone Python script to execute the research agent:
 
+```bash
+uv run python research_agent.py "Research AI Agents"
+```
+
+You can optionally pass a PDF folder to extract custom documents and prompt the agent to generate slide markup:
+
+```bash
+uv run python research_agent.py "Research AI Agents" --pdf-folder ./docs --slides
+```
+
+If you prefer an interactive notebook, you can still run it via:
 ```bash
 uv run jupyter notebook research_agent.ipynb
 ```
@@ -98,6 +114,16 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 
 model = ChatGoogleGenerativeAI(model=os.getenv("MODEL_NAME"))
 
+# Using AzureOpenAI
+from langchain_openai import AzureChatOpenAI
+
+model = AzureChatOpenAI(
+    azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+    azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+    api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+    api_key=os.getenv("AZURE_OPENAI_API_KEY")
+)
+
 agent = create_deep_agent(
     model=model,
 )
@@ -121,3 +147,5 @@ The deep research agent adds the following custom tools beyond the built-in deep
 |-----------|-------------|
 | `tavily_search` | Web search tool that uses Tavily purely as a URL discovery engine. Performs searches using Tavily API to find relevant URLs, fetches full webpage content via HTTP with proper User-Agent headers (avoiding 403 errors), converts HTML to markdown, and returns the complete content without summarization to preserve all information for the agent's analysis. Works with both Claude and Gemini models. |
 | `think_tool` | Strategic reflection mechanism that helps the agent pause and assess progress between searches, analyze findings, identify gaps, and plan next steps. |
+| `read_pdf_folder` | Extracts text content from all PDF documents located in a specified local folder, allowing the agent to research from local files. |
+| `generate_slide_markup` | Transforms research findings into structured, 3-slide markdown presentation markup designed for quick learning and summarization. |

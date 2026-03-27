@@ -4,13 +4,19 @@ This module provides search and content processing utilities for the research ag
 using Tavily for URL discovery and fetching full webpage content.
 """
 
+import os
+
 import httpx
 from langchain_core.tools import InjectedToolArg, tool
 from markdownify import markdownify
+from pypdf import PdfReader
 from tavily import TavilyClient
 from typing_extensions import Annotated, Literal
 
 tavily_client = TavilyClient()
+# Disable SSL verification for Tavily API requests as well
+if hasattr(tavily_client, "session"):
+    tavily_client.session.verify = False
 
 
 def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
@@ -28,7 +34,7 @@ def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
     }
 
     try:
-        response = httpx.get(url, headers=headers, timeout=timeout)
+        response = httpx.get(url, headers=headers, timeout=timeout, verify=False)
         response.raise_for_status()
         return markdownify(response.text)
     except Exception as e:
@@ -37,11 +43,11 @@ def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
 
 @tool(parse_docstring=True)
 def tavily_search(
-    query: str,
-    max_results: Annotated[int, InjectedToolArg] = 1,
-    topic: Annotated[
-        Literal["general", "news", "finance"], InjectedToolArg
-    ] = "general",
+        query: str,
+        max_results: Annotated[int, InjectedToolArg] = 1,
+        topic: Annotated[
+            Literal["general", "news", "finance"], InjectedToolArg
+        ] = "general",
 ) -> str:
     """Search the web for information on a given query.
 
@@ -114,3 +120,58 @@ def think_tool(reflection: str) -> str:
         Confirmation that reflection was recorded for decision-making
     """
     return f"Reflection recorded: {reflection}"
+
+
+@tool(parse_docstring=True)
+def read_pdf_folder(folder_path: str) -> str:
+    """Read and extract text from all PDF documents in a given folder.
+
+    Use this tool when you need to research from local PDF documents instead of or in addition to web search.
+
+    Args:
+        folder_path: The absolute or relative path to the folder containing PDF files.
+
+    Returns:
+        Extracted text from all PDFs or an error message.
+    """
+    if not PdfReader:
+        return "Error: pypdf is not installed."
+
+    if not os.path.exists(folder_path):
+        return f"Error: Folder {folder_path} does not exist."
+
+    extracted_text = []
+    try:
+        for file_name in os.listdir(folder_path):
+            if file_name.lower().endswith('.pdf'):
+                file_path = os.path.join(folder_path, file_name)
+                try:
+                    reader = PdfReader(file_path)
+                    text = "\\n".join(page.extract_text() or "" for page in reader.pages)
+                    extracted_text.append(f"--- Content of {file_name} ---\\n{text}\\n")
+                except Exception as e:
+                    extracted_text.append(f"--- Error reading {file_name}: {str(e)} ---\\n")
+    except Exception as e:
+        return f"Error accessing folder {folder_path}: {str(e)}"
+
+    if not extracted_text:
+        return f"No PDF files found in {folder_path}."
+
+    return "\\n".join(extracted_text)
+
+
+@tool(parse_docstring=True)
+def generate_slide_markup(topic: str, slide_contents: list[str]) -> str:
+    """Generate Markdown presentation slide markup for a given research topic, optimized for quick learning.
+
+    Args:
+        topic: The overall presentation topic.
+        slide_contents: A list of content strings for each slide (e.g., 3 slides).
+
+    Returns:
+        Structured markdown for presentation slides, demarcated by `---`.
+    """
+    markup = f"# Presentation: {topic}\\n\\n---\\n\\n"
+    for i, content in enumerate(slide_contents):
+        markup += f"## Slide {i + 1}\\n\\n{content}\\n\\n---\\n\\n"
+    return markup

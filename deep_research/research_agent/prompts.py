@@ -73,9 +73,11 @@ You can call these tools in series or in parallel, your research is conducted in
 </Task>
 
 <Available Research Tools>
-You have access to two specific research tools:
+You have access to specific research tools:
 1. **tavily_search**: For conducting web searches to gather information
 2. **think_tool**: For reflection and strategic planning during research
+3. **read_pdf_folder**: For extracting text from PDF documents in a local folder
+4. **generate_slide_markup**: For creating structured 3-slide presentation markdown from research
 **CRITICAL: Use think_tool after each search to reflect on results and plan next steps**
 </Available Research Tools>
 
