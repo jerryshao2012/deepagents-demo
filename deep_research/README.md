@@ -91,12 +91,12 @@ from deepagents import create_deep_agent
 model = init_chat_model(model=f"ollama:{os.getenv("MODEL_NAME")}", base_url=os.getenv("OLLAMA_API_BASE"))
 
 # Using Claude
-model = init_chat_model(model=os.getenv("ANTHROPIC_API_KEY"), temperature = 0.0)
+model = init_chat_model(model=os.getenv("MODEL_NAME"), temperature = 0.0)
 
 # Using Gemini
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-model = ChatGoogleGenerativeAI(model=os.getenv("GOOGLE_API_KEY"))
+model = ChatGoogleGenerativeAI(model=os.getenv("MODEL_NAME"))
 
 agent = create_deep_agent(
     model=model,

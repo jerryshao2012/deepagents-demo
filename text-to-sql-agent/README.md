@@ -44,7 +44,7 @@ curl -L -o chinook.db https://github.com/lerocha/chinook-database/raw/master/Chi
 
 ```bash
 # Using uv (recommended)
-uv venv --python 3.11
+uv venv --python 3.12
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 uv pip install -e .
 ```
@@ -70,7 +70,7 @@ ANTHROPIC_API_KEY=your_anthropic_api_key_here
 Optional:
 
 ```
-LANGCHAIN_TRACING_V2=true
+LANGSMITH_TRACING=true
 LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 LANGCHAIN_API_KEY=your_langsmith_api_key_here
 LANGCHAIN_PROJECT=text2sql-deepagent
@@ -84,10 +84,6 @@ Run the agent from the command line with a natural language question:
 
 ```bash
 # With Ollama
-python agent.py "What are the top 5 best-selling artists?" --model ollama:glm-4.7-flash:latest
-python agent.py "Which employee generated the most revenue by country?" --model ollama:qwen3.5:latest
-
-# Default (uses cloud API if ANTHROPIC_API_KEY is set, or Ollama if configured)
 python agent.py "What are the top 5 best-selling artists?"
 python agent.py "Which employee generated the most revenue by country?"
 python agent.py "How many customers are from Canada?"
@@ -249,7 +245,7 @@ All dependencies are specified in `pyproject.toml`:
 3. Add these variables to your `.env` file:
 
 ```
-LANGCHAIN_TRACING_V2=true
+LANGSMITH_TRACING=true
 LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 LANGCHAIN_API_KEY=your_langsmith_api_key_here
 LANGCHAIN_PROJECT=text2sql-deepagent

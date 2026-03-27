@@ -5,7 +5,6 @@ import sys
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
 from dotenv import load_dotenv
-from langchain_anthropic import ChatAnthropic
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain_community.utilities import SQLDatabase
 from rich.console import Console
@@ -28,7 +27,12 @@ def create_sql_deep_agent():
     db = SQLDatabase.from_uri(f"sqlite:///{db_path}", sample_rows_in_table_info=3)
 
     # Initialize Claude Sonnet 4.5 for toolkit initialization
-    model = ChatAnthropic(model="claude-sonnet-4-5-20250929", temperature=0)
+    # from langchain_anthropic import ChatAnthropic
+    # model = ChatAnthropic(model="claude-sonnet-4-5-20250929", temperature=0)
+
+    # Initialize Ollama (Local) for toolkit initialization
+    from langchain.chat_models import init_chat_model
+    model = init_chat_model(model=f"ollama:{os.getenv("MODEL_NAME")}", base_url=os.getenv("OLLAMA_API_BASE"))
 
     # Create SQL toolkit and get tools
     toolkit = SQLDatabaseToolkit(db=db, llm=model)
@@ -43,7 +47,7 @@ def create_sql_deep_agent():
         ],  # Specialized workflows (query-writing, schema-exploration)
         tools=sql_tools,  # SQL database tools
         subagents=[],  # No subagents needed
-        backend=FilesystemBackend(root_dir=base_dir),  # Persistent file storage
+        backend=FilesystemBackend(root_dir=base_dir, virtual_mode=True),  # Persistent file storage
     )
 
     return agent
@@ -52,7 +56,7 @@ def create_sql_deep_agent():
 def main():
     """Main entry point for the SQL Deep Agent CLI"""
     parser = argparse.ArgumentParser(
-        description="Text-to-SQL Deep Agent powered by LangChain Deep Agents and Claude Sonnet 4.5",
+        description="Text-to-SQL Deep Agent powered by LangChain Deep Agents and Ollama Model",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
