@@ -1,8 +1,43 @@
 import argparse
+import itertools
 import re
+import sys
+import threading
+import time
 from datetime import datetime
 
 from deepagents.backends.utils import file_data_to_string
+
+
+class Spinner:
+    def __init__(self, message="Working..."):
+        self.spinner = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+        self.stop_running = threading.Event()
+        self.thread = None
+        self.message = message
+
+    def spin(self):
+        while not self.stop_running.is_set():
+            sys.stdout.write(f"\r\033[K\033[36m{next(self.spinner)}\033[0m {self.message}")
+            sys.stdout.flush()
+            time.sleep(0.1)
+
+    def start(self, message=None):
+        if message:
+            self.message = message
+        self.stop_running.clear()
+        self.thread = threading.Thread(target=self.spin)
+        self.thread.daemon = True
+        self.thread.start()
+
+    def stop(self):
+        self.stop_running.set()
+        if self.thread and self.thread.is_alive():
+            self.thread.join()
+        sys.stdout.write("\r\033[K")
+        sys.stdout.flush()
+
+
 from langchain_core.messages import HumanMessage
 
 from agent import agent, model
@@ -90,6 +125,12 @@ def main():
 
     # Run the agent with progress printouts
     result = None
+    start_time = time.time()
+    last_time = start_time
+
+    spinner = Spinner("Initializing research inputs...")
+    spinner.start()
+
     try:
         # We attempt to stream updates from LangGraph to provide visibility
         for state in agent.stream(
@@ -103,9 +144,17 @@ def main():
                 },
                 stream_mode="values"
         ):
+            current_time = time.time()
+            step_time = current_time - last_time
+            last_time = current_time
+
+            spinner.stop()
+
             # Inspect the latest state change
             msgs = state.get("messages", [])
             files = state.get("files", {})
+            next_spinner_msg = "Agent is working..."
+
             if msgs:
                 last = msgs[-1]
                 # Handle both dict-based and object-based messages
@@ -124,20 +173,34 @@ def main():
                 if role == "ai" and tool_calls:
                     for tc in tool_calls:
                         tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "unknown")
-                        print(f"⚙️  Agent is thinking/acting: Calling `{tc_name}`...")
+                        print(f"⚙️  Agent decided to act: Calling `{tc_name}`... (⏱️  {step_time:.1f}s)")
+                        next_spinner_msg = f"Executing `{tc_name}`..."
                 elif role == "tool":
-                    print(f"✅ Executed tool `{name}` successfully (output size: {len(content)} chars)")
+                    print(
+                        f"✅ Executed tool `{name}` successfully (output size: {len(content)} chars) (⏱️  {step_time:.1f}s)")
+                    next_spinner_msg = "Analyzing tool output..."
                 elif role == "ai" and content:
-                    print(f"💬 Agent response update...")
+                    print(f"💬 Agent updated its response based on findings... (⏱️  {step_time:.1f}s)")
+                    next_spinner_msg = "Structuring final thoughts..."
                 elif role == "human" or role == "user":
-                    print(f"🚀 Initializing research inputs...")
+                    print(f"🚀 Started research task... (⏱️  {step_time:.1f}s)")
+                    next_spinner_msg = "Agent is formulating a plan..."
 
             result = state  # The last emitted state is our final result
+            spinner.start(next_spinner_msg)
 
-        print("\n✨ Research completed!\n")
+        spinner.stop()
+        total_time = time.time() - start_time
+        print(f"\n✨ Research completed in {total_time:.1f}s!\n")
     except Exception as e:
+        spinner.stop()
+        total_time = time.time() - start_time
         # Fallback to invoke if stream doesn't work out of the box
-        print(f"⚠️ Streaming not fully supported or interrupted ({e}), running normally...")
+        print(
+            f"⚠️ Streaming not fully supported or interrupted ({e}), running normally... (failed after {total_time:.1f}s)")
+
+        spinner.start("Running fallback synchronous invoke...")
+        start_invoke = time.time()
         result = agent.invoke(
             {
                 "messages": [
@@ -148,6 +211,9 @@ def main():
                 ],
             },
         )
+        spinner.stop()
+        invoke_time = time.time() - start_invoke
+        print(f"\n✨ Fallback research completed in {invoke_time:.1f}s!\n")
 
     # Output the result. The agent usually writes to /final_report.md
     files = result.get("files", {})
