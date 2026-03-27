@@ -27,6 +27,9 @@ source .venv/bin/activate
 # Install the CLI
 uv pip install deepagents-cli
 
+# Install Langchain Ollama
+uv pip install langchain-ollama    
+
 # Download the script (or copy from examples/ralph_mode/ if you have the repo)
 curl -O https://raw.githubusercontent.com/langchain-ai/deepagents/main/examples/ralph_mode/ralph_mode.py
 
