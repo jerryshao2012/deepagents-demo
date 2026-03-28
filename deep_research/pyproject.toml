@@ -19,6 +19,7 @@ dependencies = [
     "langgraph-cli[inmem]>=0.1.55",
     "langchain-google-genai>=3.1.0",
     "pypdf>=6.9.2",
+    "marker-pdf>=0.3.10",
 ]
 
 [tool.uv]

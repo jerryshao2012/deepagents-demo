@@ -15,9 +15,12 @@ from research_agent.prompts import (
     SUBAGENT_DELEGATION_INSTRUCTIONS,
 )
 from research_agent.tools import tavily_search, think_tool, read_pdf_folder, generate_slide_markup
+from utils import _get_verify_ssl
 
 # Load environment variables
 load_dotenv()
+
+VERIFY_SSL = _get_verify_ssl()
 
 # Limits
 max_concurrent_research_units = 3
@@ -45,39 +48,50 @@ research_sub_agent: SubAgent = {
     "tools": [tavily_search, think_tool],
 }
 
+model = None
 # Model Gemini 3
-# from langchain_google_genai import ChatGoogleGenerativeAI
-# model = ChatGoogleGenerativeAI(model="gemini-3-pro-preview", temperature=0.0)
+if os.getenv("GOOGLE_API_KEY"):
+    from langchain_google_genai import ChatGoogleGenerativeAI
+
+    model = ChatGoogleGenerativeAI(model=os.getenv("MODEL_NAME", "gemini-3-pro-preview"), temperature=0.0)
 
 # Model Claude 4.5
-# from langchain.chat_models import init_chat_model
-# model = init_chat_model(model="anthropic:claude-sonnet-4-5-20250929", temperature=0.0)
+if os.getenv("ANTHROPIC_API_KEY"):
+    from langchain.chat_models import init_chat_model
+
+    model = init_chat_model(model=os.getenv("MODEL_NAME", "anthropic:claude-sonnet-4-5-20250929"), temperature=0.0)
 
 # Using Ollama (Local)
-from langchain.chat_models import init_chat_model
+if os.getenv("OLLAMA_API_BASE"):
+    from langchain.chat_models import init_chat_model
 
-model = init_chat_model(model=f"ollama:{os.getenv("MODEL_NAME")}", base_url=os.getenv("OLLAMA_API_BASE"))
+    model = init_chat_model(model=f"ollama:{os.getenv("MODEL_NAME")}", base_url=os.getenv("OLLAMA_API_BASE"))
 
 # Using AzureOpenAI
-# import httpx
-# from research_agent.tools import VERIFY_SSL
-# from langchain_openai import AzureChatOpenAI
-# endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-# deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
-# subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
-# api_version = os.getenv("AZURE_OPENAI_API_VERSION")
-#
-# model = AzureChatOpenAI(
-#     azure_endpoint=endpoint,
-#     azure_deployment=deployment,
-#     api_version=api_version,
-#     api_key=subscription_key,
-#     http_client=httpx.Client(verify=VERIFY_SSL) # Enable/Disable SSL verification for httpx
-# )
-# Create the agent
-agent = create_deep_agent(
-    model=model,
-    tools=[tavily_search, think_tool, read_pdf_folder, generate_slide_markup],
-    system_prompt=INSTRUCTIONS,
-    subagents=[research_sub_agent],
-)
+if os.getenv("AZURE_OPENAI_API_KEY"):
+    import httpx
+    from langchain_openai import AzureChatOpenAI
+
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+    subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
+    api_version = os.getenv("AZURE_OPENAI_API_VERSION")
+
+    model = AzureChatOpenAI(
+        azure_endpoint=endpoint,
+        azure_deployment=deployment,
+        api_version=api_version,
+        api_key=subscription_key,
+        http_client=httpx.Client(verify=VERIFY_SSL)  # Enable/Disable SSL verification for httpx
+    )
+
+if model:
+    # Create the agent
+    agent = create_deep_agent(
+        model=model,
+        tools=[tavily_search, think_tool, read_pdf_folder, generate_slide_markup],
+        system_prompt=INSTRUCTIONS,
+        subagents=[research_sub_agent],
+    )
+else:
+    raise ValueError("No model found. Please set up a model")

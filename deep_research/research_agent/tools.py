@@ -9,11 +9,15 @@ import os
 import httpx
 from langchain_core.tools import InjectedToolArg, tool
 from markdownify import markdownify
-from pypdf import PdfReader
+from marker.convert import convert_single_pdf
+from marker.models import load_all_models
+from marker.output import save_markdown
 from tavily import TavilyClient
 from typing_extensions import Annotated, Literal
 
-VERIFY_SSL = os.getenv("VERIFY_SSL", "True") == "True"
+from utils import _get_verify_ssl
+
+VERIFY_SSL = _get_verify_ssl()
 tavily_client = TavilyClient()
 # Disable SSL verification for Tavily API requests as well
 if not VERIFY_SSL and hasattr(tavily_client, "session"):
@@ -128,7 +132,7 @@ def think_tool(reflection: str) -> str:
 
 @tool(parse_docstring=True)
 def read_pdf_folder(folder_path: str) -> str:
-    """Read and extract text from all PDF documents in a given folder.
+    """Read and extract text from all PDF documents in a given folder using Marker.
 
     Use this tool when you need to research from local PDF documents instead of or in addition to web search.
 
@@ -138,30 +142,41 @@ def read_pdf_folder(folder_path: str) -> str:
     Returns:
         Extracted text from all PDFs or an error message.
     """
-    if not PdfReader:
-        return "Error: pypdf is not installed."
-
     if not os.path.exists(folder_path):
         return f"Error: Folder {folder_path} does not exist."
 
     extracted_text = []
+    # Marker's convert_single_pdf expects loaded models rather than a config object
+    model_lst = load_all_models()
     try:
         for file_name in os.listdir(folder_path):
             if file_name.lower().endswith('.pdf'):
                 file_path = os.path.join(folder_path, file_name)
                 try:
-                    reader = PdfReader(file_path)
-                    text = "\\n".join(page.extract_text() or "" for page in reader.pages)
-                    extracted_text.append(f"--- Content of {file_name} ---\\n{text}\\n")
+                    result = convert_single_pdf(file_path, model_lst)
+                    if isinstance(result, tuple) and len(result) >= 2:
+                        full_text, images = result[0], result[1]
+                        out_meta = result[2] if len(result) > 2 else {}
+                    else:
+                        full_text = result
+                        images = {}
+                        out_meta = {}
+
+                    # Save images to temporary location
+                    temp_dir = os.path.join(folder_path, "__marker_temp__")
+                    os.makedirs(temp_dir, exist_ok=True)
+                    save_markdown(temp_dir, file_name, full_text, images, out_meta)
+                    # Include image paths in output
+                    extracted_text.append(f"--- Content of {file_name} ---\n{full_text}\n")
                 except Exception as e:
-                    extracted_text.append(f"--- Error reading {file_name}: {str(e)} ---\\n")
+                    extracted_text.append(f"--- Error reading {file_name}: {str(e)} ---\n")
     except Exception as e:
         return f"Error accessing folder {folder_path}: {str(e)}"
 
     if not extracted_text:
         return f"No PDF files found in {folder_path}."
 
-    return "\\n".join(extracted_text)
+    return "\n".join(extracted_text)
 
 
 @tool(parse_docstring=True)

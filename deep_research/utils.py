@@ -1,6 +1,7 @@
 """Utility functions for displaying messages and prompts in Jupyter notebooks."""
-
+import argparse
 import json
+import sys
 
 from rich.console import Console
 from rich.panel import Panel
@@ -32,9 +33,9 @@ def format_message_content(message):
 
     # Handle tool calls attached to the message (OpenAI format) - only if not already processed
     if (
-        not tool_calls_processed
-        and hasattr(message, "tool_calls")
-        and message.tool_calls
+            not tool_calls_processed
+            and hasattr(message, "tool_calls")
+            and message.tool_calls
     ):
         for tool_call in message.tool_calls:
             parts.append(f"\n🔧 Tool Call: {tool_call['name']}")
@@ -92,3 +93,27 @@ def show_prompt(prompt_text: str, title: str = "Prompt", border_style: str = "bl
             padding=(1, 2),
         )
     )
+
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    if v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
+def _get_verify_ssl():
+    for i, arg in enumerate(sys.argv):
+        if arg.startswith('--verify_ssl='):
+            val = arg.split('=', 1)[1].lower()
+            return val in ('yes', 'true', 't', 'y', '1')
+        elif arg == '--verify_ssl':
+            if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith('-'):
+                val = sys.argv[i + 1].lower()
+                if val in ('yes', 'true', 't', 'y', '1'): return True
+                if val in ('no', 'false', 'f', 'n', '0'): return False
+            return True
+    return os.getenv("VERIFY_SSL", "True").lower() in ('yes', 'true', 't', 'y', '1')

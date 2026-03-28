@@ -8,15 +8,7 @@ from datetime import datetime
 
 from deepagents.backends.utils import file_data_to_string
 
-
-def str2bool(v):
-    if isinstance(v, bool):
-        return v
-    if v.lower() in ('yes', 'true', 't', 'y', '1'):
-        return True
-    if v.lower() in ('no', 'false', 'f', 'n', '0'):
-        return False
-    raise argparse.ArgumentTypeError('Boolean value expected.')
+from utils import str2bool, _get_verify_ssl
 
 
 class Spinner:
@@ -108,6 +100,8 @@ def save_research_to_file(research_content, filename=None):
 
 def main():
     parser = argparse.ArgumentParser(description="Run the Deep Research Agent", add_help=False)
+    parser.add_argument('--verify_ssl', type=str2bool, nargs='?', const='True', default='True',
+                        help='Verify SSL certificates (default: True). Set to False to skip SSL verification')
     parser.add_argument("subject", type=str, help="Research subject")
     parser.add_argument('--verbose', type=str2bool, nargs='?', const='True', default='True',
                         help='Show progress (default: True). When False, runs agent without progress display')
@@ -145,6 +139,9 @@ def main():
     start_time = time.time()
     last_time = start_time
 
+    # Create SSL verification setting - CLI flag takes precedence over env var
+    verify_ssl = _get_verify_ssl()
+
     # Run the agent based on verbose flag
     if args.verbose:
         # Show progress with spinner
@@ -162,7 +159,8 @@ def main():
                             }
                         ],
                     },
-                    stream_mode="values"
+                    stream_mode="values",
+                    verify_ssl=verify_ssl
             ):
                 current_time = time.time()
                 step_time = current_time - last_time
@@ -230,6 +228,7 @@ def main():
                         }
                     ],
                 },
+                verify_ssl=verify_ssl
             )
             spinner.stop()
             invoke_time = time.time() - start_invoke
@@ -244,8 +243,9 @@ def main():
                         "content": instruction,
                     }
                 ],
-            })
-
+            },
+            verify_ssl=verify_ssl
+        )
         total_time = time.time() - start_time
         print(f"\n✨ Research completed in {total_time:.1f}s!\n")
 
