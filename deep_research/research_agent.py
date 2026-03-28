@@ -9,6 +9,16 @@ from datetime import datetime
 from deepagents.backends.utils import file_data_to_string
 
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    if v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
 class Spinner:
     def __init__(self, message="Working..."):
         self.spinner = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
@@ -97,8 +107,11 @@ def save_research_to_file(research_content, filename=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run the Deep Research Agent")
+    parser = argparse.ArgumentParser(description="Run the Deep Research Agent", add_help=False)
     parser.add_argument("subject", type=str, help="Research subject")
+    parser.add_argument('--verbose', type=str2bool, nargs='?', const='True', default='True',
+                        help='Show progress (default: True). When False, runs agent without progress display')
+    parser.add_argument('--help', '-h', action='store_true', help='Show this help message and exit')
     parser.add_argument("--pdf-folder", type=str,
                         help="Optional folder containing PDF documents to use as research material")
     parser.add_argument("--slides", action="store_true",
@@ -106,6 +119,10 @@ def main():
     parser.add_argument("--title", type=str,
                         help="Optional research title for output file")
     args = parser.parse_args()
+
+    if args.help:
+        parser.print_help()
+        sys.exit(0)
 
     # Construct the instruction
     instruction = f"Research the following subject: {args.subject}"
@@ -128,12 +145,83 @@ def main():
     start_time = time.time()
     last_time = start_time
 
-    spinner = Spinner("Initializing research inputs...")
-    spinner.start()
+    # Run the agent based on verbose flag
+    if args.verbose:
+        # Show progress with spinner
+        spinner = Spinner("Initializing research inputs...")
+        spinner.start()
 
-    try:
-        # We attempt to stream updates from LangGraph to provide visibility
-        for state in agent.stream(
+        try:
+            # We attempt to stream updates from LangGraph to provide visibility
+            for state in agent.stream(
+                    {
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": instruction,
+                            }
+                        ],
+                    },
+                    stream_mode="values"
+            ):
+                current_time = time.time()
+                step_time = current_time - last_time
+                last_time = current_time
+
+                spinner.stop()
+
+                # Inspect the latest state change
+                msgs = state.get("messages", [])
+                files = state.get("files", {})
+                next_spinner_msg = "Agent is working..."
+
+                if msgs:
+                    last = msgs[-1]
+                    # Handle both dict-based and object-based messages
+                    if isinstance(last, dict):
+                        role = last.get("role", "")
+                        content = str(last.get("content", ""))
+                        name = last.get("name", "")
+                        tool_calls = last.get("tool_calls", [])
+                    else:
+                        role = getattr(last, "type", "")
+                        content = str(getattr(last, "content", ""))
+                        name = getattr(last, "name", "")
+                        tool_calls = getattr(last, "tool_calls", [])
+
+                    # Output meaningful progress based on the last message type
+                    if role == "ai" and tool_calls:
+                        for tc in tool_calls:
+                            tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "unknown")
+                            print(f"⚙️  Agent decided to act: Calling `{tc_name}`... (⏱️  {step_time:.1f}s)")
+                            next_spinner_msg = f"Executing `{tc_name}`..."
+                    elif role == "tool":
+                        print(
+                            f"✅ Executed tool `{name}` successfully (output size: {len(content)} chars) (⏱️  {step_time:.1f}s)")
+                        next_spinner_msg = "Analyzing tool output..."
+                    elif role == "ai" and content:
+                        print(f"💬 Agent updated its response based on findings... (⏱️  {step_time:.1f}s)")
+                        next_spinner_msg = "Structuring final thoughts..."
+                    elif role == "human" or role == "user":
+                        print(f"🚀 Started research task... (⏱️  {step_time:.1f}s)")
+                        next_spinner_msg = "Agent is formulating a plan..."
+
+                result = state  # The last emitted state is our final result
+                spinner.start(next_spinner_msg)
+
+            spinner.stop()
+            total_time = time.time() - start_time
+            print(f"\n✨ Research completed in {total_time:.1f}s!\n")
+        except Exception as e:
+            spinner.stop()
+            total_time = time.time() - start_time
+            # Fallback to invoke if stream doesn't work out of the box
+            print(
+                f"⚠️ Streaming not fully supported or interrupted ({e}), running normally... (failed after {total_time:.1f}s)")
+
+            spinner.start("Running fallback synchronous invoke...")
+            start_invoke = time.time()
+            result = agent.invoke(
                 {
                     "messages": [
                         {
@@ -142,65 +230,12 @@ def main():
                         }
                     ],
                 },
-                stream_mode="values"
-        ):
-            current_time = time.time()
-            step_time = current_time - last_time
-            last_time = current_time
-
+            )
             spinner.stop()
-
-            # Inspect the latest state change
-            msgs = state.get("messages", [])
-            files = state.get("files", {})
-            next_spinner_msg = "Agent is working..."
-
-            if msgs:
-                last = msgs[-1]
-                # Handle both dict-based and object-based messages
-                if isinstance(last, dict):
-                    role = last.get("role", "")
-                    content = str(last.get("content", ""))
-                    name = last.get("name", "")
-                    tool_calls = last.get("tool_calls", [])
-                else:
-                    role = getattr(last, "type", "")
-                    content = str(getattr(last, "content", ""))
-                    name = getattr(last, "name", "")
-                    tool_calls = getattr(last, "tool_calls", [])
-
-                # Output meaningful progress based on the last message type
-                if role == "ai" and tool_calls:
-                    for tc in tool_calls:
-                        tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "unknown")
-                        print(f"⚙️  Agent decided to act: Calling `{tc_name}`... (⏱️  {step_time:.1f}s)")
-                        next_spinner_msg = f"Executing `{tc_name}`..."
-                elif role == "tool":
-                    print(
-                        f"✅ Executed tool `{name}` successfully (output size: {len(content)} chars) (⏱️  {step_time:.1f}s)")
-                    next_spinner_msg = "Analyzing tool output..."
-                elif role == "ai" and content:
-                    print(f"💬 Agent updated its response based on findings... (⏱️  {step_time:.1f}s)")
-                    next_spinner_msg = "Structuring final thoughts..."
-                elif role == "human" or role == "user":
-                    print(f"🚀 Started research task... (⏱️  {step_time:.1f}s)")
-                    next_spinner_msg = "Agent is formulating a plan..."
-
-            result = state  # The last emitted state is our final result
-            spinner.start(next_spinner_msg)
-
-        spinner.stop()
-        total_time = time.time() - start_time
-        print(f"\n✨ Research completed in {total_time:.1f}s!\n")
-    except Exception as e:
-        spinner.stop()
-        total_time = time.time() - start_time
-        # Fallback to invoke if stream doesn't work out of the box
-        print(
-            f"⚠️ Streaming not fully supported or interrupted ({e}), running normally... (failed after {total_time:.1f}s)")
-
-        spinner.start("Running fallback synchronous invoke...")
-        start_invoke = time.time()
+            invoke_time = time.time() - start_invoke
+            print(f"\n✨ Fallback research completed in {invoke_time:.1f}s!\n")
+    else:
+        # Run the agent directly without showing progress
         result = agent.invoke(
             {
                 "messages": [
@@ -209,11 +244,10 @@ def main():
                         "content": instruction,
                     }
                 ],
-            },
-        )
-        spinner.stop()
-        invoke_time = time.time() - start_invoke
-        print(f"\n✨ Fallback research completed in {invoke_time:.1f}s!\n")
+            })
+
+        total_time = time.time() - start_time
+        print(f"\n✨ Research completed in {total_time:.1f}s!\n")
 
     # Output the result. The agent usually writes to /final_report.md
     files = result.get("files", {})
