@@ -1,6 +1,7 @@
 """Utility functions for displaying messages and prompts in Jupyter notebooks."""
 import argparse
 import json
+import os
 import sys
 
 from rich.console import Console
@@ -95,25 +96,26 @@ def show_prompt(prompt_text: str, title: str = "Prompt", border_style: str = "bl
     )
 
 
-def str2bool(v):
+def str2bool(v, defaultValue=None):
     if isinstance(v, bool):
         return v
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
         return True
     if v.lower() in ('no', 'false', 'f', 'n', '0'):
         return False
-    raise argparse.ArgumentTypeError('Boolean value expected.')
+    if defaultValue is None:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+    return defaultValue
 
 
 def _get_verify_ssl():
     for i, arg in enumerate(sys.argv):
         if arg.startswith('--verify_ssl='):
-            val = arg.split('=', 1)[1].lower()
-            return val in ('yes', 'true', 't', 'y', '1')
+            val = arg.split('=', 1)[1]
+            return str2bool(val, False)
         elif arg == '--verify_ssl':
             if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith('-'):
-                val = sys.argv[i + 1].lower()
-                if val in ('yes', 'true', 't', 'y', '1'): return True
-                if val in ('no', 'false', 'f', 'n', '0'): return False
+                val = sys.argv[i + 1]
+                return str2bool(val, True)
             return True
-    return os.getenv("VERIFY_SSL", "True").lower() in ('yes', 'true', 't', 'y', '1')
+    return str2bool(os.getenv("VERIFY_SSL", "True"), False)
