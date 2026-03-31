@@ -62,6 +62,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional folder containing supported documents to use as research material",
     )
     parser.add_argument(
+        "--no-web",
+        action="store_true",
+        help="Disable web search (Tavily) during research",
+    )
+    parser.add_argument(
         "--target",
         choices=list_target_ids(),
         help="Optional structured output target",
@@ -89,6 +94,7 @@ def build_instruction(
         doc_folder: str | None = None,
         target: str | None = None,
         subject_file: str | None = None,
+        no_web: bool = False,
 ) -> str:
     """Build the user instruction sent to the agent."""
     if not subject and subject_file and os.path.exists(subject_file):
@@ -97,16 +103,17 @@ def build_instruction(
 
     instruction = f"Research the following subject: {subject}"
 
-    if not subject:
-        instruction = "Research the application of artificial intelligence in healthcare"
-    elif subject_file and os.path.exists(subject_file):
-        instruction += f"\n\nNote: The subject was read from the file: {subject_file}"
-
     if doc_folder:
         instruction += (
             "\n\nPlease use the 'read_doc_folder' tool to read supported documents "
             f"from this folder first: '{doc_folder}'. Ground your answer in those docs "
             "when they are relevant."
+        )
+
+    if no_web:
+        instruction += (
+            "\n\n**CRITICAL: Do NOT use web search for this research task.** "
+            "Use only provided documentation or your internal knowledge."
         )
 
     if target:

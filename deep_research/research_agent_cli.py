@@ -43,7 +43,7 @@ class Spinner:
         sys.stdout.flush()
 
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 
 from agent import agent, model
 from research_agent.cli import build_instruction, build_parser, normalize_target
@@ -52,10 +52,7 @@ from research_agent.cli import build_instruction, build_parser, normalize_target
 def generate_research_title(research_content):
     """Generate a concise title for the research content using the configured LLM."""
     try:
-        if isinstance(research_content, dict):
-            content_snippet = research_content.get("content", "")[:2000]
-        else:
-            content_snippet = str(research_content)[:2000]
+        content_snippet = extract_message_content(research_content)[:2000]
 
         prompt = (
             "Based on the following research content, generate a short, concise, and descriptive "
@@ -79,6 +76,30 @@ def generate_research_title(research_content):
         return "research-report"
 
 
+def extract_message_content(message):
+    """Normalize agent output into plain text for saving and display."""
+    if isinstance(message, dict):
+        content = message.get("content", "")
+    elif isinstance(message, BaseMessage):
+        content = message.content
+    else:
+        content = message
+
+    if isinstance(content, list):
+        normalized_parts = []
+        for item in content:
+            if isinstance(item, str):
+                normalized_parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content") or str(item)
+                normalized_parts.append(text)
+            else:
+                normalized_parts.append(str(item))
+            return "\n".join(part for part in normalized_parts if part)
+
+    return str(content)
+
+
 def save_research_to_file(research_content, filename=None):
     # Get current date
     current_date = datetime.now().strftime("%Y-%m-%d")
@@ -91,8 +112,7 @@ def save_research_to_file(research_content, filename=None):
         filename = f"{title}-{current_date}.md"
 
     # Extract string content if a dictionary message was passed
-    if isinstance(research_content, dict):
-        research_content = research_content.get("content", str(research_content))
+    research_content = extract_message_content(research_content)
 
     # Write the research content to the file
     with open(filename, "w") as file:
@@ -117,6 +137,7 @@ def main():
         doc_folder=args.doc_folder,
         target=target,
         subject_file=args.subject_file,
+        no_web=args.no_web,
     )
     title = None
 
@@ -256,11 +277,12 @@ def main():
         # Fallback to the last message content
         last_message = result.get('messages', [])[-1]
         filename = save_research_to_file(last_message, title)
+        last_message_content = extract_message_content(last_message)
 
         print("\n" + "=" * 80)
         print(f"Final Response ({filename}):")
         print("=" * 80)
-        print(last_message.get('content', 'No output received.'))
+        print(last_message_content or 'No output received.')
 
 
 if __name__ == "__main__":

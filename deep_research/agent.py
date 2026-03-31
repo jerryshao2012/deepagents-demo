@@ -51,30 +51,31 @@ research_sub_agent: SubAgent = {
     "name": "research-agent",
     "description": "Delegate research to the sub-agent researcher. Only give this researcher one topic at a time.",
     "system_prompt": RESEARCHER_INSTRUCTIONS.format(date=current_date),
-    "tools": [tavily_search, think_tool],
+    "tools": [tavily_search, think_tool, read_doc_folder, render_target_output],
 }
 
 model = None
 # Model Gemini 3
-if os.getenv("GOOGLE_API_KEY"):
+if os.getenv("GOOGLE_API_KEY") and os.getenv("MODEL_NAME"):
     from langchain_google_genai import ChatGoogleGenerativeAI
 
     model = ChatGoogleGenerativeAI(model=os.getenv("MODEL_NAME", "gemini-3-pro-preview"), temperature=0.0)
 
 # Model Claude 4.5
-if os.getenv("ANTHROPIC_API_KEY"):
+if os.getenv("ANTHROPIC_API_KEY") and os.getenv("MODEL_NAME"):
     from langchain.chat_models import init_chat_model
 
     model = init_chat_model(model=os.getenv("MODEL_NAME", "anthropic:claude-sonnet-4-5-20250929"), temperature=0.0)
 
 # Using Ollama (Local)
-if os.getenv("OLLAMA_API_BASE"):
+if os.getenv("OLLAMA_API_BASE") and os.getenv("MODEL_NAME"):
     from langchain.chat_models import init_chat_model
 
     model = init_chat_model(model=f"ollama:{os.getenv("MODEL_NAME")}", base_url=os.getenv("OLLAMA_API_BASE"))
 
 # Using AzureOpenAI
-if os.getenv("AZURE_OPENAI_API_KEY"):
+if os.getenv("AZURE_OPENAI_ENDPOINT") and os.getenv("AZURE_OPENAI_DEPLOYMENT") \
+        and os.getenv("AZURE_OPENAI_API_KEY") and os.getenv("AZURE_OPENAI_API_VERSION"):
     import httpx
     from langchain_openai import AzureChatOpenAI
 

@@ -84,14 +84,31 @@ def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
 
 
 def _extract_pdf_text(file_path: Path) -> str:
-    from marker.convert import convert_single_pdf
-    from marker.models import load_all_models
+    import opendataloader_pdf
 
-    model_list = load_all_models()
-    result = convert_single_pdf(str(file_path), model_list)
-    if isinstance(result, tuple) and result:
-        return str(result[0])
-    return str(result)
+    try:
+        import io
+        from contextlib import redirect_stdout
+        f = io.StringIO()
+        with redirect_stdout(f):
+            opendataloader_pdf.convert(input_path=str(file_path), format="markdown", to_stdout=True, quiet=True)
+        result = f.getvalue()
+        if result.strip():
+            return result
+    except Exception:
+        # Silently fail and fallback
+        pass
+
+    # Fallback to pypdf if opendataloader_pdf fails or Java is missing
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(file_path)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+        return text
+    except Exception as e:
+        return f"Error extracting PDF text: {e}"
 
 
 def _extract_text_file(file_path: Path) -> str:
@@ -333,8 +350,19 @@ def _render_interview_kit(payload: dict[str, object]) -> str:
     )
     return "\n".join(sections).strip() + "\n"
 
+def _coerce_integers(value, schema):
+    if isinstance(value, dict):
+        props = schema.get('properties', {})
+        return {k: _coerce_integers(v, props.get(k, {})) for k, v in value.items()}
+    if isinstance(value, list):
+        item_schema = schema.get('items', {})
+        return [_coerce_integers(item, item_schema) for item in value]
+    if schema.get(type) == "integer" and isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
 
-def _render_payload(template: str, payload: dict[str, object]) -> str:
+
+def _render_payload(template: str, payload) -> str:
     if template == "presentation":
         return _render_presentation(payload)
     if template == "interview_kit":
@@ -364,6 +392,8 @@ def render_target_output(target_id: str, payload_json: str) -> str:
         payload = json.loads(payload_json)
     except json.JSONDecodeError as exc:
         return f"Invalid JSON payload: {exc}"
+
+    payload = _coerce_integers(payload, definition["schema"])
 
     try:
         jsonschema.validate(instance=payload, schema=definition["schema"])
