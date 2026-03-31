@@ -67,10 +67,11 @@ def generate_research_title(research_content):
         response = model.invoke([HumanMessage(content=prompt)])
         title = response.content.strip()
 
-        # Capitalize words in the title
-        title = title.replace(" ", "_").title()
-        title = re.sub(r'[^w\-]+', '-', title)
-        title = re.sub(r'[-_]{2,}', '-', title).strip('-_')
+        # Format title with underscores and proper capitalization
+        title = title.replace(" ", "_")  # Replace spaces with underscores first
+        title = ''.join([c if c.isalnum() or c == '_' else '_' for c in title])  # Replace special characters with underscores
+        title = re.sub(r'_+', '_', title)  # Replace multiple underscores with single
+        title = title.strip('_')  # Remove leading/trailing underscores
         return title if title else "research-report"
     except Exception as e:
         print(f"Warning: Could not generate title ({e}). Using default.")
