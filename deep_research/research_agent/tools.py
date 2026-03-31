@@ -5,8 +5,10 @@ using Tavily for URL discovery and fetching full webpage content.
 """
 
 import os
+from json import dumps as json_dumps
 
 import httpx
+import requests
 from langchain_core.tools import InjectedToolArg, tool
 from markdownify import markdownify
 from marker.convert import convert_single_pdf
@@ -15,13 +17,31 @@ from marker.output import save_markdown
 from tavily import TavilyClient
 from typing_extensions import Annotated, Literal
 
-from utils import _get_verify_ssl
+from utils import get_ssl_verify_config
 
-VERIFY_SSL = _get_verify_ssl()
-tavily_client = TavilyClient()
-# Disable SSL verification for Tavily API requests as well
-if not VERIFY_SSL and hasattr(tavily_client, "session"):
-    tavily_client.session.verify = False
+# Create SSL verification setting - CLI flag takes precedence over env var
+verify_ssl = get_ssl_verify_config()
+tavily_session = requests.Session()
+tavily_session.verify = verify_ssl
+tavily_client = TavilyClient(session=tavily_session)
+
+
+def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float = 60.0) -> dict:
+    payload = {
+        "query": query,
+        "max_results": max_results,
+        "topic": topic,
+    }
+    response = tavily_client.session.post(
+        f"{tavily_client.base_url}/search",
+        data=json_dumps(payload),
+        timeout=min(timeout, 120),
+        verify=verify_ssl,
+    )
+    response.raise_for_status()
+    response_dict = response.json()
+    response_dict.setdefault("results", [])
+    return response_dict
 
 
 def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
@@ -42,7 +62,7 @@ def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
         response = httpx.get(url=url,
                              headers=headers,
                              timeout=timeout,
-                             verify=VERIFY_SSL)
+                             verify=verify_ssl)
         response.raise_for_status()
         return markdownify(response.text)
     except Exception as e:
@@ -70,8 +90,8 @@ def tavily_search(
         Formatted search results with full webpage content
     """
     # Use Tavily to discover URLs
-    search_results = tavily_client.search(
-        query,
+    search_results = _run_tavily_search(
+        query=query,
         max_results=max_results,
         topic=topic,
     )

@@ -112,10 +112,37 @@ def _get_verify_ssl():
     for i, arg in enumerate(sys.argv):
         if arg.startswith('--verify_ssl='):
             val = arg.split('=', 1)[1]
-            return str2bool(val, False)
+            return str2bool(val, Ture)
         elif arg == '--verify_ssl':
             if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith('-'):
                 val = sys.argv[i + 1]
-                return str2bool(val, True)
+                return str2bool(val, Ture)
             return True
-    return str2bool(os.getenv("VERIFY_SSL", "True"), False)
+    return str2bool(os.getenv("VERIFY_SSL", "Ture"), True)
+
+
+def _get_ssl_ca_file():
+    for i, arg in enumerate(sys.argv):
+        if arg.startswith('--ssl-ca-file='):
+            return arg.split('=', 1)[1]
+        if arg == '--ssl-ca-file' and i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+
+    for env_var in ("SSL_CAINFO", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+        value = os.getenv(env_var)
+        if value:
+            return value
+
+    return None
+
+
+def get_ssl_verify_config():
+    verify_ssl = _get_verify_ssl()
+    if not verify_ssl:
+        return False
+
+    ssl_ca_file = _get_ssl_ca_file()
+    if ssl_ca_file:
+        return ssl_ca_file
+
+    return True

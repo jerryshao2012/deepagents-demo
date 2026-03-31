@@ -15,12 +15,13 @@ from research_agent.prompts import (
     SUBAGENT_DELEGATION_INSTRUCTIONS,
 )
 from research_agent.tools import tavily_search, think_tool, read_pdf_folder, generate_slide_markup
-from utils import _get_verify_ssl
+from utils import get_ssl_verify_config
 
 # Load environment variables
 load_dotenv()
 
-VERIFY_SSL = _get_verify_ssl()
+# Create SSL verification setting - CLI flag takes precedence over env var
+verify_ssl = get_ssl_verify_config()
 
 # Limits
 max_concurrent_research_units = 3
@@ -82,7 +83,7 @@ if os.getenv("AZURE_OPENAI_API_KEY"):
         azure_deployment=deployment,
         api_version=api_version,
         api_key=subscription_key,
-        http_client=httpx.Client(verify=VERIFY_SSL)  # Enable/Disable SSL verification for httpx
+        http_client=httpx.Client(verify=verify_ssl)  # Enable/Disable SSL verification for httpx
     )
 
 if model:

@@ -8,7 +8,7 @@ from datetime import datetime
 
 from deepagents.backends.utils import file_data_to_string
 
-from utils import str2bool, _get_verify_ssl
+from utils import str2bool, get_ssl_verify_config
 
 
 class Spinner:
@@ -64,12 +64,9 @@ def generate_research_title(research_content):
         title = response.content.strip()
 
         # Capitalize words in the title
-        title = title.title()
-        # Sanitize filename: replace spaces with underscores, preserve existing underscores,
-        # and only allow alphanumeric characters, hyphens, and underscores
-        title = re.sub(r'[^w\-]', '_', title)
-        # Collapse multiple consecutive underscores into a single one and trim edges
-        title = re.sub(r'_+', '_', title).strip('_')
+        title = title.replace(" ", "_").title()
+        title = re.sub(r'[^w\-]+', '-', title)
+        title = re.sub(r'[-_]{2,}', '-', title).strip('-_')
         return title if title else "research-report"
     except Exception as e:
         print(f"Warning: Could not generate title ({e}). Using default.")
@@ -102,6 +99,8 @@ def main():
     parser = argparse.ArgumentParser(description="Run the Deep Research Agent", add_help=False)
     parser.add_argument('--verify_ssl', type=str2bool, nargs='?', const='True', default='True',
                         help='Verify SSL certificates (default: True). Set to False to skip SSL verification')
+    parser.add_argument("--ssl-ca-files", type=str,
+                        help="Path to a PEN CA buddle to use for HTTPS verification")
     parser.add_argument("subject", type=str, help="Research subject")
     parser.add_argument('--verbose', type=str2bool, nargs='?', const='True', default='True',
                         help='Show progress (default: True). When False, runs agent without progress display')
@@ -140,7 +139,7 @@ def main():
     last_time = start_time
 
     # Create SSL verification setting - CLI flag takes precedence over env var
-    verify_ssl = _get_verify_ssl()
+    verify_ssl = get_ssl_verify_config()
 
     # Run the agent based on verbose flag
     if args.verbose:
