@@ -68,7 +68,7 @@ def generate_research_title(research_content):
         title = response.content.strip()
 
         # Format title with underscores and proper capitalization
-        title = title.replace(" ", "_")  # Replace spaces with underscores first
+        title = title.replace(" ", "_").title()  # Replace spaces with underscores first
         title = ''.join([c if c.isalnum() or c == '_' else '_' for c in title])  # Replace special characters with underscores
         title = re.sub(r'_+', '_', title)  # Replace multiple underscores with single
         title = title.strip('_')  # Remove leading/trailing underscores
