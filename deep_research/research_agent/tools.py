@@ -84,31 +84,27 @@ def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
 
 
 def _extract_pdf_text(file_path: Path) -> str:
-    import opendataloader_pdf
+    from docling.document_converter import DocumentConverter
 
     try:
-        import io
-        from contextlib import redirect_stdout
-        f = io.StringIO()
-        with redirect_stdout(f):
-            opendataloader_pdf.convert(input_path=str(file_path), format="markdown", to_stdout=True, quiet=True)
-        result = f.getvalue()
-        if result.strip():
-            return result
-    except Exception:
-        # Silently fail and fallback
-        pass
-
-    # Fallback to pypdf if opendataloader_pdf fails or Java is missing
-    try:
-        import pypdf
-        reader = pypdf.PdfReader(file_path)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text() + "\n"
-        return text
+        print("Use docling for PDF text extraction.")
+        converter = DocumentConverter()
+        result = converter.convert(str(file_path))
+        markdown_content = result.document.export_to_markdown()
+        if markdown_content.strip():
+            return markdown_content
     except Exception as e:
-        return f"Error extracting PDF text: {e}"
+        # Fallback to pypdf if docling fails
+        try:
+            print("Falling back to pypdf for PDF text extraction.")
+            import pypdf
+            reader = pypdf.PdfReader(file_path)
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() + "\n"
+            return text
+        except Exception as e:
+            return f"Error extracting PDF text: {e}"
 
 
 def _extract_text_file(file_path: Path) -> str:
