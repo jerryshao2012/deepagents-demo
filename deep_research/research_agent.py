@@ -7,8 +7,12 @@ import time
 from datetime import datetime
 
 from deepagents.backends.utils import file_data_to_string
+from dotenv import load_dotenv
 
 from utils import str2bool, get_ssl_verify_config
+
+# Load environment variables
+load_dotenv()
 
 
 class Spinner:
@@ -140,6 +144,7 @@ def main():
 
     # Create SSL verification setting - CLI flag takes precedence over env var
     verify_ssl = get_ssl_verify_config()
+    print(f"SSL Verification is set to: {verify_ssl}")
 
     # Run the agent based on verbose flag
     if args.verbose:

@@ -112,13 +112,13 @@ def _get_verify_ssl():
     for i, arg in enumerate(sys.argv):
         if arg.startswith('--verify_ssl='):
             val = arg.split('=', 1)[1]
-            return str2bool(val, Ture)
+            return str2bool(val, True)
         elif arg == '--verify_ssl':
             if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith('-'):
                 val = sys.argv[i + 1]
-                return str2bool(val, Ture)
+                return str2bool(val, True)
             return True
-    return str2bool(os.getenv("VERIFY_SSL", "Ture"), True)
+    return str2bool(os.getenv("VERIFY_SSL", "True"), True)
 
 
 def _get_ssl_ca_file():

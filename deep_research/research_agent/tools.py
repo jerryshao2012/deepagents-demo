@@ -9,6 +9,7 @@ from json import dumps as json_dumps
 
 import httpx
 import requests
+from dotenv import load_dotenv
 from langchain_core.tools import InjectedToolArg, tool
 from markdownify import markdownify
 from marker.convert import convert_single_pdf
@@ -19,6 +20,9 @@ from typing_extensions import Annotated, Literal
 
 from utils import get_ssl_verify_config
 
+# Load environment variables
+load_dotenv()
+
 # Create SSL verification setting - CLI flag takes precedence over env var
 verify_ssl = get_ssl_verify_config()
 tavily_session = requests.Session()
@@ -27,19 +31,30 @@ tavily_client = TavilyClient(session=tavily_session)
 
 
 def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float = 60.0) -> dict:
+    api_key = os.getenv("TAVILY_API_KEY")
+    if not api_key:
+        raise ValueError("TAVILY_API_KEY is not set")
+
     payload = {
+        "api_key": api_key,
         "query": query,
         "max_results": max_results,
         "topic": topic,
+        # Keep output compact; we fetch full page content ourselves.
+        "include_answer": False,
+        "include_raw_content": False,
     }
     response = tavily_client.session.post(
         f"{tavily_client.base_url}/search",
         data=json_dumps(payload),
         timeout=min(timeout, 120),
         verify=verify_ssl,
+        headers={"Content-Type": "application/json"},
     )
     response.raise_for_status()
     response_dict = response.json()
+    if not isinstance(response_dict, dict):
+        return {"results": []}
     response_dict.setdefault("results", [])
     return response_dict
 
@@ -90,11 +105,24 @@ def tavily_search(
         Formatted search results with full webpage content
     """
     # Use Tavily to discover URLs
-    search_results = _run_tavily_search(
-        query=query,
-        max_results=max_results,
-        topic=topic,
-    )
+    try:
+        search_results = _run_tavily_search(
+            query=query,
+            max_results=max_results,
+            topic=topic,
+        )
+    except requests.exceptions.HTTPError as e:
+        status_code = e.response.status_code if e.response is not None else None
+        if status_code == 401:
+            return (
+                "Tavily authentication failed (401 Unauthorized)."
+                "Set a valid TAVILY_API_KEY environment variable and retry"
+            )
+        return f"Tavily request failed with HTTP {status_code}: {e}"
+    except ValueError as e:
+        return str(e)
+    except Exception as e:
+        return f"Tavily search failed: {e}"
 
     # Fetch full content for each URL
     result_texts = []

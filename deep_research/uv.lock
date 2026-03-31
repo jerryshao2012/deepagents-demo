@@ -720,6 +720,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "rich" },
     { name = "tavily-python" },
+    { name = "wincertstore" },
 ]
 
 [package.optional-dependencies]
@@ -747,7 +748,8 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "rich", specifier = ">=14.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.1" },
-    { name = "tavily-python", specifier = ">=0.5.0" },
+    { name = "tavily-python", specifier = ">=0.7.23" },
+    { name = "wincertstore", specifier = ">=0.2.1" },
 ]
 provides-extras = ["dev"]
 
@@ -4348,16 +4350,16 @@ wheels = [
 
 [[package]]
 name = "tavily-python"
-version = "0.7.22"
+version = "0.7.23"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "requests" },
     { name = "tiktoken" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6e/87/995a176c81887000a14556b810be986530d723224a71e10ccb312b480637/tavily_python-0.7.22.tar.gz", hash = "sha256:050c0113309b516f58fbdc484d6091efa7ce6c016c2a2cd9f111581269f00dfe", size = 22393, upload-time = "2026-02-26T15:05:00.794Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/89/d1/197419d6133643848514e5e84e8f41886e825b73bf91ae235a1595c964f5/tavily_python-0.7.23.tar.gz", hash = "sha256:3b92232e0e29ab68898b765f281bb4f2c650b02210b64affbc48e15292e96161", size = 25968, upload-time = "2026-03-09T19:17:32.333Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/14/43/9f977f236c641c7903939788b088c3575e9a5dba0b9ca9a5586a1f02bb9e/tavily_python-0.7.22-py3-none-any.whl", hash = "sha256:25d05f02be3fa2508ff1c114196b714e069d75312c26ddf747c9f5bdc617bbb3", size = 18136, upload-time = "2026-02-26T15:04:59.608Z" },
+    { url = "https://files.pythonhosted.org/packages/64/27/f9c6e9249367be0772fb754849e03cbbc6ad8d80a479bf30ea8811828b2e/tavily_python-0.7.23-py3-none-any.whl", hash = "sha256:52ef85c44b926bce3f257570cd32bc1bd4db54666acf3105617f27411a59e188", size = 19079, upload-time = "2026-03-09T19:17:29.593Z" },
 ]
 
 [[package]]
@@ -4911,6 +4913,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/bd/f4/c67440c7fb409a71b7404b7aefcd7569a9c0d6bd071299bf4198ae7a5d95/widgetsnbextension-4.0.15.tar.gz", hash = "sha256:de8610639996f1567952d763a5a41af8af37f2575a41f9852a38f947eb82a3b9", size = 1097402, upload-time = "2025-11-01T21:15:55.178Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3f/0e/fa3b193432cfc60c93b42f3be03365f5f909d2b3ea410295cf36df739e31/widgetsnbextension-4.0.15-py3-none-any.whl", hash = "sha256:8156704e4346a571d9ce73b84bee86a29906c9abfd7223b7228a28899ccf3366", size = 2196503, upload-time = "2025-11-01T21:15:53.565Z" },
+]
+
+[[package]]
+name = "wincertstore"
+version = "0.2.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/90/71/7b01b7e37a73200bf52a81a2a9ea71b2d0492a5137258dd6034975c808e1/wincertstore-0.2.1.zip", hash = "sha256:ebd681f45f4e156493b4fa54f134b9a171d9c0a8de40ae1a0bc96c3092cb8b12", size = 16650, upload-time = "2021-06-08T11:20:52.101Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3d/82/d50da806a22161c74059e59319240c02422d92cede1cbf6c36d5035f9337/wincertstore-0.2.1-py2.py3-none-any.whl", hash = "sha256:cfedf0047855c3fd2668a4750e951329f68ecf6118b5814026c18f23f127dd93", size = 7825, upload-time = "2021-06-08T11:20:50.597Z" },
 ]
 
 [[package]]
