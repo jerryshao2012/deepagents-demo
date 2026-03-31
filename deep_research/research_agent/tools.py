@@ -271,6 +271,14 @@ def read_doc_folder(folder_path: str) -> str:
         Extracted text from all supported documents or an error message.
     """
     folder = Path(folder_path)
+
+    # If the folder doesn't exist, try resolving it relative to the deep_research package
+    if not folder.exists():
+        package_root = Path(__file__).resolve().parent.parent
+        alternate_folder = package_root / folder_path
+        if alternate_folder.exists() and alternate_folder.is_dir():
+            folder = alternate_folder
+
     if not folder.exists():
         return f"Error: Folder {folder_path} does not exist."
     if not folder.is_dir():
