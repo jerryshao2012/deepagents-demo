@@ -14,18 +14,13 @@ Create concise Markdown presentation content for quick learning.
 - Use concise bullets.
 - Include speaking notes for each slide.
 - Ground the content in the available documents and research findings.
-- Return the final result by calling `render_target_output` with JSON matching the schema below.
+- Return the final result by calling `render_target_output` with JSON resembling the template below.
 
-## Schema
+## Suggested Template
 
 ```json
 {
   "type": "object",
-  "required": [
-    "topic",
-    "slides"
-  ],
-  "additionalProperties": false,
   "properties": {
     "topic": {
       "type": "string"
@@ -35,12 +30,6 @@ Create concise Markdown presentation content for quick learning.
       "maxItems": 2,
       "items": {
         "type": "object",
-        "required": [
-          "title",
-          "bullets",
-          "speaker_notes"
-        ],
-        "additionalProperties": false,
         "properties": {
           "title": {
             "type": "string"

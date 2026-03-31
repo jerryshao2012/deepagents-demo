@@ -84,10 +84,10 @@ def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
 
 
 def _extract_pdf_text(file_path: Path) -> str:
-    from docling.document_converter import DocumentConverter
-
     try:
         print("Use docling for PDF text extraction.")
+        from docling.document_converter import DocumentConverter
+
         converter = DocumentConverter()
         result = converter.convert(str(file_path))
         markdown_content = result.document.export_to_markdown()

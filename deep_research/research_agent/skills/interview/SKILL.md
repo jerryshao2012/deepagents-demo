@@ -13,19 +13,13 @@ Create a grounded 45-minute interview question kit based on the available docume
 - Include time-boxed interview questions.
 - Include follow-up prompts for each question.
 - Keep the output grounded in the provided materials.
-- Return the final result by calling `render_target_output` with JSON matching the schema below.
+- Return the final result by calling `render_target_output` with JSON resembling the template below.
 
-## Schema
+## Suggested Template
 
 ```json
 {
   "type": "object",
-  "required": [
-    "topic",
-    "objective",
-    "questions"
-  ],
-  "additionalProperties": false,
   "properties": {
     "topic": {
       "type": "string"
@@ -37,12 +31,6 @@ Create a grounded 45-minute interview question kit based on the available docume
       "type": "array",
       "items": {
         "type": "object",
-        "required": [
-          "question",
-          "timebox_minutes",
-          "follow_up"
-        ],
-        "additionalProperties": false,
         "properties": {
           "question": {
             "type": "string"
