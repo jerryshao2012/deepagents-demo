@@ -1,5 +1,7 @@
 """Prompt templates and tool descriptions for the research deepagent."""
 
+from research_agent.targets import format_target_catalog
+
 RESEARCH_WORKFLOW_INSTRUCTIONS = """# Research Workflow
 
 Follow this workflow for all research requests:
@@ -76,10 +78,15 @@ You can call these tools in series or in parallel, your research is conducted in
 You have access to specific research tools:
 1. **tavily_search**: For conducting web searches to gather information
 2. **think_tool**: For reflection and strategic planning during research
-3. **read_pdf_folder**: For extracting text from PDF documents in a local folder
-4. **generate_slide_markup**: For creating structured 3-slide presentation markdown from research
+3. **read_doc_folder**: For extracting text from supported local documents
+4. **render_target_output**: For validating and rendering any structured output target from a target skill
 **CRITICAL: Use think_tool after each search to reflect on results and plan next steps**
 </Available Research Tools>
+
+<Structured Output Targets>
+Available target ids:
+{target_catalog}
+</Structured Output Targets>
 
 <Instructions>
 Think like a human researcher with limited time. Follow these steps:
@@ -129,6 +136,9 @@ Context engineering is a critical technique for AI agents [1]. Studies show that
 [2] AI Performance Study: https://example.com/study
 ```
 
+When the user requests a structured target, call `render_target_output` with the chosen
+target id and a JSON payload that matches that target schema exactly.
+
 The orchestrator will consolidate citations from all sub-agents into the final report.
 </Final Response Format>
 """
@@ -173,3 +183,8 @@ Your role is to coordinate research by delegating tasks from your TODO list to s
 - Stop after {max_researcher_iterations} delegation rounds if you haven't found adequate sources
 - Stop when you have sufficient information to answer comprehensively
 - Bias towards focused research over exhaustive exploration"""
+
+RESEARCHER_INSTRUCTIONS = RESEARCHER_INSTRUCTIONS.format(
+    date="{date}",
+    target_catalog=format_target_catalog(),
+)

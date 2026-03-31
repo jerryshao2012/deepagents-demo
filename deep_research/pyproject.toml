@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Deep research agent example using deepagents package"
 requires-python = ">=3.11"
 dependencies = [
+    "langchain-core>=1.0.0",
     "langchain-openai>=1.0.2",
     "langchain-anthropic>=1.0.3",
     "langchain_tavily>=0.2.13",
@@ -21,6 +22,10 @@ dependencies = [
     "marker-pdf>=0.3.10",
     "tavily-python>=0.7.23",
     "wincertstore>=0.2.1",
+    "python-docx>=1.2.0",
+    "python-pptx>=1.0.2",
+    "openpyxl>=3.1.5",
+    "jsonschema>=4.25.1",
 ]
 
 [tool.uv]
@@ -33,6 +38,7 @@ override-dependencies = [
 dev = [
     "mypy>=1.11.1",
     "ruff>=0.6.1",
+    "pytest>=9.0.0",
 ]
 
 [build-system]
@@ -43,7 +49,7 @@ build-backend = "setuptools.build_meta"
 packages = ["research_agent"]
 
 [tool.setuptools.package-data]
-"*" = ["py.typed"]
+"*" = ["py.typed", "skills/*/SKILL.md"]
 
 [tool.ruff]
 lint.select = [

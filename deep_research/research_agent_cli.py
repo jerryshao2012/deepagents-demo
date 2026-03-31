@@ -1,4 +1,3 @@
-import argparse
 import itertools
 import re
 import sys
@@ -47,6 +46,7 @@ class Spinner:
 from langchain_core.messages import HumanMessage
 
 from agent import agent, model
+from research_agent.cli import build_instruction, build_parser, normalize_target
 
 
 def generate_research_title(research_content):
@@ -69,7 +69,8 @@ def generate_research_title(research_content):
 
         # Format title with underscores and proper capitalization
         title = title.replace(" ", "_").title()  # Replace spaces with underscores first
-        title = ''.join([c if c.isalnum() or c == '_' else '_' for c in title])  # Replace special characters with underscores
+        title = ''.join(
+            [c if c.isalnum() or c == '_' else '_' for c in title])  # Replace special characters with underscores
         title = re.sub(r'_+', '_', title)  # Replace multiple underscores with single
         title = title.strip('_')  # Remove leading/trailing underscores
         return title if title else "research-report"
@@ -101,36 +102,23 @@ def save_research_to_file(research_content, filename=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run the Deep Research Agent", add_help=False)
-    parser.add_argument('--verify_ssl', type=str2bool, nargs='?', const='True', default='True',
-                        help='Verify SSL certificates (default: True). Set to False to skip SSL verification')
-    parser.add_argument("--ssl-ca-files", type=str,
-                        help="Path to a PEN CA buddle to use for HTTPS verification")
-    parser.add_argument("subject", type=str, help="Research subject")
-    parser.add_argument('--verbose', type=str2bool, nargs='?', const='True', default='True',
-                        help='Show progress (default: True). When False, runs agent without progress display')
-    parser.add_argument('--help', '-h', action='store_true', help='Show this help message and exit')
-    parser.add_argument("--pdf-folder", type=str,
-                        help="Optional folder containing PDF documents to use as research material")
-    parser.add_argument("--slides", action="store_true",
-                        help="Format the output as a 3-slide PowerPoint training markup")
-    parser.add_argument("--title", type=str,
-                        help="Optional research title for output file")
+    parser = build_parser()
     args = parser.parse_args()
+    args.verify_ssl = str2bool(args.verify_ssl)
+    args.verbose = str2bool(args.verbose)
 
     if args.help:
         parser.print_help()
         sys.exit(0)
 
-    # Construct the instruction
-    instruction = f"Research the following subject: {args.subject}"
+    target = normalize_target(args.target, args.slides)
+    instruction = build_instruction(
+        args.subject,
+        doc_folder=args.doc_folder,
+        target=target,
+        subject_file=args.subject_file,
+    )
     title = None
-
-    if args.pdf_folder:
-        instruction += f"\n\nPlease use the 'read_pdf_folder' tool to read PDFs from this folder: '{args.pdf_folder}'."
-
-    if args.slides:
-        instruction += "\n\nPlease use the 'generate_slide_markup' tool to output a 3-slide presentation training markup based on your findings."
 
     if args.title:
         title = args.title

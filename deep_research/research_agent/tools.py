@@ -4,30 +4,33 @@ This module provides search and content processing utilities for the research ag
 using Tavily for URL discovery and fetching full webpage content.
 """
 
+from __future__ import annotations
+
+import json
 import os
 from json import dumps as json_dumps
+from pathlib import Path
 
 import httpx
+import jsonschema
 import requests
 from dotenv import load_dotenv
 from langchain_core.tools import InjectedToolArg, tool
 from markdownify import markdownify
-from marker.convert import convert_single_pdf
-from marker.models import load_all_models
-from marker.output import save_markdown
 from tavily import TavilyClient
 from typing_extensions import Annotated, Literal
 
+from research_agent.targets import get_target_definition
 from utils import get_ssl_verify_config
 
-# Load environment variables
 load_dotenv()
 
-# Create SSL verification setting - CLI flag takes precedence over env var
 verify_ssl = get_ssl_verify_config()
 tavily_session = requests.Session()
 tavily_session.verify = verify_ssl
 tavily_client = TavilyClient(session=tavily_session)
+
+SUPPORTED_DOC_SUFFIXES = {".pdf", ".txt", ".md", ".docx", ".pptx", ".xlsx"}
 
 
 def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float = 60.0) -> dict:
@@ -40,7 +43,6 @@ def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float 
         "query": query,
         "max_results": max_results,
         "topic": topic,
-        # Keep output compact; we fetch full page content ourselves.
         "include_answer": False,
         "include_raw_content": False,
     }
@@ -60,37 +62,117 @@ def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float 
 
 
 def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
-    """Fetch and convert webpage content to markdown.
-
-    Args:
-        url: URL to fetch
-        timeout: Request timeout in seconds
-
-    Returns:
-        Webpage content as markdown
-    """
+    """Fetch and convert webpage content to markdown."""
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        )
     }
 
     try:
-        response = httpx.get(url=url,
-                             headers=headers,
-                             timeout=timeout,
-                             verify=verify_ssl)
+        response = httpx.get(
+            url=url,
+            headers=headers,
+            timeout=timeout,
+            verify=verify_ssl,
+        )
         response.raise_for_status()
         return markdownify(response.text)
-    except Exception as e:
-        return f"Error fetching content from {url}: {str(e)}"
+    except Exception as exc:
+        return f"Error fetching content from {url}: {exc}"
+
+
+def _extract_pdf_text(file_path: Path) -> str:
+    from marker.convert import convert_single_pdf
+    from marker.models import load_all_models
+
+    model_list = load_all_models()
+    result = convert_single_pdf(str(file_path), model_list)
+    if isinstance(result, tuple) and result:
+        return str(result[0])
+    return str(result)
+
+
+def _extract_text_file(file_path: Path) -> str:
+    return file_path.read_text(encoding="utf-8")
+
+
+def _extract_docx_text(file_path: Path) -> str:
+    from docx import Document
+
+    document = Document(str(file_path))
+    paragraphs = [paragraph.text.strip() for paragraph in document.paragraphs]
+    return "\n".join(text for text in paragraphs if text)
+
+
+def _extract_pptx_text(file_path: Path) -> str:
+    from pptx import Presentation
+
+    presentation = Presentation(str(file_path))
+    slide_sections: list[str] = []
+    for index, slide in enumerate(presentation.slides, start=1):
+        parts: list[str] = [f"Slide {index}"]
+        for shape in slide.shapes:
+            text = getattr(shape, "text", "")
+            if text and text.strip():
+                parts.append(text.strip())
+
+        notes_text = ""
+        if slide.has_notes_slide and slide.notes_slide:
+            notes = []
+            for shape in slide.notes_slide.shapes:
+                text = getattr(shape, "text", "")
+                if text and text.strip():
+                    notes.append(text.strip())
+            notes_text = "\n".join(notes)
+        if notes_text:
+            parts.append(f"Speaker Notes:\n{notes_text}")
+        slide_sections.append("\n".join(parts))
+
+    return "\n\n".join(slide_sections)
+
+
+def _extract_xlsx_text(file_path: Path) -> str:
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(filename=str(file_path), read_only=True, data_only=True)
+    sections: list[str] = []
+    try:
+        for worksheet in workbook.worksheets:
+            rows: list[str] = []
+            for row in worksheet.iter_rows(values_only=True):
+                values = [str(value).strip() for value in row if value not in (None, "")]
+                if values:
+                    rows.append(" | ".join(values))
+            body = "\n".join(rows) if rows else "(empty sheet)"
+            sections.append(f"Sheet: {worksheet.title}\n{body}")
+    finally:
+        workbook.close()
+
+    return "\n\n".join(sections)
+
+
+def _extract_supported_document(file_path: Path) -> str:
+    suffix = file_path.suffix.lower()
+    if suffix == ".pdf":
+        return _extract_pdf_text(file_path)
+    if suffix in {".txt", ".md"}:
+        return _extract_text_file(file_path)
+    if suffix == ".docx":
+        return _extract_docx_text(file_path)
+    if suffix == ".pptx":
+        return _extract_pptx_text(file_path)
+    if suffix == ".xlsx":
+        return _extract_xlsx_text(file_path)
+    raise ValueError(f"Unsupported document type: {suffix}")
 
 
 @tool(parse_docstring=True)
 def tavily_search(
         query: str,
         max_results: Annotated[int, InjectedToolArg] = 1,
-        topic: Annotated[
-            Literal["general", "news", "finance"], InjectedToolArg
-        ] = "general",
+        topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
 ) -> str:
     """Search the web for information on a given query.
 
@@ -104,35 +186,30 @@ def tavily_search(
     Returns:
         Formatted search results with full webpage content
     """
-    # Use Tavily to discover URLs
     try:
         search_results = _run_tavily_search(
             query=query,
             max_results=max_results,
             topic=topic,
         )
-    except requests.exceptions.HTTPError as e:
-        status_code = e.response.status_code if e.response is not None else None
+    except requests.exceptions.HTTPError as exc:
+        status_code = exc.response.status_code if exc.response is not None else None
         if status_code == 401:
             return (
                 "Tavily authentication failed (401 Unauthorized)."
                 "Set a valid TAVILY_API_KEY environment variable and retry"
             )
-        return f"Tavily request failed with HTTP {status_code}: {e}"
-    except ValueError as e:
-        return str(e)
-    except Exception as e:
-        return f"Tavily search failed: {e}"
+        return f"Tavily request failed with HTTP {status_code}: {exc}"
+    except ValueError as exc:
+        return str(exc)
+    except Exception as exc:
+        return f"Tavily search failed: {exc}"
 
-    # Fetch full content for each URL
     result_texts = []
     for result in search_results.get("results", []):
         url = result["url"]
         title = result["title"]
-
-        # Fetch webpage content
         content = fetch_webpage_content(url)
-
         result_text = f"""## {title}
 **URL:** {url}
 
@@ -142,12 +219,9 @@ def tavily_search(
 """
         result_texts.append(result_text)
 
-    # Format final response
-    response = f"""🔍 Found {len(result_texts)} result(s) for '{query}':
+    return f"""🔍 Found {len(result_texts)} result(s) for '{query}':
 
 {chr(10).join(result_texts)}"""
-
-    return response
 
 
 @tool(parse_docstring=True)
@@ -157,20 +231,8 @@ def think_tool(reflection: str) -> str:
     Use this tool after each search to analyze results and plan next steps systematically.
     This creates a deliberate pause in the research workflow for quality decision-making.
 
-    When to use:
-    - After receiving search results: What key information did I find?
-    - Before deciding next steps: Do I have enough to answer comprehensively?
-    - When assessing research gaps: What specific information am I still missing?
-    - Before concluding research: Can I provide a complete answer now?
-
-    Reflection should address:
-    1. Analysis of current findings - What concrete information have I gathered?
-    2. Gap assessment - What crucial information is still missing?
-    3. Quality evaluation - Do I have sufficient evidence/examples for a good answer?
-    4. Strategic decision - Should I continue searching or provide my answer?
-
     Args:
-        reflection: Your detailed reflection on research progress, findings, gaps, and next steps
+        reflection: Detailed reflection on research progress, findings, gaps, and next steps
 
     Returns:
         Confirmation that reflection was recorded for decision-making
@@ -179,66 +241,133 @@ def think_tool(reflection: str) -> str:
 
 
 @tool(parse_docstring=True)
-def read_pdf_folder(folder_path: str) -> str:
-    """Read and extract text from all PDF documents in a given folder using Marker.
+def read_doc_folder(folder_path: str) -> str:
+    """Read and extract text from supported documents in a given folder.
 
-    Use this tool when you need to research from local PDF documents instead of or in addition to web search.
+    Use this tool when you need to research from local documents instead of or in addition
+    to web search. Supported file types are PDF, text, Markdown, Word, PowerPoint, and Excel.
 
     Args:
-        folder_path: The absolute or relative path to the folder containing PDF files.
+        folder_path: The absolute or relative path to the folder containing document files.
 
     Returns:
-        Extracted text from all PDFs or an error message.
+        Extracted text from all supported documents or an error message.
     """
-    if not os.path.exists(folder_path):
+    folder = Path(folder_path)
+    if not folder.exists():
         return f"Error: Folder {folder_path} does not exist."
+    if not folder.is_dir():
+        return f"Error: {folder_path} is not a folder."
 
-    extracted_text = []
-    # Marker's convert_single_pdf expects loaded models rather than a config object
-    model_lst = load_all_models()
-    try:
-        for file_name in os.listdir(folder_path):
-            if file_name.lower().endswith('.pdf'):
-                file_path = os.path.join(folder_path, file_name)
-                try:
-                    result = convert_single_pdf(file_path, model_lst)
-                    if isinstance(result, tuple) and len(result) >= 2:
-                        full_text, images = result[0], result[1]
-                        out_meta = result[2] if len(result) > 2 else {}
-                    else:
-                        full_text = result
-                        images = {}
-                        out_meta = {}
+    extracted_text: list[str] = []
+    supported_files = sorted(
+        file_path for file_path in folder.iterdir() if file_path.suffix.lower() in SUPPORTED_DOC_SUFFIXES
+    )
 
-                    # Save images to temporary location
-                    temp_dir = os.path.join(folder_path, "__marker_temp__")
-                    os.makedirs(temp_dir, exist_ok=True)
-                    save_markdown(temp_dir, file_name, full_text, images, out_meta)
-                    # Include image paths in output
-                    extracted_text.append(f"--- Content of {file_name} ---\n{full_text}\n")
-                except Exception as e:
-                    extracted_text.append(f"--- Error reading {file_name}: {str(e)} ---\n")
-    except Exception as e:
-        return f"Error accessing folder {folder_path}: {str(e)}"
+    if not supported_files:
+        return (
+            f"No supported document files found in {folder_path}. "
+            "Supported types: .pdf, .txt, .md, .docx, .pptx, .xlsx."
+        )
 
-    if not extracted_text:
-        return f"No PDF files found in {folder_path}."
+    for file_path in supported_files:
+        try:
+            content = _extract_supported_document(file_path)
+            extracted_text.append(f"--- Content of {file_path.name} ---\n{content}\n")
+        except Exception as exc:
+            extracted_text.append(f"--- Error reading {file_path.name}: {exc} ---\n")
 
     return "\n".join(extracted_text)
 
 
+def _render_presentation(payload: dict[str, object]) -> str:
+    topic = str(payload.get("topic", "")).strip()
+    slides = payload.get("slides", [])
+    sections = [f"# Presentation: {topic}", ""]
+    for index, slide in enumerate(slides if isinstance(slides, list) else [], start=1):
+        title = str(slide.get("title", f"Slide {index}")).strip()
+        bullets = slide.get("bullets", [])
+        speaker_notes = str(slide.get("speaker_notes", "")).strip()
+        sections.extend(["---", "", f"## Slide {index}: {title}", ""])
+        for bullet in bullets if isinstance(bullets, list) else []:
+            sections.append(f"- {bullet}")
+        if speaker_notes:
+            sections.extend(["", "### Speaking Notes", "", speaker_notes])
+        sections.append("")
+    return "\n".join(sections).strip() + "\n"
+
+
+def _render_interview_kit(payload: dict[str, object]) -> str:
+    topic = str(payload.get("topic", "")).strip()
+    objective = str(payload.get("objective", "")).strip()
+    questions = payload.get("questions", [])
+    sections = [
+        f"# Interview Kit: {topic}",
+        "",
+        "## 45-minute interview objective",
+        objective,
+        "",
+        "## Agenda",
+    ]
+    total_minutes = 0
+    for index, question in enumerate(questions if isinstance(questions, list) else [], start=1):
+        prompt = str(question.get("question", "")).strip()
+        timebox = int(question.get("timebox_minutes", 0) or 0)
+        follow_up = str(question.get("follow_up", "")).strip()
+        total_minutes += timebox
+        sections.extend(
+            [
+                f"{index}. Timebox: {timebox} minutes",
+                f"Question: {prompt}",
+                f"Follow-up: {follow_up}",
+                "",
+            ]
+        )
+    sections.extend(
+        [
+            f"Total planned time: {total_minutes} minutes",
+            "",
+            "## Grounding Reminder",
+            "Tie every question back to the documents and research findings.",
+        ]
+    )
+    return "\n".join(sections).strip() + "\n"
+
+
+def _render_payload(template: str, payload: dict[str, object]) -> str:
+    if template == "presentation":
+        return _render_presentation(payload)
+    if template == "interview_kit":
+        return _render_interview_kit(payload)
+    raise ValueError(f"Unsupported render template: {template}")
+
+
 @tool(parse_docstring=True)
-def generate_slide_markup(topic: str, slide_contents: list[str]) -> str:
-    """Generate Markdown presentation slide markup for a given research topic, optimized for quick learning.
+def render_target_output(target_id: str, payload_json: str) -> str:
+    """Render structured target output using a reusable target definition.
+
+    Use this tool for any structured output target. Provide the target id and a JSON
+    payload that matches the selected target schema exactly.
 
     Args:
-        topic: The overall presentation topic.
-        slide_contents: A list of content strings for each slide (e.g., 3 slides).
+        target_id: The target definition id to use for validation and rendering.
+        payload_json: A JSON object string matching the target schema.
 
     Returns:
-        Structured markdown for presentation slides, demarcated by `---`.
+        Rendered markdown output or a validation error message.
     """
-    markup = f"# Presentation: {topic}\\n\\n---\\n\\n"
-    for i, content in enumerate(slide_contents):
-        markup += f"## Slide {i + 1}\\n\\n{content}\\n\\n---\\n\\n"
-    return markup
+    try:
+        definition = get_target_definition(target_id)
+    except ValueError as exc:
+        return str(exc)
+    try:
+        payload = json.loads(payload_json)
+    except json.JSONDecodeError as exc:
+        return f"Invalid JSON payload: {exc}"
+
+    try:
+        jsonschema.validate(instance=payload, schema=definition["schema"])
+    except jsonschema.ValidationError as exc:
+        return f"Schema validation failed for target '{target_id}': {exc.message}"
+
+    return _render_payload(definition["render"]["template"], payload)

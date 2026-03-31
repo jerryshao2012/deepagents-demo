@@ -9,11 +9,18 @@ from research_agent.prompts import (
     RESEARCH_WORKFLOW_INSTRUCTIONS,
     SUBAGENT_DELEGATION_INSTRUCTIONS,
 )
-from research_agent.tools import tavily_search, think_tool
+from research_agent.tools import (
+    read_doc_folder,
+    render_target_output,
+    tavily_search,
+    think_tool,
+)
 
 __all__ = [
     "tavily_search",
     "think_tool",
+    "read_doc_folder",
+    "render_target_output",
     "RESEARCHER_INSTRUCTIONS",
     "RESEARCH_WORKFLOW_INSTRUCTIONS",
     "SUBAGENT_DELEGATION_INSTRUCTIONS",

@@ -14,7 +14,12 @@ from research_agent.prompts import (
     RESEARCH_WORKFLOW_INSTRUCTIONS,
     SUBAGENT_DELEGATION_INSTRUCTIONS,
 )
-from research_agent.tools import tavily_search, think_tool, read_pdf_folder, generate_slide_markup
+from research_agent.tools import (
+    read_doc_folder,
+    render_target_output,
+    tavily_search,
+    think_tool,
+)
 from utils import get_ssl_verify_config
 
 # Load environment variables
@@ -90,7 +95,12 @@ if model:
     # Create the agent
     agent = create_deep_agent(
         model=model,
-        tools=[tavily_search, think_tool, read_pdf_folder, generate_slide_markup],
+        tools=[
+            tavily_search,
+            think_tool,
+            read_doc_folder,
+            render_target_output,
+        ],
         system_prompt=INSTRUCTIONS,
         subagents=[research_sub_agent],
     )

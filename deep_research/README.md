@@ -49,14 +49,24 @@ You can run this example in two ways:
 Run the standalone Python script to execute the research agent:
 
 ```bash
-uv run python research_agent.py "Research AI Agents"
+uv run python research_agent_cli.py "Research AI Agents"
 ```
 
-You can optionally pass a PDF folder to extract custom documents and prompt the agent to generate slide markup:
+You can optionally pass a document folder to extract custom documents and choose a structured output target:
 
 ```bash
-uv run python research_agent.py "Research AI Agents" --pdf-folder ./docs --slides
+uv run python research_agent_cli.py "Research AI Agents" --doc-folder ./docs --target slides
 ```
+
+To generate an interview question kit grounded in the local documents:
+
+```bash
+uv run python research_agent_cli.py "Research AI Agents" --doc-folder ./docs --target interview
+```
+
+Structured targets are skill-driven. Add a new `research_agent/skills/<target>/SKILL.md`
+with frontmatter, instructions, a JSON Schema block, and a render template to make a new
+target available through `--target` without changing core CLI or tool wiring.
 
 If you prefer an interactive notebook, you can still run it via:
 ```bash
@@ -147,5 +157,5 @@ The deep research agent adds the following custom tools beyond the built-in deep
 |-----------|-------------|
 | `tavily_search` | Web search tool that uses Tavily purely as a URL discovery engine. Performs searches using Tavily API to find relevant URLs, fetches full webpage content via HTTP with proper User-Agent headers (avoiding 403 errors), converts HTML to markdown, and returns the complete content without summarization to preserve all information for the agent's analysis. Works with both Claude and Gemini models. |
 | `think_tool` | Strategic reflection mechanism that helps the agent pause and assess progress between searches, analyze findings, identify gaps, and plan next steps. |
-| `read_pdf_folder` | Extracts text content from all PDF documents located in a specified local folder, allowing the agent to research from local files. |
-| `generate_slide_markup` | Transforms research findings into structured, 3-slide markdown presentation markup designed for quick learning and summarization. |
+| `read_doc_folder` | Extracts text content from supported local files in a specified folder. Supports `.pdf`, `.txt`, `.md`, `.docx`, `.pptx`, and `.xlsx`. |
+| `render_target_output` | Generic target renderer that loads a target skill from `research_agent/skills/*/SKILL.md`, validates the provided JSON payload against that target's schema, and renders the final Markdown output. |
