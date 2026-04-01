@@ -56,6 +56,7 @@ def test_render_target_output_formats_45_minute_interview_kit() -> None:
     assert "45-minute interview objective" in result
     assert "Timebox: 10 minutes" in result
     assert "Follow-up:" in result
+    assert "Total planned time: 10 minutes" in result
 
 
 def test_render_target_output_reports_schema_validation_errors() -> None:
@@ -67,6 +68,136 @@ def test_render_target_output_reports_schema_validation_errors() -> None:
     )
 
     assert "Schema validation failed" in result
+
+
+def test_render_target_output_rejects_missing_required_fields() -> None:
+    result = render_target_output.invoke(
+        {
+            "target_id": "interview",
+            "payload_json": """
+            {
+              "topic": "AI Agents",
+              "objective": "Assess practical agent design judgment.",
+              "questions": [
+                {
+                  "question": "How would you ground an agent in local documents?",
+                  "timebox_minutes": 10
+                }
+              ]
+            }
+            """,
+        }
+    )
+
+    assert "Schema validation failed" in result
+    assert "follow_up" in result
+
+
+def test_render_target_output_coerces_integer_like_floats() -> None:
+    result = render_target_output.invoke(
+        {
+            "target_id": "interview",
+            "payload_json": """
+            {
+              "topic": "AI Agents",
+              "objective": "Assess practical agent design judgment.",
+              "questions": [
+                {
+                  "question": "How would you ground an agent in local documents?",
+                  "timebox_minutes": 10.0,
+                  "follow_up": "What trade-offs would you watch for?"
+                }
+              ]
+            }
+            """,
+        }
+    )
+
+    assert "# Interview Kit: AI Agents" in result
+    assert "Timebox: 10 minutes" in result
+
+
+def test_render_target_output_uses_declarative_render_spec(tmp_path, monkeypatch) -> None:
+    from research_agent import targets
+
+    skill_dir = tmp_path / "skills" / "demo"
+    skill_dir.mkdir(parents=True)
+    skill_file = skill_dir / "SKILL.md"
+    skill_file.write_text(
+        """---
+name: demo
+title: Demo Target
+description: Demo target for declarative rendering
+render_template: markdown_blocks
+---
+
+## Instructions
+
+Return the final result by calling `render_target_output`.
+
+## Schema
+
+```json
+{
+  "type": "object",
+  "required": ["topic", "items"],
+  "properties": {
+    "topic": {"type": "string"},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "minutes"],
+        "properties": {
+          "name": {"type": "string"},
+          "minutes": {"type": "integer"}
+        }
+      }
+    }
+  }
+}
+```
+
+## Render Spec
+
+```json
+[
+  {"type": "heading", "level": 1, "value": "Demo: {topic}"},
+  {"type": "repeat", "path": "items", "body": [
+    {"type": "heading", "level": 2, "value": "Item {index}: {item.name}"},
+    {"type": "text", "value": "Minutes: {item.minutes}"}
+  ]},
+  {"type": "text", "value": "Total: {sum(items[].minutes)}"}
+]
+```
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(targets, "SKILLS_DIR", tmp_path / "skills")
+    targets._load_all_targets.cache_clear()
+    try:
+        result = render_target_output.invoke(
+            {
+                "target_id": "demo",
+                "payload_json": """
+                {
+                  "topic": "Agenda",
+                  "items": [
+                    {"name": "Intro", "minutes": 5},
+                    {"name": "Deep Dive", "minutes": 15}
+                  ]
+                }
+                """,
+            }
+        )
+    finally:
+        targets._load_all_targets.cache_clear()
+
+    assert "# Demo: Agenda" in result
+    assert "## Item 1: Intro" in result
+    assert "Minutes: 15" in result
+    assert "Total: 20" in result
 
 
 def test_render_target_output_reports_unknown_target() -> None:

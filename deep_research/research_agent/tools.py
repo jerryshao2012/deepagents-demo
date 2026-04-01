@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from json import dumps as json_dumps
 from pathlib import Path
 
@@ -18,9 +19,10 @@ from dotenv import load_dotenv
 from langchain_core.tools import InjectedToolArg, tool
 from langgraph.prebuilt import InjectedState
 from markdownify import markdownify
-from research_agent.targets import get_target_definition
 from tavily import TavilyClient
 from typing_extensions import Annotated, Literal
+
+from research_agent.targets import get_target_definition
 from utils import get_ssl_verify_config
 
 load_dotenv()
@@ -310,60 +312,6 @@ def read_doc_folder(folder_path: str) -> str:
     return "\n".join(extracted_text)
 
 
-def _render_presentation(payload: dict[str, object]) -> str:
-    topic = str(payload.get("topic", "")).strip()
-    slides = payload.get("slides", [])
-    sections = [f"# Presentation: {topic}", ""]
-    for index, slide in enumerate(slides if isinstance(slides, list) else [], start=1):
-        title = str(slide.get("title", f"Slide {index}")).strip()
-        bullets = slide.get("bullets", [])
-        speaker_notes = str(slide.get("speaker_notes", "")).strip()
-        sections.extend(["---", "", f"## Slide {index}: {title}", ""])
-        for bullet in bullets if isinstance(bullets, list) else []:
-            sections.append(f"- {bullet}")
-        if speaker_notes:
-            sections.extend(["", "### Speaking Notes", "", speaker_notes])
-        sections.append("")
-    return "\n".join(sections).strip() + "\n"
-
-
-def _render_interview_kit(payload: dict[str, object]) -> str:
-    topic = str(payload.get("topic", "")).strip()
-    objective = str(payload.get("objective", "")).strip()
-    questions = payload.get("questions", [])
-    sections = [
-        f"# Interview Kit: {topic}",
-        "",
-        "## 45-minute interview objective",
-        objective,
-        "",
-        "## Agenda",
-    ]
-    total_minutes = 0
-    for index, question in enumerate(questions if isinstance(questions, list) else [], start=1):
-        prompt = str(question.get("question", "")).strip()
-        timebox = int(question.get("timebox_minutes", 0) or 0)
-        follow_up = str(question.get("follow_up", "")).strip()
-        total_minutes += timebox
-        sections.extend(
-            [
-                f"{index}. Timebox: {timebox} minutes",
-                f"Question: {prompt}",
-                f"Follow-up: {follow_up}",
-                "",
-            ]
-        )
-    sections.extend(
-        [
-            f"Total planned time: {total_minutes} minutes",
-            "",
-            "## Grounding Reminder",
-            "Tie every question back to the documents and research findings.",
-        ]
-    )
-    return "\n".join(sections).strip() + "\n"
-
-
 def _coerce_integers(value, schema):
     if isinstance(value, dict):
         props = schema.get('properties', {})
@@ -371,16 +319,104 @@ def _coerce_integers(value, schema):
     if isinstance(value, list):
         item_schema = schema.get('items', {})
         return [_coerce_integers(item, item_schema) for item in value]
-    if schema.get(type) == "integer" and isinstance(value, float) and value.is_integer():
+    if schema.get("type") == "integer" and isinstance(value, float) and value.is_integer():
         return int(value)
     return value
 
 
-def _render_payload(template: str, payload) -> str:
-    if template == "presentation":
-        return _render_presentation(payload)
-    if template == "interview_kit":
-        return _render_interview_kit(payload)
+def _resolve_path(path: str, context: dict[str, object]):
+    if path == "item":
+        return context.get("item")
+    target = context["root"]
+    if path.startswith("item."):
+        target = context.get("item", {})
+        path = path[5:]
+    elif path.startswith("root."):
+        path = path[5:]
+
+    if not path:
+        return target
+
+    current = target
+    for part in path.split("."):
+        if isinstance(current, dict):
+            current = current.get(part)
+        else:
+            return None
+    return current
+
+
+def _evaluate_expression(expression: str, context: dict[str, object]) -> str:
+    expression = expression.strip()
+    if expression == "index":
+        return str(context.get("index", ""))
+    if expression.startswith("sum(") and expression.endswith(")"):
+        inner = expression[4:-1]
+        array_path, _, field_name = inner.partition("[].")
+        values = _resolve_path(array_path, context)
+        if not isinstance(values, list) or not field_name:
+            return ""
+        total = 0
+        for value in values:
+            if isinstance(value, dict):
+                number = value.get(field_name)
+                if isinstance(number, (int, float)):
+                    total += number
+        return str(int(total) if isinstance(total, float) and total.is_integer() else total)
+
+    value = _resolve_path(expression, context)
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _interpolate_text(template: str, context: dict[str, object]) -> str:
+    result = template
+    for match in re.finditer(r"\{([^{}]+)\}", template):
+        expression = match.group(1)
+        result = result.replace(match.group(0), _evaluate_expression(expression, context))
+    return result
+
+
+def _render_blocks(spec: list[dict[str, object]], context: dict[str, object]) -> list[str]:
+    output: list[str] = []
+    for block in spec:
+        block_type = block.get("type")
+        if block_type == "heading":
+            level = int(block.get("level", 1))
+            value = _interpolate_text(str(block.get("value", "")), context)
+            output.append(f"{'#' * level} {value}".rstrip())
+        elif block_type == "text":
+            output.append(_interpolate_text(str(block.get("value", "")), context))
+        elif block_type == "separator":
+            output.append(str(block.get("value", "---")))
+        elif block_type == "bullet_list":
+            values = _resolve_path(str(block.get("path", "")), context)
+            if isinstance(values, list):
+                for value in values:
+                    output.append(f"- {value}")
+        elif block_type == "repeat":
+            items = _resolve_path(str(block.get("path", "")), context)
+            body = block.get("body", [])
+            if isinstance(items, list) and isinstance(body, list):
+                for index, item in enumerate(items, start=1):
+                    child_context = {"root": context["root"], "item": item, "index": index}
+                    output.extend(_render_blocks(body, child_context))
+        elif block_type == "if_present":
+            value = _resolve_path(str(block.get("path", "")), context)
+            body = block.get("body", [])
+            if value and isinstance(body, list):
+                output.extend(_render_blocks(body, context))
+        else:
+            raise ValueError(f"Unsupported render block type: {block_type}")
+    return output
+
+
+def _render_payload(template: str, payload, render_spec: list[dict[str, object]]) -> str:
+    if template == "markdown_blocks":
+        context = {"root": payload, "item": payload, "index": 1}
+        rendered = [block for block in _render_blocks(render_spec, context) if block != ""]
+        return "\n\n".join(rendered).strip() + "\n"
     raise ValueError(f"Unsupported render template: {template}")
 
 
@@ -414,4 +450,4 @@ def render_target_output(target_id: str, payload_json: str) -> str:
     except jsonschema.ValidationError as exc:
         return f"Schema validation failed for target '{target_id}': {exc.message}"
 
-    return _render_payload(definition["render"]["template"], payload)
+    return _render_payload(definition["render"]["template"], payload, definition["render"]["spec"])
