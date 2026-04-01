@@ -85,35 +85,34 @@ def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
         return f"Error fetching content from {url}: {exc}"
 
 
-def _extract_pdf_text(file_path: Path):
+def _extract_pdf_text(file_path: Path) -> str:
+    """Extract PDF content as markdown without ML model downloads.\n\n    Returns:\n        str: Extracted content from the PDF file.\n    """
     try:
-        if isinstance(verify_ssl, str):
-            # Docking downloads models from huggingface_hub/requests, so mirror CA settings
-            os.environ.setdefault("SSL_CERT_FILE", verify_ssl)
-            os.environ.setdefault("REQUESTS_CA_BUNDLE", verify_ssl)
-            os.environ.setdefault("CURL_CA_BUNDLE", verify_ssl)
+        print("Use PyMuPDF4LLM for PDF markdown extraction.")
+        import pymupdf4llm
 
-        print("Use docling for PDF text extraction.")
-        from docling.document_converter import DocumentConverter
-
-        converter = DocumentConverter()
-        result = converter.convert(str(file_path))
-        markdown_content = result.document.export_to_markdown()
+        markdown_content = pymupdf4llm.to_markdown(str(file_path))
+        if isinstance(markdown_content, list):
+            # Convert each dictionary to a string representation
+            return "\n\n".join(str(item) for item in markdown_content)
         if markdown_content.strip():
             return markdown_content
     except Exception as e:
-        print(f"Docling PDF extraction failed: {e}")
-        # Fallback to pypdf if docling fails
+        print(f"PyMuPDF4LLM PDF extraction failed: {e}")
+        # Fallback to pypdf if markdown extraction fails
         try:
             print("Falling back to pypdf for PDF text extraction.")
             import pypdf
             reader = pypdf.PdfReader(file_path)
-            text = ""
-            for page in reader.pages:
-                text += page.extract_text() + "\n"
-            return text
+            page_texts: list[str] = []
+            for index, page in enumerate(reader.pages, start=1):
+                text = (page.extract_text() or "").strip()
+                if text:
+                    page_texts.append(f"## Page {index}:\n\n{text}")
+            return "\n\n".join(page_texts)
         except Exception as e:
             return f"Error extracting PDF text: {e}"
+    return ""
 
 
 def _extract_text_file(file_path: Path) -> str:
@@ -379,7 +378,7 @@ def _evaluate_expression(expression: str, context: dict[str, object]) -> str:
 
 def _interpolate_text(template: str, context: dict[str, object]) -> str:
     result = template
-    for match in re.finditer(r"\{([^{}]+)\}", template):
+    for match in re.finditer(r"\{([^{}]+)}", template):
         expression = match.group(1)
         result = result.replace(match.group(0), _evaluate_expression(expression, context))
     return result
@@ -390,7 +389,8 @@ def _render_blocks(spec: list[dict[str, object]], context: dict[str, object]) ->
     for block in spec:
         block_type = block.get("type")
         if block_type == "heading":
-            level = int(block.get("level", 1))
+            level_value = block.get("level", 1)
+            level = int(str(level_value))
             value = _interpolate_text(str(block.get("value", "")), context)
             output.append(f"{'#' * level} {value}".rstrip())
         elif block_type == "text":
