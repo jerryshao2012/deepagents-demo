@@ -44,3 +44,8 @@ env/
 # Temporary files
 *.tmp
 *.bak
+
+# Projet data
+.docs/
+.input/
+.output/

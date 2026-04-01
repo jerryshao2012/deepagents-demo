@@ -6,6 +6,7 @@ using Tavily for URL discovery and fetching full webpage content.
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import re
@@ -33,6 +34,8 @@ tavily_session.verify = verify_ssl
 tavily_client = TavilyClient(session=tavily_session)
 
 SUPPORTED_DOC_SUFFIXES = {".pdf", ".txt", ".md", ".docx", ".pptx", ".xlsx"}
+
+REPORTS_OUTPUT_FOLDER = "output"
 
 
 def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float = 60.0) -> dict:
@@ -345,6 +348,35 @@ def read_doc_folder(folder_path: str) -> str:
         summary_lines.append(f"Files failed: {', '.join(failed_files)}")
     print("\n".join(summary_lines))
     return "\n".join(summary_lines + [""] + extracted_text)
+
+
+def save_research_report(report_title: str, content: str) -> str:
+    """Save a research report to the output folder.
+
+    Args:
+        report_title: Title of the report (used for filename)
+        content: Content of the report
+
+    Returns:
+        str: Path to the saved report file
+    """
+    output_dir = Path(REPORTS_OUTPUT_FOLDER)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Clean up the report title to make it filename-friendly
+    safe_title = re.sub(r"[^a-zA-Z0-9_\- ]", "", report_title).strip()[:100]
+    safe_title = safe_title.replace(" ", "_")
+
+    # Create filename with timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{timestamp}_{safe_title}.md"
+
+    file_path = output_dir / filename
+
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+    return str(file_path)
 
 
 def _coerce_integers(value, schema):
