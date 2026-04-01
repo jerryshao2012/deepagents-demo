@@ -3,11 +3,12 @@
 This module creates a deep research agent with custom tools and prompts
 for conducting web research with strategic thinking and context management.
 """
-import os
 from datetime import datetime
 
 from deepagents import create_deep_agent, SubAgent
 from dotenv import load_dotenv
+
+from model_factory import get_configured_model
 from research_agent.prompts import (
     RESEARCHER_INSTRUCTIONS,
     RESEARCH_WORKFLOW_INSTRUCTIONS,
@@ -58,56 +59,17 @@ research_sub_agent: SubAgent = {
     ],
 }
 
-model = None
-# Model Gemini 3
-if os.getenv("GOOGLE_API_KEY") and os.getenv("MODEL_NAME"):
-    from langchain_google_genai import ChatGoogleGenerativeAI
+model = get_configured_model()
 
-    model = ChatGoogleGenerativeAI(model=os.getenv("MODEL_NAME", "gemini-3-pro-preview"), temperature=0.0)
-
-# Model Claude 4.5
-if os.getenv("ANTHROPIC_API_KEY") and os.getenv("MODEL_NAME"):
-    from langchain.chat_models import init_chat_model
-
-    model = init_chat_model(model=os.getenv("MODEL_NAME", "anthropic:claude-sonnet-4-5-20250929"), temperature=0.0)
-
-# Using Ollama (Local)
-if os.getenv("OLLAMA_API_BASE") and os.getenv("MODEL_NAME"):
-    from langchain.chat_models import init_chat_model
-
-    model = init_chat_model(model=f"ollama:{os.getenv("MODEL_NAME")}", base_url=os.getenv("OLLAMA_API_BASE"))
-
-# Using AzureOpenAI
-if os.getenv("AZURE_OPENAI_ENDPOINT") and os.getenv("AZURE_OPENAI_DEPLOYMENT") \
-        and os.getenv("AZURE_OPENAI_API_KEY") and os.getenv("AZURE_OPENAI_API_VERSION"):
-    import httpx
-    from langchain_openai import AzureChatOpenAI
-
-    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
-    deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
-    subscription_key = os.getenv("AZURE_OPENAI_API_KEY")
-    api_version = os.getenv("AZURE_OPENAI_API_VERSION")
-
-    model = AzureChatOpenAI(
-        azure_endpoint=endpoint,
-        azure_deployment=deployment,
-        api_version=api_version,
-        api_key=subscription_key,
-        http_client=httpx.Client(verify=verify_ssl)  # Enable/Disable SSL verification for httpx
-    )
-
-if model:
-    # Create the agent
-    agent = create_deep_agent(
-        model=model,
-        tools=[
-            tavily_search,
-            think_tool,
-            read_doc_folder,
-            render_target_output,
-        ],
-        system_prompt=INSTRUCTIONS,
-        subagents=[research_sub_agent],
-    )
-else:
-    raise ValueError("No model found. Please set up a model")
+# Create the agent
+agent = create_deep_agent(
+    model=model,
+    tools=[
+        tavily_search,
+        think_tool,
+        read_doc_folder,
+        render_target_output,
+    ],
+    system_prompt=INSTRUCTIONS,
+    subagents=[research_sub_agent],
+)

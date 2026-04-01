@@ -215,6 +215,38 @@ def test_render_target_output_reports_unknown_target() -> None:
     assert "Unknown target" in result
 
 
+def test_render_target_output_renders_golden_dataset_without_metric_fields() -> None:
+    result = render_target_output.invoke(
+        {
+            "target_id": "golden-dataset",
+            "payload_json": """
+            {
+              "dataset_name": "HR Policy Starter",
+              "domain": "Employee handbook and HR policy",
+              "recommended_total_dataset_size": 150,
+              "coverage_areas": ["Leave", "Benefits"],
+              "items": [
+                {
+                  "id": "Q1",
+                  "coverage_area": "Leave",
+                  "question": "How do I request parental leave under the employee handbook?",
+                  "draft_llm_response": "You would typically start by reviewing the leave policy and then submitting the required request through HR."
+                }
+              ]
+            }
+            """,
+        }
+    )
+
+    assert "# Golden Dataset Starter: HR Policy Starter" in result
+    assert "## Coverage Areas" in result
+    assert "### Q1. Leave" in result
+    assert "Question: How do I request parental leave under the employee handbook?" in result
+    assert "Answer:" in result
+    assert "QnA Similarity Evaluation" not in result
+    assert "QnA Groundedness Evaluation" not in result
+
+
 def test_read_doc_folder_reads_text_and_markdown_files(tmp_path: Path) -> None:
     (tmp_path / "notes.txt").write_text("alpha", encoding="utf-8")
     (tmp_path / "summary.md").write_text("# heading", encoding="utf-8")
