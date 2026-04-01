@@ -87,6 +87,12 @@ def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
 
 def _extract_pdf_text(file_path: Path):
     try:
+        if isinstance(verify_ssl, str):
+            # Docking downloads models from huggingface_hub/requests, so mirror CA settings
+            os.environ.setdefault("SSL_CERT_FILE", verify_ssl)
+            os.environ.setdefault("REQUESTS_CA_BUNDLE", verify_ssl)
+            os.environ.setdefault("CURL_CA_BUNDLE", verify_ssl)
+
         print("Use docling for PDF text extraction.")
         from docling.document_converter import DocumentConverter
 
@@ -96,6 +102,7 @@ def _extract_pdf_text(file_path: Path):
         if markdown_content.strip():
             return markdown_content
     except Exception as e:
+        print(f"Docling PDF extraction failed: {e}")
         # Fallback to pypdf if docling fails
         try:
             print("Falling back to pypdf for PDF text extraction.")

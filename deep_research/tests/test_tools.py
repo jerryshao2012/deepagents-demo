@@ -23,7 +23,7 @@ def test_render_target_output_renders_slides_from_definition() -> None:
                 }
               ]
             }
-            """,
+            """
         }
     )
 
@@ -44,17 +44,19 @@ def test_render_target_output_formats_45_minute_interview_kit() -> None:
                 {
                   "question": "How would you ground an agent in local documents?",
                   "timebox_minutes": 10,
+                  "potential_answer": "A strong answer would cover retrieval, source selection, and citation strategy.",
                   "follow_up": "What trade-offs would you watch for?"
                 }
               ]
             }
-            """,
+            """
         }
     )
 
     assert "# Interview Kit: AI Agents" in result
     assert "45-minute interview objective" in result
     assert "Timebox: 10 minutes" in result
+    assert "Potential Answer:" in result
     assert "Follow-up:" in result
     assert "Total planned time: 10 minutes" in result
 
@@ -81,16 +83,17 @@ def test_render_target_output_rejects_missing_required_fields() -> None:
               "questions": [
                 {
                   "question": "How would you ground an agent in local documents?",
-                  "timebox_minutes": 10
+                  "timebox_minutes": 10,
+                  "follow_up": "What trade-offs would you watch for?"
                 }
               ]
             }
-            """,
+            """
         }
     )
 
     assert "Schema validation failed" in result
-    assert "follow_up" in result
+    assert "potential_answer" in result
 
 
 def test_render_target_output_coerces_integer_like_floats() -> None:
@@ -105,11 +108,12 @@ def test_render_target_output_coerces_integer_like_floats() -> None:
                 {
                   "question": "How would you ground an agent in local documents?",
                   "timebox_minutes": 10.0,
+                  "potential_answer": "A strong answer would cover retrieval, source selection, and citation strategy.",
                   "follow_up": "What trade-offs would you watch for?"
                 }
               ]
             }
-            """,
+            """
         }
     )
 
@@ -188,7 +192,7 @@ Return the final result by calling `render_target_output`.
                     {"name": "Deep Dive", "minutes": 15}
                   ]
                 }
-                """,
+                """
             }
         )
     finally:

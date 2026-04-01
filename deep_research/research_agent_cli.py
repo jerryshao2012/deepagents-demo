@@ -95,7 +95,7 @@ def extract_message_content(message):
                 normalized_parts.append(text)
             else:
                 normalized_parts.append(str(item))
-            return "\n".join(part for part in normalized_parts if part)
+        return "\n".join(part for part in normalized_parts if part)
 
     return str(content)
 
