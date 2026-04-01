@@ -123,8 +123,25 @@ def _extract_docx_text(file_path: Path) -> str:
     from docx import Document
 
     document = Document(str(file_path))
-    paragraphs = [paragraph.text.strip() for paragraph in document.paragraphs]
-    return "\n".join(text for text in paragraphs if text)
+    paragraphs = [
+        paragraph.text.strip()
+        for paragraph in document.paragraphs
+        if paragraph.text and paragraph.text.strip()
+    ]
+
+    # Many documents are table-based; include table cells so content is not silently missed.
+    for table in document.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                call_paragraph = [
+                    paragraph.text.strip()
+                    for paragraph in cell.paragraphs
+                    if paragraph.text and paragraph.text.strip()
+                ]
+                if call_paragraph:
+                    paragraphs.extend(call_paragraph)
+
+    return "\n".join(paragraphs)
 
 
 def _extract_pptx_text(file_path: Path) -> str:
@@ -308,14 +325,26 @@ def read_doc_folder(folder_path: str) -> str:
             "Supported types: .pdf, .txt, .md, .docx, .pptx, .xlsx."
         )
 
+    processed_files: list[str] = []
+    failed_files: list[str] = []
+
     for file_path in supported_files:
+        print(f"Processing document: {file_path.name}...")
         try:
             content = _extract_supported_document(file_path)
+            processed_files.append(file_path.name)
             extracted_text.append(f"--- Content of {file_path.name} ---\n{content}\n")
         except Exception as exc:
+            failed_files.append(file_path.name)
             extracted_text.append(f"--- Error reading {file_path.name}: {exc} ---\n")
 
-    return "\n".join(extracted_text)
+    summary_lines = [f"Processed {len(processed_files)}/{len(supported_files)} supported file(s) from {folder}."]
+    if processed_files:
+        summary_lines.append(f"Files processed: {', '.join(processed_files)}")
+    if failed_files:
+        summary_lines.append(f"Files failed: {', '.join(failed_files)}")
+    print("\n".join(summary_lines))
+    return "\n".join(summary_lines + [""] + extracted_text)
 
 
 def _coerce_integers(value, schema):
