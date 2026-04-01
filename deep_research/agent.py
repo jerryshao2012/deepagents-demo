@@ -8,7 +8,6 @@ from datetime import datetime
 
 from deepagents import create_deep_agent, SubAgent
 from dotenv import load_dotenv
-
 from research_agent.prompts import (
     RESEARCHER_INSTRUCTIONS,
     RESEARCH_WORKFLOW_INSTRUCTIONS,
@@ -51,7 +50,12 @@ research_sub_agent: SubAgent = {
     "name": "research-agent",
     "description": "Delegate research to the sub-agent researcher. Only give this researcher one topic at a time.",
     "system_prompt": RESEARCHER_INSTRUCTIONS.format(date=current_date),
-    "tools": [tavily_search, think_tool, read_doc_folder, render_target_output],
+    "tools": [
+        tavily_search,
+        think_tool,
+        read_doc_folder,
+        render_target_output
+    ],
 }
 
 model = None

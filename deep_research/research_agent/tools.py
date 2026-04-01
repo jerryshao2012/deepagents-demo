@@ -16,11 +16,11 @@ import jsonschema
 import requests
 from dotenv import load_dotenv
 from langchain_core.tools import InjectedToolArg, tool
+from langgraph.prebuilt import InjectedState
 from markdownify import markdownify
+from research_agent.targets import get_target_definition
 from tavily import TavilyClient
 from typing_extensions import Annotated, Literal
-
-from research_agent.targets import get_target_definition
 from utils import get_ssl_verify_config
 
 load_dotenv()
@@ -83,7 +83,7 @@ def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
         return f"Error fetching content from {url}: {exc}"
 
 
-def _extract_pdf_text(file_path: Path) -> str:
+def _extract_pdf_text(file_path: Path):
     try:
         print("Use docling for PDF text extraction.")
         from docling.document_converter import DocumentConverter
@@ -186,6 +186,7 @@ def tavily_search(
         query: str,
         max_results: Annotated[int, InjectedToolArg] = 1,
         topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
+        state: Annotated[dict, InjectedState] = None,
 ) -> str:
     """Search the web for information on a given query.
 
@@ -195,10 +196,18 @@ def tavily_search(
         query: Search query to execute
         max_results: Maximum number of results to return (default: 1)
         topic: Topic filter - 'general', 'news', or 'finance' (default: 'general')
+        state: LangGraph state
 
     Returns:
         Formatted search results with full webpage content
     """
+    if state:
+        messages = state.get("messages", [])
+        for msg in messages:
+            content = getattr(msg, "content", "") if not isinstance(msg, dict) else msg.get("content", "")
+            if isinstance(content, str) and "Do NOT use web search" in content:
+                return "Note: Web search is disabled for this research task. Please use local documents or internal knowledge only."
+
     try:
         search_results = _run_tavily_search(
             query=query,
@@ -353,6 +362,7 @@ def _render_interview_kit(payload: dict[str, object]) -> str:
         ]
     )
     return "\n".join(sections).strip() + "\n"
+
 
 def _coerce_integers(value, schema):
     if isinstance(value, dict):
