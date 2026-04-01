@@ -21,6 +21,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+.pytest_cache/
 
 # Virtual Environment
 .venv/
@@ -46,6 +47,6 @@ env/
 *.bak
 
 # Projet data
-.docs/
-.input/
-.output/
+docs/
+input/
+output/
