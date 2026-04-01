@@ -13,7 +13,7 @@ This target covers only:
 - Step 1: create realistic, self-contained customer questions
 - Step 2: generate draft LLM responses for those questions
 
-Do not do Step 3 or Step 4:
+Do not do Step 3 or Step 4 (defined in the [Producing Golden Datasets](https://github.com/microsoft/promptflow-resource-hub/blob/main/sample_gallery/golden_dataset/copilot-golden-dataset-creation-guidance.md)):
 - Do not write expert answers
 - Do not present draft answers as validated or final
 - Do not invent citations or source references that are not supported by the provided materials
@@ -27,8 +27,8 @@ Requirements:
 - Draft LLM responses should be helpful and plausible, but clearly framed as starting points for later expert review.
 - Keep each draft response concise but complete enough for a domain expert to refine.
 - If grounding is weak, narrow the question or add a short caveat inside the draft response rather than overstating certainty.
-- The rendered output should be easy to export into CSV with at least `Question` and `Answer` columns.
-- Quality metrics such as `Similarity`, `Relevance`, `Coherence`, and `Groundedness` are generated after export by the bundled script at `scripts/generate_quality_metrics.py`.
+- The rendered output should be easy to export into a CSV file in the `output/` directory with at least `Question` and `Answer` columns.
+- Quality metrics such as `Similarity`, `Relevance`, `Coherence`, and `Groundedness` are generated after export by the bundled script at `scripts/generate_quality_metrics.py` targeting the CSV in the `output/` folder.
 - Treat the following metric guidance as best practice during evaluation:
   - `Similarity`: measures how similar the response is to a human expert answer. Scale `1-5`. Suggested goal: `3+`.
   - `Relevance`: measures how relevant the response is to the question and context. Scale `0-100`. Suggested goal: `60+`.
@@ -115,9 +115,25 @@ Requirements:
     { "type": "text", "value": "Answer: {item.draft_llm_response}" }
   ]},
   { "type": "heading", "level": 2, "value": "Scoring Workflow" },
-  { "type": "text", "value": "After exporting a CSV with at least Question and Answer columns, run `python research_agent/skills/golden_dataset/scripts/generate_quality_metrics.py <input.csv>` from the deep_research folder to append Similarity, Relevance, Coherence, and Groundedness columns." },
+  { "type": "text", "value": "After exporting a CSV with at least Question and Answer columns to the `output/` directory, run `python research_agent/skills/golden_dataset/scripts/generate_quality_metrics.py output/<input.csv>` from the deep_research folder to append Similarity, Relevance, Coherence, and Groundedness columns." },
   { "type": "text", "value": "Evaluation best practice: Similarity measures closeness to a human expert answer on a 1-5 scale with a suggested goal of 3+. Relevance measures how well the answer addresses the question and context on a 0-100 scale with a suggested goal of 60+. Coherence measures how naturally the sentences fit together on a 1-5 scale with a suggested goal of 3+. Groundedness measures how verifiable the answer is against the provided context on a 1-5 scale with a suggested goal of 3+." },
   { "type": "heading", "level": 2, "value": "Reviewer Note" },
   { "type": "text", "value": "These draft responses cover Golden Dataset steps 1 and 2 only. A domain expert should review and replace them with authoritative expert answers before evaluation use." }
 ]
 ```
+
+## Quality Guidelines
+
+Before submitting, verify every item passes:
+
+- **Item count**: Exactly 12 items are present unless the user explicitly requested a different count.
+- **Question realism**: Every question sounds like a real customer inquiry — avoid academic or overly technical phrasing. Prefer openings such as "How do I…", "What is…", "Can you give me…".
+- **Self-contained questions**: Each question must be understandable on its own without referencing other items in the dataset.
+- **No duplicate questions**: No two items should ask the same question with different wording.
+- **Coverage balance**: Items should spread across the listed `coverage_areas`; no single area should dominate more than 40% of the dataset.
+- **Grounding**: Every draft response must be traceable to the provided documents or research findings. Do not invent facts, statistics, or source references that are not supported by the materials.
+- **Caveat over certainty**: If grounding is weak for a particular answer, narrow the question scope or add a short caveat rather than overstating confidence.
+- **Draft framing**: Draft responses must be clearly framed as starting points — do not present them as validated expert answers.
+- **Response completeness**: Each `draft_llm_response` must be substantive enough (3+ sentences) for a domain expert to meaningfully review and refine.
+- **Metric readiness**: The output must be directly exportable to a CSV in the `output/` directory with `Question` and `Answer` columns for scoring with `generate_quality_metrics.py`.
+- **Schema compliance**: Output contains only schema-allowed fields (`dataset_name`, `domain`, `recommended_total_dataset_size`, `coverage_areas`, `items`, `id`, `coverage_area`, `question`, `draft_llm_response`).

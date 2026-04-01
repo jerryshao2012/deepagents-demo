@@ -92,6 +92,16 @@ Requirements:
 ```
 
 ## Quality Guidelines
-- Sum of all timebox_minutes equals 45.
-- Exactly six interview questions are present in the middle section with the required difficulty progression.
-- Output contains only schema-allowed fields.
+
+Before submitting, verify every item passes:
+
+- **Total time**: Sum of all `timebox_minutes` equals exactly 45.
+- **Agenda count**: Exactly 8 agenda items are present in `questions`.
+- **Agenda structure**: Items follow the required order — 5-min intro, six interview questions, 5-min closing.
+- **Difficulty progression**: The six interview questions escalate in difficulty (Q1-Q2 easy, Q3-Q4 harder, Q5-Q6 hardest).
+- **Grounding**: Every question and potential answer must be traceable to the provided documents or research findings. Do not invent unsupported claims.
+- **Potential answers**: Each `potential_answer` outlines what a strong response would include, grounded in the source materials — not a single-sentence restatement of the question.
+- **Follow-up depth**: Each `follow_up` for interview questions probes reasoning, tradeoffs, evidence, or practical application — not a generic "Can you elaborate?".
+- **Self-contained questions**: Each question must be understandable on its own without needing to read the previous question.
+- **No filler**: Remove generic questions such as "Tell me about yourself" from the six interview slots; those belong only in the intro/closing items.
+- **Schema compliance**: Output contains only schema-allowed fields (`topic`, `objective`, `questions`, `question`, `timebox_minutes`, `potential_answer`, `follow_up`).

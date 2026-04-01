@@ -1,7 +1,7 @@
 ---
 name: slides
 title: Learning Slides
-description: Quick-learning presentation markup with fewer than 3 slides and speaking notes.
+description: Quick-learning presentation markup with fewer than 5 slides and speaking notes.
 render_template: markdown_blocks
 ---
 
@@ -9,7 +9,7 @@ render_template: markdown_blocks
 
 Create concise Markdown presentation content for quick learning.
 
-- Keep it to fewer than 3 slides.
+- Keep it to fewer than 5 slides.
 - Use clear slide titles.
 - Use concise bullets.
 - Include speaking notes for each slide.
@@ -29,7 +29,7 @@ Create concise Markdown presentation content for quick learning.
     },
     "slides": {
       "type": "array",
-      "maxItems": 2,
+      "maxItems": 5,
       "items": {
         "type": "object",
         "required": ["title", "bullets", "speaker_notes"],
@@ -70,3 +70,15 @@ Create concise Markdown presentation content for quick learning.
   ]}
 ]
 ```
+
+## Quality Guidelines
+
+Before submitting, verify every item passes:
+
+- **Slide count**: The presentation contains at most 2 slides (enforced by `maxItems: 5` in the schema).
+- **Grounding**: Every bullet point and speaking note must be traceable to the provided documents or research findings. Do not invent unsupported claims.
+- **No filler content**: Remove generic bullets such as "In conclusion…" or "As we can see…" that add no informational value.
+- **Title clarity**: Each slide title should clearly describe the content of that slide in fewer than 10 words.
+- **Bullet conciseness**: Each bullet should be one sentence or phrase. If a bullet exceeds two lines, split it or shorten it.
+- **Speaker notes depth**: Speaking notes must add context beyond what the bullets already say — explanations, examples, or transition cues.
+- **Schema compliance**: Output contains only schema-allowed fields (`topic`, `slides`, `title`, `bullets`, `speaker_notes`).

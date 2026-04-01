@@ -518,4 +518,31 @@ def render_target_output(target_id: str, payload_json: str) -> str:
     except jsonschema.ValidationError as exc:
         return f"Schema validation failed for target '{target_id}': {exc.message}"
 
-    return _render_payload(definition["render"]["template"], payload, definition["render"]["spec"])
+    rendered = _render_payload(definition["render"]["template"], payload, definition["render"]["spec"])
+
+    if target_id == "golden_dataset":
+        import csv
+        output_dir = Path(REPORTS_OUTPUT_FOLDER)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        filename = re.sub(r"[^a-zA-Z0-9_\- ]", "", payload.get("dataset_name", "dataset")).strip().replace(" ",
+                                                                                                           "_").lower()
+        if not filename:
+            filename = "golden_dataset"
+
+        csv_path = output_dir / f"{filename}.csv"
+        try:
+            with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["ID", "Coverage Area", "Question", "Answer"])
+                for item in payload.get("items", []):
+                    writer.writerow([
+                        item.get("id", ""),
+                        item.get("coverage_area", ""),
+                        item.get("question", ""),
+                        item.get("draft_llm_response", "")
+                    ])
+            rendered += f"\n\n**Data exported to:** `{csv_path}`"
+        except Exception as e:
+            rendered += f"\n\n**Error exporting to CSV:** {e}"
+
+    return rendered
