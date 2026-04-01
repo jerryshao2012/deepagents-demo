@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from research_agent.golden_dataset_metrics import score_dataset_file
+from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import score_dataset_file
 
 
 def build_parser() -> argparse.ArgumentParser:

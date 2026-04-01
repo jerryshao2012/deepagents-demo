@@ -1,5 +1,5 @@
 ---
-name: golden-dataset
+name: golden_dataset
 title: Golden Dataset Starter
 description: Produce a Golden Dataset starter pack with realistic customer questions and draft LLM answers only. Use for deep research outputs that should cover Golden Dataset steps 1 and 2, then score the exported CSV separately with the bundled quality-metrics script.
 render_template: markdown_blocks
@@ -115,7 +115,7 @@ Requirements:
     { "type": "text", "value": "Answer: {item.draft_llm_response}" }
   ]},
   { "type": "heading", "level": 2, "value": "Scoring Workflow" },
-  { "type": "text", "value": "After exporting a CSV with at least Question and Answer columns, run `python research_agent/skills/golden-dataset/scripts/generate_quality_metrics.py <input.csv>` from the deep_research folder to append Similarity, Relevance, Coherence, and Groundedness columns." },
+  { "type": "text", "value": "After exporting a CSV with at least Question and Answer columns, run `python research_agent/skills/golden_dataset/scripts/generate_quality_metrics.py <input.csv>` from the deep_research folder to append Similarity, Relevance, Coherence, and Groundedness columns." },
   { "type": "text", "value": "Evaluation best practice: Similarity measures closeness to a human expert answer on a 1-5 scale with a suggested goal of 3+. Relevance measures how well the answer addresses the question and context on a 0-100 scale with a suggested goal of 60+. Coherence measures how naturally the sentences fit together on a 1-5 scale with a suggested goal of 3+. Groundedness measures how verifiable the answer is against the provided context on a 1-5 scale with a suggested goal of 3+." },
   { "type": "heading", "level": 2, "value": "Reviewer Note" },
   { "type": "text", "value": "These draft responses cover Golden Dataset steps 1 and 2 only. A domain expert should review and replace them with authoritative expert answers before evaluation use." }

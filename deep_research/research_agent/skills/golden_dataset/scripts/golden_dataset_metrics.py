@@ -67,7 +67,7 @@ def build_judge_prompt(question: str, answer: str, context: str = "") -> str:
         f"- {metric_name}: {METRIC_GUIDANCE[metric_name]}" for metric_name in METRIC_NAMES
     )
     return (
-        "You are evaluating a draft golden-dataset answer for QA purposes.\n"
+        "You are evaluating a draft golden_dataset answer for QA purposes.\n"
         "Score the answer on four metrics and return exactly these four lines:\n"
         "Similarity: <1-5 score>\n"
         "Relevance: <0-100 score>\n"

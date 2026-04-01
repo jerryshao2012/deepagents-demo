@@ -218,7 +218,7 @@ def test_render_target_output_reports_unknown_target() -> None:
 def test_render_target_output_renders_golden_dataset_without_metric_fields() -> None:
     result = render_target_output.invoke(
         {
-            "target_id": "golden-dataset",
+            "target_id": "golden_dataset",
             "payload_json": """
             {
               "dataset_name": "HR Policy Starter",

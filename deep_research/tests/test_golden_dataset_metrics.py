@@ -1,4 +1,7 @@
-from research_agent.golden_dataset_metrics import build_judge_prompt, parse_metric_scores
+from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import (
+    build_judge_prompt,
+    parse_metric_scores,
+)
 
 
 def test_parse_metric_scores_extracts_expected_columns() -> None:
