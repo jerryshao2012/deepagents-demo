@@ -146,7 +146,7 @@ Before submitting, verify every item passes:
 - **Schema compliance**: Output contains only schema-allowed fields (`dataset_name`, `domain`, `recommended_total_dataset_size`, `coverage_areas`, `items`, `id`, `coverage_area`, `question`, `draft_llm_response`, `content`).
 - **Sequential IDs**: Ensure `id` for each item is a sequential string starting from "1".
 
-## Handling Large Scale Datasets
+### Handling Large Scale Datasets
 
 If the `doc-folder` contains thousands of files or very large files (hundreds of GBs):
 

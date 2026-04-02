@@ -15,6 +15,7 @@ _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
 _JSON_BLOCK_RE = re.compile(r"```json\n(.*?)\n```", re.DOTALL)
 _SCHEMA_SECTION_RE = re.compile(r"^## Schema\s*$", re.MULTILINE)
 _RENDER_SPEC_SECTION_RE = re.compile(r"^## Render Spec\s*$", re.MULTILINE)
+_QUALITY_GUIDELINES_SECTION_RE = re.compile(r"^## Quality Guidelines\s*$", re.MULTILINE)
 SUPPORTED_RENDER_TEMPLATES = {"markdown_blocks"}
 
 
@@ -51,6 +52,18 @@ def _extract_render_spec(body: str, path: Path) -> list[dict[str, Any]]:
     return render_spec
 
 
+def _extract_quality_guidelines(body: str) -> str:
+    """Extract the raw Markdown text of the ## Quality Guidelines section, or empty string."""
+    guidelines_heading = _QUALITY_GUIDELINES_SECTION_RE.search(body)
+    if not guidelines_heading:
+        return ""
+    # Grab everything from after the heading to the next ## section (or end of file)
+    start = guidelines_heading.end()
+    next_section = re.search(r"^## ", body[start:], re.MULTILINE)
+    end = (start + next_section.start()) if next_section else len(body)
+    return body[start:end].strip()
+
+
 def _parse_skill_file(path: Path) -> dict[str, Any]:
     content = path.read_text(encoding="utf-8")
     match = _FRONTMATTER_RE.match(content)
@@ -78,6 +91,7 @@ def _parse_skill_file(path: Path) -> dict[str, Any]:
             "title": frontmatter.get("title", target_id.replace("-", " ").title()),
             "description": frontmatter.get("description", "").strip(),
             "instructions": instructions,
+            "quality_guidelines": _extract_quality_guidelines(body),
             "schema": schema,
             "render": {"template": render_template, "spec": render_spec},
             "skill_path": str(path),
@@ -121,3 +135,20 @@ def format_target_catalog() -> str:
             f"- `{target_id}`: {definition['title']} — {definition['description']}"
         )
     return "\n".join(lines)
+
+
+def format_target_quality_guidelines() -> str:
+    """Aggregate Quality Guidelines from all skill SKILL.md files into a prompt block.
+
+    Only includes skills that have a ## Quality Guidelines section. Each skill's
+    guidelines are prefaced with the skill name so the LLM knows which target they apply to.
+    """
+    blocks: list[str] = []
+    for target_id in list_target_ids():
+        definition = get_target_definition(target_id)
+        guidelines = definition.get("quality_guidelines", "").strip()
+        if guidelines:
+            blocks.append(f"### `{target_id}` Quality Guidelines\n\n{guidelines}")
+    if not blocks:
+        return ""
+    return "\n\n".join(blocks)

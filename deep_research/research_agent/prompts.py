@@ -1,6 +1,6 @@
 """Prompt templates and tool descriptions for the research deepagent."""
 
-from research_agent.targets import format_target_catalog
+from research_agent.targets import format_target_catalog, format_target_quality_guidelines
 
 RESEARCH_WORKFLOW_INSTRUCTIONS = """# Research Workflow
 
@@ -88,6 +88,10 @@ You have access to specific research tools:
 Available target ids:
 {target_catalog}
 </Structured Output Targets>
+
+<Target Quality Guidelines>
+{target_quality_guidelines}
+</Target Quality Guidelines>
 
 <Instructions>
 Think like a human researcher with limited time. Follow these steps:
@@ -188,4 +192,5 @@ Your role is to coordinate research by delegating tasks from your TODO list to s
 RESEARCHER_INSTRUCTIONS = RESEARCHER_INSTRUCTIONS.format(
     date="{date}",
     target_catalog=format_target_catalog(),
+    target_quality_guidelines=format_target_quality_guidelines(),
 )

@@ -4,6 +4,7 @@ import sys
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 
 from deepagents.backends.utils import file_data_to_string
 from dotenv import load_dotenv
@@ -100,7 +101,7 @@ def extract_message_content(message):
     return str(content)
 
 
-def save_research_to_file(research_content, filename=None):
+def save_research_to_file(research_content, filename=None, output_folder=None):
     # Get current date
     current_date = datetime.now().strftime("%Y-%m-%d")
 
@@ -114,11 +115,19 @@ def save_research_to_file(research_content, filename=None):
     # Extract string content if a dictionary message was passed
     research_content = extract_message_content(research_content)
 
+    # Determine the full path for the file
+    if output_folder:
+        output_dir = Path(output_folder)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        file_path = output_dir / filename
+    else:
+        file_path = Path(filename)
+
     # Write the research content to the file
-    with open(filename, "w") as file:
+    with open(file_path, "w", encoding="utf-8") as file:
         file.write(research_content)
 
-    return filename
+    return str(file_path)
 
 
 def main():
@@ -269,9 +278,23 @@ def main():
 
     # Output the result. The agent usually writes to /final_report.md
     files = result.get("files", {})
+
+    # Determine output folder for final response
+    output_folder = None
+    if args.doc_folder:
+        doc_folder = Path(args.doc_folder)
+        try:
+            # Mirror the same logic as in tools.py for output subfolders
+            abs_doc_folder = doc_folder.resolve()
+            abs_cwd = Path.cwd().resolve()
+            rel_path = abs_doc_folder.relative_to(abs_cwd)
+            output_folder = Path("output") / rel_path
+        except ValueError:
+            output_folder = Path("output") / doc_folder.name
+
     if "/final_report.md" in files:
         file_content = file_data_to_string(files['/final_report.md'])
-        filename = save_research_to_file(file_content, title)
+        filename = save_research_to_file(file_content, title, output_folder=output_folder)
 
         print("\n" + "=" * 80)
         print(f"Final Report ({filename}):")
@@ -280,7 +303,7 @@ def main():
     else:
         # Fallback to the last message content
         last_message = result.get('messages', [])[-1]
-        filename = save_research_to_file(last_message, title)
+        filename = save_research_to_file(last_message, title, output_folder=output_folder)
         last_message_content = extract_message_content(last_message)
 
         print("\n" + "=" * 80)
