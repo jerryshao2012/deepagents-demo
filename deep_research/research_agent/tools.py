@@ -732,7 +732,7 @@ def render_target_output(
 
     if target_id == "golden-dataset":
         import csv
-        output_dir = Path(REPORTS_OUTPUT_FOLDER)
+        output_dir = Path(REPORTS_OUTPUT_FOLDER) / "golden_dataset"
 
         # Prepare items for CSV: ensure non-empty ID
         items = payload.get("items", [])
@@ -745,29 +745,6 @@ def render_target_output(
         # Re-render Markdown after potentially fixing IDs so that Markdown matches CSV
         rendered = _render_payload(definition["render"]["template"], payload, definition["render"]["spec"])
 
-        # Try to find doc_folder in the messages to determine the output subfolder
-        if state:
-            messages = state.get("messages", [])
-            for msg in messages:
-                content = getattr(msg, "content", "") if not isinstance(msg, dict) else msg.get("content", "")
-                if isinstance(content, str) and "read_doc_folder' tool to read supported documents from this folder first: '" in content:
-                    # Extract the folder path from the instruction message
-                    match = re.search(
-                        r"read_doc_folder' tool to read supported documents from this folder first: '(.+?)'",
-                        content)
-                    if match:
-                        folder_path = match.group(1)
-                        folder = Path(folder_path)
-                        try:
-                            # Use the same subfolder logic as read_doc_folder
-                            abs_folder = folder.resolve()
-                            abs_cwd = Path.cwd().resolve()
-                            rel_path = abs_folder.relative_to(abs_cwd)
-                            output_dir = output_dir / rel_path
-                        except ValueError:
-                            output_dir = output_dir / folder.name
-                        break
-
         output_dir.mkdir(parents=True, exist_ok=True)
         filename = re.sub(r"[^a-zA-Z0-9_\- ]", "", payload.get("dataset_name", "dataset")).strip().replace(" ",
                                                                                                            "_").lower()
@@ -776,7 +753,7 @@ def render_target_output(
 
         csv_path = output_dir / f"{filename}.csv"
         try:
-            with open(csv_path, 'w', encoding='utf-8', newline='') as f:
+            with open(csv_path, "w", encoding="utf-8", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow(["ID", "Coverage Area", "Question", "Answer", "Content"])
                 for item in items:
@@ -787,9 +764,19 @@ def render_target_output(
                         item.get("answer", ""),
                         item.get("content", ""),
                     ])
-            rendered += f"\n\n**Data exported to:** `{csv_path}`"
+            rendered += f"\n\n**CSV exported to:** `{csv_path}`"
         except Exception as e:
             rendered += f"\n\n**Error exporting to CSV:** {e}"
+            return rendered
+
+        # Automatically run metric scoring so the agent doesn't need a follow-up tool call
+        try:
+            from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import score_dataset_file
+            metrics_path = output_dir / f"{filename}-with-metrics.csv"
+            score_dataset_file(str(csv_path), str(metrics_path))
+            rendered += f"\n\n**Quality metrics saved to:** `{metrics_path}`"
+        except Exception as e:
+            rendered += f"\n\n**Metric evaluation failed (you can run it manually):** {e}"
 
     return rendered
 

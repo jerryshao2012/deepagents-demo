@@ -39,7 +39,11 @@ Do not do Step 3 or Step 4 (defined in the [Producing Golden Datasets](https://g
 - Do not invent citations or source references that are not supported by the provided materials
 
 Requirements:
-- **MANDATORY: when all items are ready, you MUST call `render_target_output` with target id `golden-dataset` and the complete JSON payload. A verbal summary is NOT acceptable as a substitute for the tool call.**
+- **COMPLETION SEQUENCE — follow these steps in order after all items are drafted:**
+  1. Call `render_target_output` with `target_id="golden-dataset"` and a JSON object containing `items`. This automatically exports a CSV to `output/` and returns the CSV path.
+  2. Call `trigger_dataset_evaluation` passing the CSV path returned in step 1.
+  3. Only after both tool calls succeed, write a brief summary to the user.
+  **Do NOT skip steps 1 or 2. A verbal description of the dataset is NOT a substitute for the tool calls.**
 - Produce a reviewable starter batch with exactly 12 items unless the user explicitly asks for a different count.
 - Questions must sound like realistic non-expert customer questions.
 - Every question must be self-contained and unambiguous.
