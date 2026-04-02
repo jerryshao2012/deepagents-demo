@@ -144,3 +144,13 @@ Before submitting, verify every item passes:
 - **Response completeness**: Each `draft_llm_response` must be substantive enough (3+ sentences) for a domain expert to meaningfully review and refine.
 - **Metric readiness**: The output must be directly exportable to a CSV in the `output/` directory with `Question` and `Answer` columns for scoring with `generate_quality_metrics.py`. `Content` is recommended, especially for better Groundedness evaluation.
 - **Schema compliance**: Output contains only schema-allowed fields (`dataset_name`, `domain`, `recommended_total_dataset_size`, `coverage_areas`, `items`, `id`, `coverage_area`, `question`, `draft_llm_response`, `content`).
+
+## Handling Large Scale Datasets
+
+If the `doc-folder` contains thousands of files or very large files (hundreds of GBs):
+
+1. **Tiered Discovery**: Call `read_doc_folder` once. If it returns a summary instead of full text, review the file list.
+2. **Selective Sampling**: Identify a representative subset of files (e.g., one from each major subfolder or topic-related filenames).
+3. **Specific Reading**: Use the `specific_files` parameter in `read_doc_folder` to read only those selected files.
+4. **Iterative Coverage**: If needed, repeat the process for different "coverage areas" to ensure the 12 items are well-distributed across the entire large dataset.
+5. **Summarization**: For very large individual documents, if they fail to read or are too long, focus on their executive summaries or introductions if available as separate files.

@@ -36,6 +36,8 @@ tavily_client = TavilyClient(session=tavily_session)
 SUPPORTED_DOC_SUFFIXES = {".pdf", ".txt", ".md", ".docx", ".pptx", ".xlsx"}
 
 REPORTS_OUTPUT_FOLDER = "output"
+MAX_FILES_TO_READ = 20
+MAX_TOTAL_SIZE_MB = 50
 
 
 def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float = 60.0) -> dict:
@@ -322,17 +324,23 @@ def think_tool(reflection: str) -> str:
 
 
 @tool(parse_docstring=True)
-def read_doc_folder(folder_path: str) -> str:
+def read_doc_folder(folder_path: str, specific_files: list[str] | None = None) -> str:
     """Read and extract text from supported documents in a given folder.
 
     Use this tool when you need to research from local documents instead of or in addition
     to web search. Supported file types are PDF, text, Markdown, Word, PowerPoint, and Excel.
 
+    If the folder contains a large number of files or the total size is very large,
+    this tool will return a summary of the contents instead of all text.
+    You can then use the `specific_files` argument to read particular documents of interest.
+
     Args:
         folder_path: The absolute or relative path to the folder containing document files.
+        specific_files: Optional list of filenames within the folder to read specifically.
+            If provided, only these files will be processed, bypassing general limits.
 
     Returns:
-        Extracted text from all supported documents or an error message.
+        Extracted text from supported documents, a summary for large folders, or an error message.
     """
     folder = Path(folder_path)
 
@@ -348,9 +356,13 @@ def read_doc_folder(folder_path: str) -> str:
     if not folder.is_dir():
         return f"Error: {folder_path} is not a folder."
 
-    extracted_text: list[str] = []
+    # Use a set for faster lookup if specific_files is provided
+    specific_set = set(specific_files) if specific_files else None
+
+    # Filter for supported files and potentially specific files
     supported_files = sorted(
-        file_path for file_path in folder.iterdir() if file_path.suffix.lower() in SUPPORTED_DOC_SUFFIXES
+        file_path for file_path in folder.iterdir()
+        if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_DOC_SUFFIXES
     )
 
     if not supported_files:
@@ -359,10 +371,35 @@ def read_doc_folder(folder_path: str) -> str:
             "Supported types: .pdf, .txt, .md, .docx, .pptx, .xlsx."
         )
 
+    # If specific files are requested, narrow the list down
+    if specific_set:
+        files_to_process = [f for f in supported_files if f.name in specific_set]
+        if not files_to_process:
+            return f"None of the requested files were found in {folder_path}. Available: {', '.join(f.name for f in supported_files[:10])}..."
+    else:
+        # Check limits for general folder reading
+        total_files = len(supported_files)
+        # Total size in MB (using lstat for speed)
+        total_size_mb = sum(f.lstat().st_size for f in supported_files) / (1024 * 1024)
+
+        if total_files > MAX_FILES_TO_READ or total_size_mb > MAX_TOTAL_SIZE_MB:
+            file_list = "\n".join(f"- {f.name} ({f.lstat().st_size / 1024:.1f} KB)" for f in supported_files[:50])
+            if total_files > 50:
+                file_list += f"\n... and {total_files - 50} more files."
+
+            return (
+                f"Folder {folder_path} is too large to read all at once ({total_files} files, {total_size_mb:.1f} MB).\n"
+                f"Limits are {MAX_FILES_TO_READ} files or {MAX_TOTAL_SIZE_MB} MB.\n\n"
+                "Please review the file list below and use the `specific_files` parameter to read the most relevant documents:\n\n"
+                f"{file_list}"
+            )
+        files_to_process = supported_files
+
+    extracted_text: list[str] = []
     processed_files: list[str] = []
     failed_files: list[str] = []
 
-    for file_path in supported_files:
+    for file_path in files_to_process:
         print(f"Processing document: {file_path.name}...")
         try:
             content = _extract_supported_document(file_path)
@@ -374,7 +411,7 @@ def read_doc_folder(folder_path: str) -> str:
             failed_files.append(file_path.name)
             extracted_text.append(f"--- Error reading {file_path.name}: {exc} ---\n")
 
-    summary_lines = [f"Processed {len(processed_files)}/{len(supported_files)} supported file(s) from {folder}."]
+    summary_lines = [f"Processed {len(processed_files)}/{len(files_to_process)} supported file(s) from {folder}."]
     if processed_files:
         summary_lines.append(f"Files processed: {', '.join(processed_files)}")
     if failed_files:
