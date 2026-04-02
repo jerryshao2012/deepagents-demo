@@ -47,6 +47,7 @@ Requirements:
 - Draft LLM responses should be helpful and plausible, but clearly framed as starting points for later expert review.
 - Keep each draft response concise but complete enough for a domain expert to refine.
 - If grounding is weak, narrow the question or add a short caveat inside the draft response rather than overstating certainty.
+- **Complete the full dataset in one pass. Do NOT stop mid-generation to ask the user which topics to prioritize, which areas to cover, or for any other confirmation. Make all topic and coverage choices autonomously based on the available documents.**
 - The rendered output should be easy to export into a CSV file in the `output/` directory with `Question` and `Answer` columns, plus `Content` when available.
 - Quality metrics such as `Similarity`, `Relevance`, `Coherence`, and `Groundedness` are generated after export by the bundled script at `scripts/generate_quality_metrics.py` targeting the CSV in the `output/` folder.
 - Include `content` for every item. This should be the supporting RAG content that best matches the question and draft answer and will be used later for meaningful `Groundedness` evaluation.
