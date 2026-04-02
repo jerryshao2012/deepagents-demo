@@ -39,6 +39,9 @@ REPORTS_OUTPUT_FOLDER = "output"
 MAX_FILES_TO_READ = 20
 MAX_TOTAL_SIZE_MB = 50
 
+# For output subfolder
+output_subfolder = os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER)
+
 
 def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float = 60.0) -> dict:
     api_key = os.getenv("TAVILY_API_KEY")
@@ -435,7 +438,6 @@ def read_doc_folder(folder_path: str, specific_files: list[str] | None = None) -
     # We want to avoid nested output folders like output/input/policy/
     # If the folder is a direct child of the current directory, use its name.
     # Otherwise, try to use a relatively clean name.
-    output_subfolder = Path(REPORTS_OUTPUT_FOLDER) / folder.name
 
     for file_path in files_to_process:
         target_path = _get_extracted_path(file_path, output_subfolder)
@@ -479,7 +481,7 @@ def save_research_report(report_title: str, content: str) -> str:
     Returns:
         str: Path to the saved report file
     """
-    output_dir = Path(REPORTS_OUTPUT_FOLDER)
+    output_dir = Path(output_subfolder)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Clean up the report title to make it filename-friendly
@@ -719,8 +721,8 @@ def render_target_output(
     except json.JSONDecodeError as exc:
         return f"Invalid JSON payload: {exc}"
 
-    payload = _coerce_integers(payload, definition["schema"])
     payload = _fill_defaults(target_id, payload)
+    payload = _coerce_integers(payload, definition["schema"])
 
     try:
         jsonschema.validate(instance=payload, schema=definition["schema"])
@@ -732,11 +734,13 @@ def render_target_output(
 
     if target_id == "golden-dataset":
         import csv
-        output_dir = Path(REPORTS_OUTPUT_FOLDER)
+
+        output_dir = Path(output_subfolder)
+        output_dir.mkdir(parents=True, exist_ok=True)
         if not output_dir.is_absolute():
-             # Ensure we use an absolute path relative to the script's directory or current working directory
-             # to avoid issues when the tool is called from different contexts.
-             output_dir = Path(__file__).parent.parent.resolve() / REPORTS_OUTPUT_FOLDER
+            # Ensure we use an absolute path relative to the script's directory or current working directory
+            # to avoid issues when the tool is called from different contexts.
+            output_dir = Path(__file__).parent.parent.resolve() / REPORTS_OUTPUT_FOLDER
 
         # Prepare items for CSV: ensure non-empty ID
         items = payload.get("items", [])

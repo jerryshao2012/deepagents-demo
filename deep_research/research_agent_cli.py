@@ -1,4 +1,5 @@
 import itertools
+import os
 import re
 import sys
 import threading
@@ -10,6 +11,7 @@ from deepagents.backends.utils import file_data_to_string
 from dotenv import load_dotenv
 
 from utils import str2bool, get_ssl_verify_config
+from research_agent.tools import REPORTS_OUTPUT_FOLDER
 
 # Load environment variables
 load_dotenv()
@@ -134,8 +136,8 @@ def save_research_to_file(research_content, filename=None, output_folder=None):
 
 def derive_output_folder(doc_folder: str | None) -> Path | None:
     if not doc_folder:
-        return None
-    return Path("output") / Path(doc_folder).name
+        return Path(REPORTS_OUTPUT_FOLDER)
+    return Path(REPORTS_OUTPUT_FOLDER) / Path(doc_folder).name
 
 
 def main():
@@ -176,6 +178,10 @@ def main():
     # Create SSL verification setting - CLI flag takes precedence over env var
     verify_ssl = get_ssl_verify_config()
     print(f"SSL Verification is set to: {verify_ssl}")
+
+    # Determine output folder for final response
+    output_folder = derive_output_folder(args.doc_folder)
+    os.environ.setdefault("OUTPUT_FOLDER", str(output_folder))
 
     # Run the agent based on verbose flag
     if args.verbose:
@@ -286,9 +292,6 @@ def main():
 
     # Output the result. The agent usually writes to /final_report.md
     files = result.get("files", {})
-
-    # Determine output folder for final response
-    output_folder = derive_output_folder(args.doc_folder)
 
     if "/final_report.md" in files:
         file_content = file_data_to_string(files['/final_report.md'])
