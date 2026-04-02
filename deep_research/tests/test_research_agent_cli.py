@@ -43,6 +43,16 @@ def test_build_instruction_for_interview_target() -> None:
     assert "45-minute interview" in instruction
 
 
+def test_build_instruction_for_golden_dataset_target() -> None:
+    instruction = build_instruction(
+        "HR policies", doc_folder="./docs", target="golden-dataset"
+    )
+
+    assert "golden-dataset" in instruction
+    assert "render_target_output" in instruction
+    assert "finalize_golden_dataset_output" in instruction
+
+
 def test_target_definition_is_loaded_from_skill() -> None:
     definition = get_target_definition("slides")
 

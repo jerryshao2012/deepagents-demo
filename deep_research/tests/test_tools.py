@@ -1,7 +1,11 @@
 from pathlib import Path
 
 from research_agent import tools
-from research_agent.tools import read_doc_folder, render_target_output
+from research_agent.tools import (
+    finalize_golden_dataset_output,
+    read_doc_folder,
+    render_target_output,
+)
 
 
 def test_render_target_output_renders_slides_from_definition() -> None:
@@ -250,12 +254,11 @@ def test_render_target_output_renders_golden_dataset_without_metric_fields() -> 
     assert "QnA Groundedness Evaluation" not in result
 
 
-def test_render_target_output_exports_golden_dataset_content_to_csv(tmp_path, monkeypatch) -> None:
+def test_finalize_golden_dataset_output_exports_content_to_csv(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(tools, "REPORTS_OUTPUT_FOLDER", str(tmp_path))
 
-    result = render_target_output.invoke(
+    result = finalize_golden_dataset_output.invoke(
         {
-            "target_id": "golden-dataset",
             "payload_json": """
             {
               "dataset_name": "HR Policy Starter",
@@ -276,6 +279,7 @@ def test_render_target_output_exports_golden_dataset_content_to_csv(tmp_path, mo
         }
     )
 
+    assert "CSV exported to" in result
     csv_path = tmp_path / "hr_policy_starter.csv"
     assert csv_path.exists()
     csv_text = csv_path.read_text(encoding="utf-8")
@@ -284,7 +288,7 @@ def test_render_target_output_exports_golden_dataset_content_to_csv(tmp_path, mo
     assert "Context" not in csv_text
 
 
-def test_render_target_output_exports_golden_dataset_and_runs_metrics(tmp_path, monkeypatch) -> None:
+def test_finalize_golden_dataset_output_runs_metrics(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(tools, "REPORTS_OUTPUT_FOLDER", str(tmp_path))
 
     def fake_score_dataset_file(input_csv: str, output_csv: str):
@@ -297,9 +301,8 @@ def test_render_target_output_exports_golden_dataset_and_runs_metrics(tmp_path, 
         fake_score_dataset_file,
     )
 
-    result = render_target_output.invoke(
+    result = finalize_golden_dataset_output.invoke(
         {
-            "target_id": "golden-dataset",
             "payload_json": """
             {
               "dataset_name": "HR Policy Starter",

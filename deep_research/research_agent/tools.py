@@ -694,6 +694,30 @@ def _render_payload(template: str, payload, render_spec: list[dict[str, object]]
     raise ValueError(f"Unsupported render template: {template}")
 
 
+def _prepare_validated_payload(
+        target_id: str, payload_json: str
+) -> tuple[dict | None, dict | None, str | None]:
+    """Parse JSON, apply defaults, validate against schema. Returns (definition, payload, error_message)."""
+    try:
+        definition = get_target_definition(target_id)
+    except ValueError as exc:
+        return None, None, str(exc)
+    try:
+        payload = json.loads(payload_json)
+    except json.JSONDecodeError as exc:
+        return None, None, f"Invalid JSON payload: {exc}"
+
+    payload = _fill_defaults(target_id, payload)
+    payload = _coerce_integers(payload, definition["schema"])
+
+    try:
+        jsonschema.validate(instance=payload, schema=definition["schema"])
+    except jsonschema.ValidationError as exc:
+        return None, None, f"Schema validation failed for target '{target_id}': {exc.message}"
+
+    return definition, payload, None
+
+
 @tool(parse_docstring=True)
 def render_target_output(
         target_id: str,
@@ -713,80 +737,62 @@ def render_target_output(
     Returns:
         Rendered markdown output or a validation error message.
     """
+    definition, payload, err = _prepare_validated_payload(target_id, payload_json)
+    if err:
+        return err
+
+    return _render_payload(definition["render"]["template"], payload, definition["render"]["spec"])
+
+
+@tool(parse_docstring=True)
+def finalize_golden_dataset_output(
+        payload_json: str,
+        state: Annotated[dict, InjectedState] = None,
+) -> str:
+    """Export a validated golden-dataset JSON payload to CSV and run quality metrics.
+
+    For the ``golden-dataset`` target, call this after ``render_target_output`` with the
+    same JSON. This writes the CSV under the output folder and runs metrics in one step.
+
+    Args:
+        payload_json: JSON object matching the golden-dataset schema (same payload as ``render_target_output``).
+        state: LangGraph state
+
+    Returns:
+        Paths to the exported CSV and metrics output, or a validation or runtime error message.
+    """
+    from research_agent.skills.golden_dataset.pipeline import (
+        GOLDEN_DATASET_TARGET_ID,
+        evaluate_golden_dataset_csv_file,
+        export_golden_dataset_csv,
+    )
+
+    _, payload, err = _prepare_validated_payload(GOLDEN_DATASET_TARGET_ID, payload_json)
+    if err:
+        return err
+
     try:
-        definition = get_target_definition(target_id)
-    except ValueError as exc:
-        return str(exc)
-    try:
-        payload = json.loads(payload_json)
-    except json.JSONDecodeError as exc:
-        return f"Invalid JSON payload: {exc}"
-
-    payload = _fill_defaults(target_id, payload)
-    payload = _coerce_integers(payload, definition["schema"])
-
-    try:
-        jsonschema.validate(instance=payload, schema=definition["schema"])
-    except jsonschema.ValidationError as exc:
-        return f"Schema validation failed for target '{target_id}': {exc.message}"
-
-    # Render initial Markdown
-    rendered = _render_payload(definition["render"]["template"], payload, definition["render"]["spec"])
-
-    if target_id == "golden-dataset":
-        import csv
-
-        # For output subfolder
         output_subfolder = Path(os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER))
-        output_subfolder.mkdir(parents=True, exist_ok=True)
-
-        # Prepare items for CSV: ensure non-empty ID
-        items = payload.get("items", [])
-        for idx, item in enumerate(items, start=1):
-            if not item.get("id") and not item.get("ID"):
-                item["id"] = str(idx)
-            elif item.get("ID") and not item.get("id"):
-                item["id"] = item["ID"]
-
-        # Re-render Markdown after potentially fixing IDs so that Markdown matches CSV
-        rendered = _render_payload(definition["render"]["template"], payload, definition["render"]["spec"])
-
-        filename = re.sub(r"[^a-zA-Z0-9_\- ]", "", payload.get("dataset_name", "dataset")).strip().replace(" ",
-                                                                                                           "_").lower()
-        if not filename:
-            filename = "golden_dataset"
-
-        csv_path = output_subfolder / f"{filename}.csv"
-        try:
-            with open(csv_path, "w", encoding="utf-8", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["ID", "Coverage Area", "Question", "Answer", "Content"])
-                for item in items:
-                    writer.writerow([
-                        item.get("id", ""),
-                        item.get("coverage_area", ""),
-                        item.get("question", ""),
-                        item.get("answer", ""),
-                        item.get("content", ""),
-                    ])
-            rendered += f"\n\n**CSV exported to:** `{csv_path}`"
-
-            # Trigger dataset evaluation after CSV generation
-            evaluation_result = trigger_dataset_evaluation.run(str(csv_path))
-            rendered += f"\n\n**Evaluation:** {evaluation_result}"
-        except Exception as e:
-            rendered += f"\n\n**Error exporting to CSV:** {e}"
-            return rendered
-
-    return rendered
+        csv_path = export_golden_dataset_csv(payload, output_subfolder)
+        evaluation_result = evaluate_golden_dataset_csv_file(str(csv_path))
+        return (
+            f"**CSV exported to:** `{csv_path}`\n\n"
+            f"**Evaluation:** {evaluation_result}"
+        )
+    except Exception as e:
+        return f"**Error exporting or evaluating golden dataset:** {e}"
 
 
+@tool(parse_docstring=True)
 def trigger_dataset_evaluation(file_path: str) -> str:
     """Evaluate a generated golden dataset CSV to compute quality metrics.
 
-    Run this tool only after you have successfully generated a golden dataset 
+    Run this tool only after you have successfully generated a golden dataset
     and received the CSV file path locally in your output folder. This runs a heavy
     evaluation script to compute Similarity, Relevance, Coherence, and Groundedness.
+
+    For new datasets, prefer ``finalize_golden_dataset_output``, which exports the CSV
+    and runs this evaluation in order. Use this tool to re-run metrics on an existing CSV.
 
     Args:
         file_path: The path to the CSV file to evaluate (e.g., "output/golden_dataset.csv").
@@ -794,14 +800,6 @@ def trigger_dataset_evaluation(file_path: str) -> str:
     Returns:
         The result of the quality metric evaluation, including the path to the scored dataset.
     """
-    path_obj = Path(file_path)
-    if not path_obj.exists():
-        return f"File not found: {file_path}"
+    from research_agent.skills.golden_dataset.pipeline import evaluate_golden_dataset_csv_file
 
-    try:
-        from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import score_dataset_file
-        output_csv = str(path_obj.with_name(f"{path_obj.stem}-with-metrics{path_obj.suffix}"))
-        result_path = score_dataset_file(str(path_obj), output_csv)
-        return f"Successfully evaluated dataset. Metrics saved to: {result_path}"
-    except Exception as exc:
-        return f"Failed to run metric evaluation: {exc}"
+    return evaluate_golden_dataset_csv_file(file_path)

@@ -160,4 +160,5 @@ The deep research agent adds the following custom tools beyond the built-in deep
 | `think_tool` | Strategic reflection mechanism that helps the agent pause and assess progress between searches, analyze findings, identify gaps, and plan next steps. |
 | `read_doc_folder` | Extracts text content from supported local files in a specified folder. Supports `.pdf`, `.txt`, `.md`, `.docx`, `.pptx`, and `.xlsx`. |
 | `render_target_output` | Generic target renderer that loads a target skill from `research_agent/skills/*/SKILL.md`, validates the provided JSON payload against that target's schema, and renders the final Markdown output. |
-| `trigger_dataset_evaluation` | Evaluates a generated golden dataset CSV to compute quality metrics (Similarity, Relevance, Coherence, Groundedness) using the bundled metric script and saves the result to a new CSV file. |
+| `finalize_golden_dataset_output` | Golden-dataset only: validates the same JSON as `render_target_output`, exports a CSV under `output/` via `skills/golden_dataset/pipeline.py`, then runs quality metrics so export and evaluation always happen in order. |
+| `trigger_dataset_evaluation` | Evaluates an existing golden dataset CSV (or use after export); computes quality metrics using the bundled script. Prefer `finalize_golden_dataset_output` for new datasets. |

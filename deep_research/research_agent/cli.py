@@ -116,5 +116,11 @@ def build_instruction(
             "\nAfter researching, please call `render_target_output` with the selected "
             "target id and a JSON payload that matches that target schema exactly."
         )
+        if target == "golden-dataset":
+            instruction += (
+                "\n\n**Golden dataset delivery:** Immediately after a successful "
+                "`render_target_output` call, call `finalize_golden_dataset_output` with the "
+                "same JSON payload so the CSV is written and metrics run in order."
+            )
 
     return instruction

@@ -10,6 +10,7 @@ from research_agent.prompts import (
     SUBAGENT_DELEGATION_INSTRUCTIONS,
 )
 from research_agent.tools import (
+    finalize_golden_dataset_output,
     read_doc_folder,
     render_target_output,
     tavily_search,
@@ -22,6 +23,7 @@ __all__ = [
     "think_tool",
     "read_doc_folder",
     "render_target_output",
+    "finalize_golden_dataset_output",
     "trigger_dataset_evaluation",
     "RESEARCHER_INSTRUCTIONS",
     "RESEARCH_WORKFLOW_INSTRUCTIONS",
