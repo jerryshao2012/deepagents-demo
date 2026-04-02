@@ -94,6 +94,7 @@ def _parse_skill_file(path: Path) -> dict[str, Any]:
             "quality_guidelines": _extract_quality_guidelines(body),
             "schema": schema,
             "render": {"template": render_template, "spec": render_spec},
+            "defaults": frontmatter.get("defaults", {}),
             "skill_path": str(path),
         }
     }

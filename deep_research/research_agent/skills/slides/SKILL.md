@@ -3,6 +3,10 @@ name: slides
 title: Learning Slides
 description: Quick-learning presentation markup with fewer than 5 slides and speaking notes.
 render_template: markdown_blocks
+defaults:
+  - field: topic
+    if_null: true
+    value: derive_topic
 ---
 
 ## Instructions
@@ -21,7 +25,7 @@ Create concise Markdown presentation content for quick learning.
 ```json
 {
   "type": "object",
-  "required": ["topic", "slides"],
+  "required": ["slides"],
   "additionalProperties": false,
   "properties": {
     "topic": {

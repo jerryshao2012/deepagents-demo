@@ -599,6 +599,90 @@ def _render_blocks(spec: list[dict[str, object]], context: dict[str, object]) ->
     return output
 
 
+def _fill_defaults(target_id: str, payload: dict) -> dict:
+    """Supply sensible default values for optional metadata fields before schema validation.
+
+    This prevents the LLM from failing validation on non-critical header fields and
+    eliminates the need to ask the user for things like dataset_name or topic.
+    """
+    definition = get_target_definition(target_id)
+    defaults = definition.get("defaults", [])
+    if not isinstance(defaults, list):
+        # Fallback if someone used a dict for some reason
+        return payload
+
+    # Pre-extract items if needed by rules
+    # This helps with legacy support or unified access to 'questions', 'slides', etc.
+    items = payload.get("items") or payload.get("questions") or payload.get("slides") or []
+
+    for rule in defaults:
+        field = rule.get("field")
+        if not field:
+            continue
+
+        condition = rule.get("if_null", False)
+        if condition and payload.get(field):
+            continue
+
+        expr = rule.get("value")
+        if not expr:
+            continue
+
+        # Evaluate simple expressions or built-ins
+        if expr == "items":
+            payload[field] = items
+        elif expr.startswith("first_of:"):
+            fields = expr[9:].split(",")
+            for f in fields:
+                val = payload.get(f.strip())
+                if val:
+                    if isinstance(val, list) and len(val) > 0:
+                        payload[field] = val[0]
+                    else:
+                        payload[field] = val
+                    break
+        elif expr == "collect_unique:coverage_area":
+            seen: list[str] = []
+            for item in items:
+                area = item.get("coverage_area", "")
+                if area and area not in seen:
+                    seen.append(area)
+            payload[field] = seen or ["General"]
+        elif expr == "derive_dataset_name":
+            domain = payload.get("domain", "")
+            areas = payload.get("coverage_areas") or []
+            if domain:
+                payload[field] = f"{domain} Q&A Draft Set"
+            elif areas:
+                payload[field] = f"{areas[0]} Q&A Draft Set"
+            else:
+                payload[field] = "Golden Dataset Draft Set"
+        elif expr == "derive_topic":
+            first_val = ""
+            if items:
+                # Try common fields for topic derivation
+                first_val = items[0].get("question") or items[0].get("title") or ""
+            payload[field] = (first_val[:80] if first_val else "General")
+        elif expr == "derive_objective":
+            topic = payload.get("topic", "the subject")
+            payload[field] = f"Assess knowledge and practical experience related to {topic}."
+        elif expr == "dataset_size_calc":
+            payload[field] = max(50, len(items) * 4)
+        elif expr == "ensure_item_ids":
+            for idx, item in enumerate(items, start=1):
+                if not item.get("id"):
+                    item["id"] = str(idx)
+        elif expr == "ensure_item_content":
+            for item in items:
+                if "content" not in item:
+                    item["content"] = ""
+        else:
+            # Simple literal string or fallback
+            payload[field] = expr
+
+    return payload
+
+
 def _render_payload(template: str, payload, render_spec: list[dict[str, object]]) -> str:
     if template == "markdown_blocks":
         context = {"root": payload, "item": payload, "index": 1}
@@ -636,6 +720,7 @@ def render_target_output(
         return f"Invalid JSON payload: {exc}"
 
     payload = _coerce_integers(payload, definition["schema"])
+    payload = _fill_defaults(target_id, payload)
 
     try:
         jsonschema.validate(instance=payload, schema=definition["schema"])

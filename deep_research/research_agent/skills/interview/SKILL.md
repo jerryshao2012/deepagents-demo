@@ -3,6 +3,13 @@ name: interview
 title: Interview Kit
 description: A grounded 45-minute interview question kit with time-boxed questions and follow-up prompts.
 render_template: markdown_blocks
+defaults:
+  - field: topic
+    if_null: true
+    value: derive_topic
+  - field: objective
+    if_null: true
+    value: derive_objective
 ---
 
 ## Instructions
@@ -35,7 +42,7 @@ Requirements:
 ```json
 {
   "type": "object",
-  "required": ["topic", "objective", "questions"],
+  "required": ["questions"],
   "additionalProperties": false,
   "properties": {
     "topic": {

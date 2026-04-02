@@ -3,6 +3,26 @@ name: golden-dataset
 title: Golden Dataset Starter
 description: Produce a Golden Dataset starter pack with realistic customer questions and draft LLM answers only. Use for deep research outputs that should cover Golden Dataset steps 1 and 2, then score the exported CSV separately with the bundled quality-metrics script.
 render_template: markdown_blocks
+defaults:
+  - field: domain
+    if_null: true
+    value: "first_of: domain, coverage_areas"
+  - field: domain
+    if_null: true
+    value: General
+  - field: coverage_areas
+    if_null: true
+    value: "collect_unique:coverage_area"
+  - field: dataset_name
+    if_null: true
+    value: derive_dataset_name
+  - field: recommended_total_dataset_size
+    if_null: true
+    value: dataset_size_calc
+  - field: items
+    value: ensure_item_ids
+  - field: items
+    value: ensure_item_content
 ---
 
 ## Instructions
@@ -43,13 +63,7 @@ Requirements:
 ```json
 {
   "type": "object",
-  "required": [
-    "dataset_name",
-    "domain",
-    "recommended_total_dataset_size",
-    "coverage_areas",
-    "items"
-  ],
+  "required": ["items"],
   "additionalProperties": false,
   "properties": {
     "dataset_name": {
@@ -77,8 +91,7 @@ Requirements:
           "id",
           "coverage_area",
           "question",
-          "draft_llm_response",
-          "content"
+          "draft_llm_response"
         ],
         "additionalProperties": false,
         "properties": {
