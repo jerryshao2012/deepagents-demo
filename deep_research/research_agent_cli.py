@@ -283,14 +283,8 @@ def main():
     output_folder = None
     if args.doc_folder:
         doc_folder = Path(args.doc_folder)
-        try:
-            # Mirror the same logic as in tools.py for output subfolders
-            abs_doc_folder = doc_folder.resolve()
-            abs_cwd = Path.cwd().resolve()
-            rel_path = abs_doc_folder.relative_to(abs_cwd)
-            output_folder = Path("output") / rel_path
-        except ValueError:
-            output_folder = Path("output") / doc_folder.name
+        # Mirror the same logic as in tools.py for output subfolders
+        output_folder = Path("output") / doc_folder.name
 
     if "/final_report.md" in files:
         file_content = file_data_to_string(files['/final_report.md'])

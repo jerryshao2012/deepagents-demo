@@ -416,16 +416,10 @@ def read_doc_folder(folder_path: str, specific_files: list[str] | None = None) -
     failed_files: list[str] = []
 
     # Determine output subfolder based on input folder_path
-    # Try to get a relative path if it's within the current directory
-    try:
-        # Resolve to absolute path first to handle relative inputs correctly
-        abs_folder = folder.resolve()
-        abs_cwd = Path.cwd().resolve()
-        rel_path = abs_folder.relative_to(abs_cwd)
-        output_subfolder = Path(REPORTS_OUTPUT_FOLDER) / rel_path
-    except ValueError:
-        # If not relative to CWD, just use the folder name as subfolder
-        output_subfolder = Path(REPORTS_OUTPUT_FOLDER) / folder.name
+    # We want to avoid nested output folders like output/input/policy/
+    # If the folder is a direct child of the current directory, use its name.
+    # Otherwise, try to use a relatively clean name.
+    output_subfolder = Path(REPORTS_OUTPUT_FOLDER) / folder.name
 
     for file_path in files_to_process:
         target_path = _get_extracted_path(file_path, output_subfolder)

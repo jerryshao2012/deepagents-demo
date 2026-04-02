@@ -35,7 +35,8 @@ Requirements:
   - `Relevance`: measures how relevant the response is to the question and context. Scale `0-100`. Suggested goal: `60+`.
   - `Coherence`: measures the quality of the sentences and how naturally they fit together. Scale `1-5`. Suggested goal: `3+`.
   - `Groundedness`: measures how verifiable the answer is against the provided context. Scale `1-5`. Suggested goal: `3+`.
-- Return the final result by calling `render_target_output` with JSON that strictly matches the schema below.
+ - Return the final result by calling `render_target_output` with JSON that strictly matches the schema below.
+ - **Important**: The schema distinguishes between `coverage_areas` (plural) at the top level and `coverage_area` (singular) for each individual item. Both are required in their respective locations.
 
 ## Schema
 
@@ -143,7 +144,9 @@ Before submitting, verify every item passes:
 - **Draft framing**: Draft responses must be clearly framed as starting points — do not present them as validated expert answers.
 - **Response completeness**: Each `draft_llm_response` must be substantive enough (3+ sentences) for a domain expert to meaningfully review and refine.
 - **Metric readiness**: The output must be directly exportable to a CSV in the `output/` directory with `Question` and `Answer` columns for scoring with `generate_quality_metrics.py`. `Content` is recommended, especially for better Groundedness evaluation.
-- **Schema compliance**: Output contains only schema-allowed fields (`dataset_name`, `domain`, `recommended_total_dataset_size`, `coverage_areas`, `items`, `id`, `coverage_area`, `question`, `draft_llm_response`, `content`).
+- **Schema compliance**: Output contains only schema-allowed fields:
+   - Top-level: `dataset_name`, `domain`, `recommended_total_dataset_size`, `coverage_areas` (array), `items`.
+   - Item-level: `id`, `coverage_area` (string), `question`, `draft_llm_response`, `content`.
 - **Sequential IDs**: Ensure `id` for each item is a sequential string starting from "1".
 
 ### Handling Large Scale Datasets
