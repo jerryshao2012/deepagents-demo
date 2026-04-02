@@ -533,13 +533,14 @@ def render_target_output(target_id: str, payload_json: str) -> str:
         try:
             with open(csv_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(["ID", "Coverage Area", "Question", "Answer"])
+                writer.writerow(["ID", "Coverage Area", "Question", "Answer", "Content"])
                 for item in payload.get("items", []):
                     writer.writerow([
                         item.get("id", ""),
                         item.get("coverage_area", ""),
                         item.get("question", ""),
-                        item.get("draft_llm_response", "")
+                        item.get("draft_llm_response", ""),
+                        item.get("content", ""),
                     ])
             rendered += f"\n\n**Data exported to:** `{csv_path}`"
         except Exception as e:

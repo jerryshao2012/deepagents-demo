@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from research_agent import tools
 from research_agent.tools import read_doc_folder, render_target_output
 
 
@@ -230,7 +231,8 @@ def test_render_target_output_renders_golden_dataset_without_metric_fields() -> 
                   "id": "Q1",
                   "coverage_area": "Leave",
                   "question": "How do I request parental leave under the employee handbook?",
-                  "draft_llm_response": "You would typically start by reviewing the leave policy and then submitting the required request through HR."
+                  "draft_llm_response": "You would typically start by reviewing the leave policy and then submitting the required request through HR.",
+                  "content": "The employee handbook leave section explains eligibility, notice periods, and HR approval steps."
                 }
               ]
             }
@@ -243,8 +245,43 @@ def test_render_target_output_renders_golden_dataset_without_metric_fields() -> 
     assert "### Q1. Leave" in result
     assert "Question: How do I request parental leave under the employee handbook?" in result
     assert "Answer:" in result
+    assert "Content:" in result
     assert "QnA Similarity Evaluation" not in result
     assert "QnA Groundedness Evaluation" not in result
+
+
+def test_render_target_output_exports_golden_dataset_content_to_csv(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(tools, "REPORTS_OUTPUT_FOLDER", str(tmp_path))
+
+    result = render_target_output.invoke(
+        {
+            "target_id": "golden_dataset",
+            "payload_json": """
+            {
+              "dataset_name": "HR Policy Starter",
+              "domain": "Employee handbook and HR policy",
+              "recommended_total_dataset_size": 150,
+              "coverage_areas": ["Leave"],
+              "items": [
+                {
+                  "id": "Q1",
+                  "coverage_area": "Leave",
+                  "question": "How do I request parental leave under the employee handbook?",
+                  "draft_llm_response": "You would typically start by reviewing the leave policy and then submitting the required request through HR.",
+                  "content": "The handbook explains eligibility, notice periods, and HR approval steps."
+                }
+              ]
+            }
+            """,
+        }
+    )
+
+    csv_path = tmp_path / "hr_policy_starter.csv"
+    assert csv_path.exists()
+    csv_text = csv_path.read_text(encoding="utf-8")
+    assert "Content" in csv_text
+    assert "eligibility, notice periods, and HR approval steps" in csv_text
+    assert "Context" not in csv_text
 
 
 def test_read_doc_folder_reads_text_and_markdown_files(tmp_path: Path) -> None:

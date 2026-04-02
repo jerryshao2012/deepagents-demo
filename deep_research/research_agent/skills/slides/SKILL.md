@@ -64,7 +64,7 @@ Create concise Markdown presentation content for quick learning.
     { "type": "heading", "level": 2, "value": "Slide {index}: {item.title}" },
     { "type": "bullet_list", "path": "item.bullets" },
     { "type": "if_present", "path": "item.speaker_notes", "body": [
-      { "type": "heading", "level": 3, "value": "Speaking Notes" },
+      { "type": "heading", "level": 5, "value": "Speaking Notes" },
       { "type": "text", "value": "{item.speaker_notes}" }
     ]}
   ]}
@@ -75,7 +75,7 @@ Create concise Markdown presentation content for quick learning.
 
 Before submitting, verify every item passes:
 
-- **Slide count**: The presentation contains at most 2 slides (enforced by `maxItems: 5` in the schema).
+- **Slide count**: The presentation contains at most 5 slides (enforced by `maxItems: 5` in the schema).
 - **Grounding**: Every bullet point and speaking note must be traceable to the provided documents or research findings. Do not invent unsupported claims.
 - **No filler content**: Remove generic bullets such as "In conclusion…" or "As we can see…" that add no informational value.
 - **Title clarity**: Each slide title should clearly describe the content of that slide in fewer than 10 words.

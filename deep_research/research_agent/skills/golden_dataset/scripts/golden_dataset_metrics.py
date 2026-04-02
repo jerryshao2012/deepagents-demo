@@ -36,6 +36,10 @@ METRIC_GUIDANCE = {
     name: f"{details['description']} Score on a scale of {details['scale']} Suggested goal: {details['goal']}."
     for name, details in _CONFIG["metrics"].items()
 }
+METRIC_RANGES = {
+    name: (details["min"], details["max"])
+    for name, details in _CONFIG["metrics"].items()
+}
 
 
 def parse_metric_scores(response_text: str) -> dict[str, float]:
@@ -46,13 +50,20 @@ def parse_metric_scores(response_text: str) -> dict[str, float]:
         match = re.search(pattern, response_text, re.IGNORECASE)
         if not match:
             raise ValueError(f"Missing metric '{metric_name}' in judge response: {response_text}")
-        metrics[metric_name] = float(match.group(1))
+        value = float(match.group(1))
+        min_value, max_value = METRIC_RANGES[metric_name]
+        if value < min_value or value > max_value:
+            raise ValueError(
+                f"Metric '{metric_name}' value {value} is outside the allowed range "
+                f"{min_value}-{max_value}."
+            )
+        metrics[metric_name] = value
     return metrics
 
 
-def build_judge_prompt(question: str, answer: str, context: str = "") -> str:
+def build_judge_prompt(question: str, answer: str, content: str = "") -> str:
     """Create a deterministic judge prompt for the four dataset metrics."""
-    context_block = context.strip() or "No grounding context was provided."
+    content_block = content.strip() or "No grounding content was provided."
     metric_guidance_lines = "\n".join(
         f"- {metric_name}: {METRIC_GUIDANCE[metric_name]}" for metric_name in METRIC_NAMES
     )
@@ -60,7 +71,7 @@ def build_judge_prompt(question: str, answer: str, context: str = "") -> str:
         metric_guidance_lines=metric_guidance_lines,
         question=question.strip(),
         answer=answer.strip(),
-        context=context_block,
+        content=content_block,
     )
 
 
@@ -69,7 +80,7 @@ def score_row(model, row: dict[str, str]) -> dict[str, float]:
     prompt = build_judge_prompt(
         question=row["Question"],
         answer=row["Answer"],
-        context=row.get("Context", ""),
+        content=row.get("Content", ""),
     )
     response = model.invoke([HumanMessage(content=prompt)])
     content = getattr(response, "content", response)
@@ -86,6 +97,26 @@ def validate_input_columns(fieldnames: Iterable[str] | None) -> None:
         raise ValueError(
             "Input dataset is missing required columns: " + ", ".join(missing)
         )
+
+
+def build_missing_content_report(rows: Iterable[dict[str, str]]) -> str:
+    """Build a small warning report for rows that are missing grounding content."""
+    missing_rows: list[str] = []
+    for index, row in enumerate(rows, start=1):
+        content = (row.get("Content") or row.get("content") or "").strip()
+        if content:
+            continue
+        row_id = (row.get("ID") or row.get("id") or f"row-{index}").strip()
+        question = (row.get("Question") or row.get("question") or "").strip()
+        question_preview = question[:80] + ("..." if len(question) > 80 else "")
+        missing_rows.append(f"- {row_id}: {question_preview}")
+
+    if not missing_rows:
+        return "All rows include Content."
+
+    header = f"Warning: {len(missing_rows)} row(s) are missing Content."
+    guidance = "Groundedness scoring is less reliable for these rows because the supporting RAG content is absent."
+    return "\n".join([header, guidance, *missing_rows])
 
 
 def score_dataset_file(input_csv: str, output_csv: str) -> Path:

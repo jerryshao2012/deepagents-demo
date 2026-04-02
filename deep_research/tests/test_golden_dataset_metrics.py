@@ -1,4 +1,5 @@
 from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import (
+    build_missing_content_report,
     build_judge_prompt,
     parse_metric_scores,
 )
@@ -43,7 +44,7 @@ def test_build_judge_prompt_includes_metric_descriptions_and_goals() -> None:
     prompt = build_judge_prompt(
         question="What is the parental leave policy?",
         answer="Employees should review the handbook and submit a request to HR.",
-        context="The handbook explains leave policy and approval steps.",
+        content="The handbook explains leave policy and approval steps.",
     )
 
     assert "Measures how similar the response is to a human expert answer" in prompt
@@ -51,3 +52,37 @@ def test_build_judge_prompt_includes_metric_descriptions_and_goals() -> None:
     assert "Suggested goal: 60+" in prompt
     assert "Measures the quality of all sentences" in prompt
     assert "Measures how grounded the answer is against the provided context" in prompt
+
+
+def test_parse_metric_scores_rejects_out_of_range_values() -> None:
+    try:
+        parse_metric_scores(
+            """
+            Similarity: 9
+            Relevance: 81
+            Coherence: 4
+            Groundedness: 3
+            """
+        )
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("Expected ValueError for out-of-range metric")
+
+    assert "Similarity" in message
+    assert "range" in message
+
+
+def test_build_missing_content_report_flags_rows_without_content() -> None:
+    report = build_missing_content_report(
+        [
+            {"ID": "Q1", "Question": "What is parental leave?", "Content": ""},
+            {"ID": "Q2", "Question": "How do I enroll in benefits?", "Content": "Benefits guide section 4"},
+            {"ID": "Q3", "Question": "How do I request PTO?", "Content": "   "},
+        ]
+    )
+
+    assert "2 row(s) are missing Content" in report
+    assert "Q1" in report
+    assert "Q3" in report
+    assert "Q2" not in report

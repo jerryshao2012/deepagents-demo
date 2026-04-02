@@ -4,9 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import csv
 from pathlib import Path
 
-from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import score_dataset_file
+from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import (
+    build_missing_content_report,
+    score_dataset_file,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -18,6 +22,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-csv",
         help="Path to write the enriched CSV. Defaults to <input>-with-metrics.csv.",
     )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="Print a warning report for rows that are missing Content.",
+    )
+    parser.add_argument(
+        "--report-file",
+        help="Optional path to also write the missing-Content warning report.",
+    )
     return parser
 
 
@@ -26,12 +39,33 @@ def default_output_path(input_csv: str) -> str:
     return str(input_path.with_name(f"{input_path.stem}-with-metrics{input_path.suffix}"))
 
 
+def default_report_path(input_csv: str) -> str:
+    input_path = Path(input_csv)
+    return str(input_path.with_name(f"{input_path.stem}-content-report.txt"))
+
+
+def load_rows(input_csv: str) -> list[dict[str, str]]:
+    input_path = Path(input_csv)
+    with input_path.open("r", encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     output_csv = args.output_csv or default_output_path(args.input_csv)
     result = score_dataset_file(args.input_csv, output_csv)
     print(f"Wrote scored dataset to {result}")
+    if args.report:
+        report = build_missing_content_report(load_rows(args.input_csv))
+        print(report)
+        if args.report_file:
+            report_path = Path(args.report_file)
+        else:
+            report_path = Path(default_report_path(args.input_csv))
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(report + "\n", encoding="utf-8")
+        print(f"Wrote content report to {report_path}")
 
 
 if __name__ == "__main__":
