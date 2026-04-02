@@ -598,7 +598,11 @@ def _render_payload(template: str, payload, render_spec: list[dict[str, object]]
 
 
 @tool(parse_docstring=True)
-def render_target_output(target_id: str, payload_json: str) -> str:
+def render_target_output(
+        target_id: str,
+        payload_json: str,
+        state: Annotated[dict, InjectedState] = None,
+) -> str:
     """Render structured target output using a reusable target definition.
 
     Use this tool for any structured output target. Provide the target id and a JSON
@@ -607,6 +611,7 @@ def render_target_output(target_id: str, payload_json: str) -> str:
     Args:
         target_id: The target definition id to use for validation and rendering.
         payload_json: A JSON object string matching the target schema.
+        state: LangGraph state
 
     Returns:
         Rendered markdown output or a validation error message.
@@ -627,11 +632,47 @@ def render_target_output(target_id: str, payload_json: str) -> str:
     except jsonschema.ValidationError as exc:
         return f"Schema validation failed for target '{target_id}': {exc.message}"
 
+    # Render initial Markdown
     rendered = _render_payload(definition["render"]["template"], payload, definition["render"]["spec"])
 
     if target_id == "golden-dataset":
         import csv
         output_dir = Path(REPORTS_OUTPUT_FOLDER)
+
+        # Prepare items for CSV: ensure non-empty ID
+        items = payload.get("items", [])
+        for idx, item in enumerate(items, start=1):
+            if not item.get("id") and not item.get("ID"):
+                item["id"] = str(idx)
+            elif item.get("ID") and not item.get("id"):
+                item["id"] = item["ID"]
+
+        # Re-render Markdown after potentially fixing IDs so that Markdown matches CSV
+        rendered = _render_payload(definition["render"]["template"], payload, definition["render"]["spec"])
+
+        # Try to find doc_folder in the messages to determine the output subfolder
+        if state:
+            messages = state.get("messages", [])
+            for msg in messages:
+                content = getattr(msg, "content", "") if not isinstance(msg, dict) else msg.get("content", "")
+                if isinstance(content, str) and "read_doc_folder' tool to read supported documents from this folder first: '" in content:
+                    # Extract the folder path from the instruction message
+                    match = re.search(
+                        r"read_doc_folder' tool to read supported documents from this folder first: '(.+?)'",
+                        content)
+                    if match:
+                        folder_path = match.group(1)
+                        folder = Path(folder_path)
+                        try:
+                            # Use the same subfolder logic as read_doc_folder
+                            abs_folder = folder.resolve()
+                            abs_cwd = Path.cwd().resolve()
+                            rel_path = abs_folder.relative_to(abs_cwd)
+                            output_dir = output_dir / rel_path
+                        except ValueError:
+                            output_dir = output_dir / folder.name
+                        break
+
         output_dir.mkdir(parents=True, exist_ok=True)
         filename = re.sub(r"[^a-zA-Z0-9_\- ]", "", payload.get("dataset_name", "dataset")).strip().replace(" ",
                                                                                                            "_").lower()
@@ -643,7 +684,7 @@ def render_target_output(target_id: str, payload_json: str) -> str:
             with open(csv_path, 'w', encoding='utf-8', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(["ID", "Coverage Area", "Question", "Answer", "Content"])
-                for item in payload.get("items", []):
+                for item in items:
                     writer.writerow([
                         item.get("id", ""),
                         item.get("coverage_area", ""),
