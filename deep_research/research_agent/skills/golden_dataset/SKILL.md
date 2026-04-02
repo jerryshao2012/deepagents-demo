@@ -27,7 +27,7 @@ Requirements:
 - Draft LLM responses should be helpful and plausible, but clearly framed as starting points for later expert review.
 - Keep each draft response concise but complete enough for a domain expert to refine.
 - If grounding is weak, narrow the question or add a short caveat inside the draft response rather than overstating certainty.
-- The rendered output should be easy to export into a CSV file in the `output/` directory with `Question`, `Answer`, and `Content` columns.
+- The rendered output should be easy to export into a CSV file in the `output/` directory with `Question` and `Answer` columns, plus `Content` when available.
 - Quality metrics such as `Similarity`, `Relevance`, `Coherence`, and `Groundedness` are generated after export by the bundled script at `scripts/generate_quality_metrics.py` targeting the CSV in the `output/` folder.
 - Include `content` for every item. This should be the supporting RAG content that best matches the question and draft answer and will be used later for meaningful `Groundedness` evaluation.
 - Treat the following metric guidance as best practice during evaluation:
@@ -121,7 +121,7 @@ Requirements:
     { "type": "text", "value": "Content: {item.content}" }
   ]},
   { "type": "heading", "level": 2, "value": "Scoring Workflow" },
-  { "type": "text", "value": "After exporting a CSV with Question, Answer, and Content columns to the `output/` directory, run `python research_agent/skills/golden_dataset/scripts/generate_quality_metrics.py output/<input.csv>` from the deep_research folder to append Similarity, Relevance, Coherence, and Groundedness columns. Content is required because Groundedness should be judged against the supporting RAG material." },
+  { "type": "text", "value": "After exporting a CSV with Question and Answer columns to the `output/` directory, run `python research_agent/skills/golden_dataset/scripts/generate_quality_metrics.py output/<input.csv>` from the deep_research folder to append Similarity, Relevance, Coherence, and Groundedness columns. Content is optional for metric calculation, but recommended because Groundedness is stronger when judged against supporting RAG material." },
   { "type": "text", "value": "Evaluation best practice: Similarity measures closeness to a human expert answer on a 1-5 scale with a suggested goal of 3+. Relevance measures how well the answer addresses the question and content on a 0-100 scale with a suggested goal of 60+. Coherence measures how naturally the sentences fit together on a 1-5 scale with a suggested goal of 3+. Groundedness measures how verifiable the answer is against the provided content on a 1-5 scale with a suggested goal of 3+." },
   { "type": "heading", "level": 2, "value": "Reviewer Note" },
   { "type": "text", "value": "These draft responses cover Golden Dataset steps 1 and 2 only. A domain expert should review and replace them with authoritative expert answers before evaluation use." }
@@ -142,5 +142,5 @@ Before submitting, verify every item passes:
 - **Caveat over certainty**: If grounding is weak for a particular answer, narrow the question scope or add a short caveat rather than overstating confidence.
 - **Draft framing**: Draft responses must be clearly framed as starting points — do not present them as validated expert answers.
 - **Response completeness**: Each `draft_llm_response` must be substantive enough (3+ sentences) for a domain expert to meaningfully review and refine.
-- **Metric readiness**: The output must be directly exportable to a CSV in the `output/` directory with `Question`, `Answer`, and `Content` columns for scoring with `generate_quality_metrics.py`.
+- **Metric readiness**: The output must be directly exportable to a CSV in the `output/` directory with `Question` and `Answer` columns for scoring with `generate_quality_metrics.py`. `Content` is recommended, especially for better Groundedness evaluation.
 - **Schema compliance**: Output contains only schema-allowed fields (`dataset_name`, `domain`, `recommended_total_dataset_size`, `coverage_areas`, `items`, `id`, `coverage_area`, `question`, `draft_llm_response`, `content`).

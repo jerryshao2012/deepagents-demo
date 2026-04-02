@@ -86,3 +86,4 @@ def test_build_missing_content_report_flags_rows_without_content() -> None:
     assert "Q1" in report
     assert "Q3" in report
     assert "Q2" not in report
+    assert "scoring still runs" in report

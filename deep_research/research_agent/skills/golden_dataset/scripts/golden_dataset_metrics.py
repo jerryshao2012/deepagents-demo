@@ -63,7 +63,7 @@ def parse_metric_scores(response_text: str) -> dict[str, float]:
 
 def build_judge_prompt(question: str, answer: str, content: str = "") -> str:
     """Create a deterministic judge prompt for the four dataset metrics."""
-    content_block = content.strip() or "No grounding content was provided."
+    content_block = content.strip() or "No grounding content was provided. Groundedness should be scored conservatively."
     metric_guidance_lines = "\n".join(
         f"- {metric_name}: {METRIC_GUIDANCE[metric_name]}" for metric_name in METRIC_NAMES
     )
@@ -115,7 +115,10 @@ def build_missing_content_report(rows: Iterable[dict[str, str]]) -> str:
         return "All rows include Content."
 
     header = f"Warning: {len(missing_rows)} row(s) are missing Content."
-    guidance = "Groundedness scoring is less reliable for these rows because the supporting RAG content is absent."
+    guidance = (
+        "Groundedness scoring is less reliable for these rows because the supporting RAG content is absent, "
+        "but scoring still runs."
+    )
     return "\n".join([header, guidance, *missing_rows])
 
 
