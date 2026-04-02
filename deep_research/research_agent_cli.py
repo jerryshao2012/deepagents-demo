@@ -10,8 +10,8 @@ from pathlib import Path
 from deepagents.backends.utils import file_data_to_string
 from dotenv import load_dotenv
 
-from utils import str2bool, get_ssl_verify_config
 from research_agent.tools import REPORTS_OUTPUT_FOLDER
+from utils import str2bool, get_ssl_verify_config
 
 # Load environment variables
 load_dotenv()
@@ -179,9 +179,10 @@ def main():
     verify_ssl = get_ssl_verify_config()
     print(f"SSL Verification is set to: {verify_ssl}")
 
-    # Determine output folder for final response
+    # Determine output folder for output
     output_folder = derive_output_folder(args.doc_folder)
     os.environ.setdefault("OUTPUT_FOLDER", str(output_folder))
+    print(f"Output subfolder is set to: {output_folder}")
 
     # Run the agent based on verbose flag
     if args.verbose:

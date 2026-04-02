@@ -39,9 +39,6 @@ REPORTS_OUTPUT_FOLDER = "output"
 MAX_FILES_TO_READ = 20
 MAX_TOTAL_SIZE_MB = 50
 
-# For output subfolder
-output_subfolder = Path(os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER))
-
 
 def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float = 60.0) -> dict:
     api_key = os.getenv("TAVILY_API_KEY")
@@ -440,6 +437,9 @@ def read_doc_folder(folder_path: str, specific_files: list[str] | None = None) -
     # Otherwise, try to use a relatively clean name.
 
     for file_path in files_to_process:
+        # For output subfolder
+        output_subfolder = Path(os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER))
+
         target_path = _get_extracted_path(file_path, output_subfolder)
         if target_path.exists():
             print(f"Skipping {file_path.name}, already extracted to {target_path}")
@@ -481,6 +481,8 @@ def save_research_report(report_title: str, content: str) -> str:
     Returns:
         str: Path to the saved report file
     """
+    # For output subfolder
+    output_subfolder = Path(os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER))
     output_subfolder.mkdir(parents=True, exist_ok=True)
 
     # Clean up the report title to make it filename-friendly
@@ -734,6 +736,8 @@ def render_target_output(
     if target_id == "golden-dataset":
         import csv
 
+        # For output subfolder
+        output_subfolder = Path(os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER))
         output_subfolder.mkdir(parents=True, exist_ok=True)
         if not output_subfolder.is_absolute():
             # Ensure we use an absolute path relative to the script's directory or current working directory
