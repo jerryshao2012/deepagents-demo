@@ -739,10 +739,6 @@ def render_target_output(
         # For output subfolder
         output_subfolder = Path(os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER))
         output_subfolder.mkdir(parents=True, exist_ok=True)
-        if not output_subfolder.is_absolute():
-            # Ensure we use an absolute path relative to the script's directory or current working directory
-            # to avoid issues when the tool is called from different contexts.
-            output_subfolder = Path(__file__).parent.parent.resolve() / REPORTS_OUTPUT_FOLDER
 
         # Prepare items for CSV: ensure non-empty ID
         items = payload.get("items", [])
