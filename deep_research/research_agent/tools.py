@@ -40,7 +40,7 @@ MAX_FILES_TO_READ = 20
 MAX_TOTAL_SIZE_MB = 50
 
 # For output subfolder
-output_subfolder = os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER)
+output_subfolder = Path(os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER))
 
 
 def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float = 60.0) -> dict:
@@ -481,8 +481,7 @@ def save_research_report(report_title: str, content: str) -> str:
     Returns:
         str: Path to the saved report file
     """
-    output_dir = Path(output_subfolder)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_subfolder.mkdir(parents=True, exist_ok=True)
 
     # Clean up the report title to make it filename-friendly
     safe_title = re.sub(r"[^a-zA-Z0-9_\- ]", "", report_title).strip()[:100]
@@ -492,7 +491,7 @@ def save_research_report(report_title: str, content: str) -> str:
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{timestamp}_{safe_title}.md"
 
-    file_path = output_dir / filename
+    file_path = output_subfolder / filename
 
     with open(file_path, 'w', encoding='utf-8') as f:
         f.write(content)
@@ -735,12 +734,11 @@ def render_target_output(
     if target_id == "golden-dataset":
         import csv
 
-        output_dir = Path(output_subfolder)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        if not output_dir.is_absolute():
+        output_subfolder.mkdir(parents=True, exist_ok=True)
+        if not output_subfolder.is_absolute():
             # Ensure we use an absolute path relative to the script's directory or current working directory
             # to avoid issues when the tool is called from different contexts.
-            output_dir = Path(__file__).parent.parent.resolve() / REPORTS_OUTPUT_FOLDER
+            output_subfolder = Path(__file__).parent.parent.resolve() / REPORTS_OUTPUT_FOLDER
 
         # Prepare items for CSV: ensure non-empty ID
         items = payload.get("items", [])
@@ -753,13 +751,12 @@ def render_target_output(
         # Re-render Markdown after potentially fixing IDs so that Markdown matches CSV
         rendered = _render_payload(definition["render"]["template"], payload, definition["render"]["spec"])
 
-        output_dir.mkdir(parents=True, exist_ok=True)
         filename = re.sub(r"[^a-zA-Z0-9_\- ]", "", payload.get("dataset_name", "dataset")).strip().replace(" ",
                                                                                                            "_").lower()
         if not filename:
             filename = "golden_dataset"
 
-        csv_path = output_dir / f"{filename}.csv"
+        csv_path = output_subfolder / f"{filename}.csv"
         try:
             with open(csv_path, "w", encoding="utf-8", newline="") as f:
                 writer = csv.writer(f)
