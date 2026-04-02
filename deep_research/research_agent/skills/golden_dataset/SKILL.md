@@ -39,25 +39,25 @@ Do not do Step 3 or Step 4 (defined in the [Producing Golden Datasets](https://g
 - Do not invent citations or source references that are not supported by the provided materials
 
 Requirements:
+- **MANDATORY: when all items are ready, you MUST call `render_target_output` with target id `golden-dataset` and the complete JSON payload. A verbal summary is NOT acceptable as a substitute for the tool call.**
 - Produce a reviewable starter batch with exactly 12 items unless the user explicitly asks for a different count.
 - Questions must sound like realistic non-expert customer questions.
 - Every question must be self-contained and unambiguous.
 - Cover the major domain areas visible in the provided materials.
 - Prefer common customer-style openings such as `How do I...`, `What is...`, `Can you give me...`, `Why should I...`, and `What are the recommended best practices for ...`.
-- Draft LLM responses should be helpful and plausible, but clearly framed as starting points for later expert review.
-- Keep each draft response concise but complete enough for a domain expert to refine.
-- If grounding is weak, narrow the question or add a short caveat inside the draft response rather than overstating certainty.
+- Answers should be helpful and plausible, but clearly framed as starting points for later expert review.
+- Keep each answer concise but complete enough for a domain expert to refine.
+- If grounding is weak, narrow the question or add a short caveat inside the answer rather than overstating certainty.
 - **Complete the full dataset in one pass. Do NOT stop mid-generation to ask the user which topics to prioritize, which areas to cover, or for any other confirmation. Make all topic and coverage choices autonomously based on the available documents.**
 - The rendered output should be easy to export into a CSV file in the `output/` directory with `Question` and `Answer` columns, plus `Content` when available.
 - Quality metrics such as `Similarity`, `Relevance`, `Coherence`, and `Groundedness` are generated after export by the bundled script at `scripts/generate_quality_metrics.py` targeting the CSV in the `output/` folder.
-- Include `content` for every item. This should be the supporting RAG content that best matches the question and draft answer and will be used later for meaningful `Groundedness` evaluation.
+- Include `content` for every item. This should be the supporting RAG content that best matches the question and answer and will be used later for meaningful `Groundedness` evaluation.
 - Treat the following metric guidance as best practice during evaluation:
   - `Similarity`: measures how similar the response is to a human expert answer. Scale `1-5`. Suggested goal: `3+`.
   - `Relevance`: measures how relevant the response is to the question and context. Scale `0-100`. Suggested goal: `60+`.
   - `Coherence`: measures the quality of the sentences and how naturally they fit together. Scale `1-5`. Suggested goal: `3+`.
   - `Groundedness`: measures how verifiable the answer is against the provided context. Scale `1-5`. Suggested goal: `3+`.
- - Return the final result by calling `render_target_output` with JSON that strictly matches the schema below.
- - **Important**: The schema distinguishes between `coverage_areas` (plural) at the top level and `coverage_area` (singular) for each individual item. Both are required in their respective locations.
+- **Important**: The schema distinguishes between `coverage_areas` (plural) at the top level and `coverage_area` (singular) for each individual item. Both are required in their respective locations.
 
 ## Schema
 

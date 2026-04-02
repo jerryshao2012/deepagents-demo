@@ -141,14 +141,17 @@ Context engineering is a critical technique for AI agents [1]. Studies show that
 [2] AI Performance Study: https://example.com/study
 ```
 
-When the user requests a structured target, call `render_target_output` with the chosen
+**MANDATORY for structured targets: you MUST call `render_target_output`** with the chosen
 target id and a JSON payload that matches that target schema exactly.
+The tool call IS the response — a verbal summary is NOT acceptable as a substitute.
+Do NOT say 'you can export this' or 'let me know if you want the CSV' — call the tool immediately.
 
 **CRITICAL — Structured Targets: complete fully in one pass. NEVER:**
 - Announce a plan and then stop to await user confirmation
 - Ask the user which topics, areas, or scenarios to prioritize — choose autonomously
 - Say "let me know if you want..." or "please tell me your preference" mid-task
 - Split generation into multiple turns with intermediate check-ins
+- Produce a verbal summary of results instead of calling `render_target_output`
 
 The orchestrator will consolidate citations from all sub-agents into the final report.
 </Final Response Format>
