@@ -196,17 +196,22 @@ def _extract_xlsx_text(file_path: Path) -> str:
     return "\n\n".join(sections)
 
 
-def _save_extracted_content(original_file_path: Path, content: str) -> str:
+def _save_extracted_content(original_file_path: Path, content: str, output_folder: Path | None = None) -> str:
     """Save extracted content to the output folder with appropriate extension.
 
     Args:
         original_file_path: Path to the original document
         content: Extracted text/markdown content
+        output_folder: Optional subfolder within REPORTS_OUTPUT_FOLDER to save to
 
     Returns:
         str: Path to the saved file
     """
-    output_dir = Path(REPORTS_OUTPUT_FOLDER)
+    if output_folder:
+        output_dir = output_folder
+    else:
+        output_dir = Path(REPORTS_OUTPUT_FOLDER)
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     suffix = original_file_path.suffix.lower()
@@ -218,8 +223,7 @@ def _save_extracted_content(original_file_path: Path, content: str) -> str:
         new_extension = ".txt"
 
     # Use original filename (without extension) + new extension
-    new_filename = f"{original_file_path.stem}_extracted{new_extension}"
-    file_path = output_dir / new_filename
+    file_path = _get_extracted_path(original_file_path, output_dir)
 
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
@@ -323,6 +327,18 @@ def think_tool(reflection: str) -> str:
     return f"Reflection recorded: {reflection}"
 
 
+def _get_extracted_path(file_path: Path, output_folder: Path) -> Path:
+    """Get the target path for an extracted file."""
+    suffix = file_path.suffix.lower()
+    if suffix in {".pdf", ".md", ".docx", ".pptx"}:
+        new_extension = ".md"
+    else:
+        new_extension = ".txt"
+
+    new_filename = f"{file_path.stem}_extracted{new_extension}"
+    return output_folder / new_filename
+
+
 @tool(parse_docstring=True)
 def read_doc_folder(folder_path: str, specific_files: list[str] | None = None) -> str:
     """Read and extract text from supported documents in a given folder.
@@ -399,12 +415,35 @@ def read_doc_folder(folder_path: str, specific_files: list[str] | None = None) -
     processed_files: list[str] = []
     failed_files: list[str] = []
 
+    # Determine output subfolder based on input folder_path
+    # Try to get a relative path if it's within the current directory
+    try:
+        # Resolve to absolute path first to handle relative inputs correctly
+        abs_folder = folder.resolve()
+        abs_cwd = Path.cwd().resolve()
+        rel_path = abs_folder.relative_to(abs_cwd)
+        output_subfolder = Path(REPORTS_OUTPUT_FOLDER) / rel_path
+    except ValueError:
+        # If not relative to CWD, just use the folder name as subfolder
+        output_subfolder = Path(REPORTS_OUTPUT_FOLDER) / folder.name
+
     for file_path in files_to_process:
+        target_path = _get_extracted_path(file_path, output_subfolder)
+        if target_path.exists():
+            print(f"Skipping {file_path.name}, already extracted to {target_path}")
+            try:
+                content = target_path.read_text(encoding="utf-8")
+                processed_files.append(f"{file_path.name} (skipped, loaded from {target_path})")
+                extracted_text.append(f"--- Content of {file_path.name} (from cache) ---\n{content}\n")
+                continue
+            except Exception as exc:
+                print(f"Failed to read existing extract {target_path}: {exc}. Re-extracting...")
+
         print(f"Processing document: {file_path.name}...")
         try:
             content = _extract_supported_document(file_path)
             # Save the extracted content as well
-            saved_path = _save_extracted_content(file_path, content)
+            saved_path = _save_extracted_content(file_path, content, output_folder=output_subfolder)
             processed_files.append(f"{file_path.name} (saved to {saved_path})")
             extracted_text.append(f"--- Content of {file_path.name} ---\n{content}\n")
         except Exception as exc:
