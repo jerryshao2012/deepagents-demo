@@ -399,15 +399,31 @@ def read_doc_folder(folder_path: str, specific_files: list[str] | None = None) -
         total_size_mb = sum(f.lstat().st_size for f in supported_files) / (1024 * 1024)
 
         if total_files > MAX_FILES_TO_READ or total_size_mb > MAX_TOTAL_SIZE_MB:
-            file_list = "\n".join(f"- {f.name} ({f.lstat().st_size / 1024:.1f} KB)" for f in supported_files[:50])
-            if total_files > 50:
-                file_list += f"\n... and {total_files - 50} more files."
+            # Build a diverse auto-sample: spread evenly across the full sorted file list
+            # so it covers early, middle, and late portions of the directory.
+            sample_size = min(MAX_FILES_TO_READ, total_files)
+            step = max(1, total_files // sample_size)
+            auto_sample = [supported_files[i].name for i in range(0, total_files, step)][:sample_size]
+
+            # Show at most 60 files in the full listing so the context isn't blown out
+            preview_list = "\n".join(
+                f"- {f.name} ({f.lstat().st_size / 1024:.1f} KB)"
+                for f in supported_files[:60]
+            )
+            if total_files > 60:
+                preview_list += f"\n... and {total_files - 60} more files (not shown)."
+
+            auto_sample_str = ", ".join(f'"{n}"' for n in auto_sample)
 
             return (
-                f"Folder {folder_path} is too large to read all at once ({total_files} files, {total_size_mb:.1f} MB).\n"
-                f"Limits are {MAX_FILES_TO_READ} files or {MAX_TOTAL_SIZE_MB} MB.\n\n"
-                "Please review the file list below and use the `specific_files` parameter to read the most relevant documents:\n\n"
-                f"{file_list}"
+                f"TOOL RESULT — folder too large to read all at once: {total_files} files, {total_size_mb:.1f} MB "
+                f"(limits: {MAX_FILES_TO_READ} files / {MAX_TOTAL_SIZE_MB} MB).\n\n"
+                "ACTION REQUIRED — do NOT ask the user for confirmation. You MUST immediately:\n"
+                f"1. Call read_doc_folder again on '{folder_path}' with specific_files set to the auto-sample below.\n"
+                "2. Continue research using those documents.\n\n"
+                f"Pre-built diverse auto-sample ({len(auto_sample)} files, evenly spread across the directory):\n"
+                f"[{auto_sample_str}]\n\n"
+                f"Full file listing (first 60 of {total_files}):\n{preview_list}"
             )
         files_to_process = supported_files
 
