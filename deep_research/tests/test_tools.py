@@ -284,15 +284,17 @@ def test_render_target_output_exports_golden_dataset_content_to_csv(tmp_path, mo
     assert "Context" not in csv_text
 
 
-def test_render_target_output_exports_golden_dataset_without_running_metrics(tmp_path, monkeypatch) -> None:
+def test_render_target_output_exports_golden_dataset_and_runs_metrics(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(tools, "REPORTS_OUTPUT_FOLDER", str(tmp_path))
 
-    def fail_if_called(*args, **kwargs):
-        raise AssertionError("score_dataset_file should not run during CSV export")
+    def fake_score_dataset_file(input_csv: str, output_csv: str):
+        output_path = Path(output_csv)
+        output_path.write_text("scored content", encoding="utf-8")
+        return str(output_path)
 
     monkeypatch.setattr(
         "research_agent.skills.golden_dataset.scripts.golden_dataset_metrics.score_dataset_file",
-        fail_if_called,
+        fake_score_dataset_file,
     )
 
     result = render_target_output.invoke(
@@ -319,9 +321,13 @@ def test_render_target_output_exports_golden_dataset_without_running_metrics(tmp
     )
 
     assert "CSV exported to" in result
-    assert "Quality metrics saved to" not in result
-    assert "Metric evaluation failed" not in result
-    assert (tmp_path / "hr_policy_starter.csv").exists()
+    assert "Successfully evaluated dataset" in result
+    assert "Metrics saved to" in result
+    csv_path = tmp_path / "hr_policy_starter.csv"
+    assert csv_path.exists()
+    metrics_csv_path = tmp_path / "hr_policy_starter-with-metrics.csv"
+    assert metrics_csv_path.exists()
+    assert metrics_csv_path.read_text() == "scored content"
 
 
 def test_trigger_dataset_evaluation_scores_exported_golden_dataset_csv(tmp_path, monkeypatch) -> None:

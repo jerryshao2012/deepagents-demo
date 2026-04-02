@@ -733,6 +733,10 @@ def render_target_output(
     if target_id == "golden-dataset":
         import csv
         output_dir = Path(REPORTS_OUTPUT_FOLDER)
+        if not output_dir.is_absolute():
+             # Ensure we use an absolute path relative to the script's directory or current working directory
+             # to avoid issues when the tool is called from different contexts.
+             output_dir = Path(__file__).parent.parent.resolve() / REPORTS_OUTPUT_FOLDER
 
         # Prepare items for CSV: ensure non-empty ID
         items = payload.get("items", [])
@@ -765,6 +769,10 @@ def render_target_output(
                         item.get("content", ""),
                     ])
             rendered += f"\n\n**CSV exported to:** `{csv_path}`"
+
+            # Trigger dataset evaluation after CSV generation
+            evaluation_result = trigger_dataset_evaluation.run(str(csv_path))
+            rendered += f"\n\n**Evaluation:** {evaluation_result}"
         except Exception as e:
             rendered += f"\n\n**Error exporting to CSV:** {e}"
             return rendered
