@@ -150,7 +150,7 @@ Before submitting, verify every item passes:
 If the `doc-folder` contains thousands of files or very large files (hundreds of GBs):
 
 1. **Tiered Discovery**: Call `read_doc_folder` once. If it returns a summary instead of full text, review the file list.
-2. **Selective Sampling**: Identify a representative subset of files (e.g., one from each major subfolder or topic-related filenames).
-3. **Specific Reading**: Use the `specific_files` parameter in `read_doc_folder` to read only those selected files.
+2. **Selective Sampling**: Identify a representative subset of files (e.g., one from each major subfolder or topic-related filenames). If the research subject is broad or mentions no specific area, **automatically sample a diverse set of documents** from the list to cover a range of topics without asking for confirmation.
+3. **Specific Reading**: Use the `specific_files` parameter in `read_doc_folder` to read only those selected files. Do this automatically based on your sampling decision.
 4. **Iterative Coverage**: If needed, repeat the process for different "coverage areas" to ensure the 12 items are well-distributed across the entire large dataset.
 5. **Summarization**: For very large individual documents, if they fail to read or are too long, focus on their executive summaries or introductions if available as separate files.
