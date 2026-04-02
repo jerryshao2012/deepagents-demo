@@ -781,7 +781,6 @@ def render_target_output(
     return rendered
 
 
-@tool(parse_docstring=True)
 def trigger_dataset_evaluation(file_path: str) -> str:
     """Evaluate a generated golden dataset CSV to compute quality metrics.
 

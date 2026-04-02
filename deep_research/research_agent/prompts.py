@@ -80,7 +80,6 @@ You have access to specific research tools:
 2. **think_tool**: For reflection and strategic planning during research
 3. **read_doc_folder**: For extracting text from supported local documents
 4. **render_target_output**: For validating and rendering any structured output target from a target skill
-5. **trigger_dataset_evaluation**: For evaluating a generated golden dataset CSV to compute quality metrics
 **CRITICAL: Use think_tool after each search to reflect on results and plan next steps**
 </Available Research Tools>
 
