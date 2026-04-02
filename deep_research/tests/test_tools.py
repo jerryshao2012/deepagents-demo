@@ -231,7 +231,7 @@ def test_render_target_output_renders_golden_dataset_without_metric_fields() -> 
                   "id": "Q1",
                   "coverage_area": "Leave",
                   "question": "How do I request parental leave under the employee handbook?",
-                  "draft_llm_response": "You would typically start by reviewing the leave policy and then submitting the required request through HR.",
+                  "answer": "You would typically start by reviewing the leave policy and then submitting the required request through HR.",
                   "content": "The employee handbook leave section explains eligibility, notice periods, and HR approval steps."
                 }
               ]
@@ -267,7 +267,7 @@ def test_render_target_output_exports_golden_dataset_content_to_csv(tmp_path, mo
                   "id": "Q1",
                   "coverage_area": "Leave",
                   "question": "How do I request parental leave under the employee handbook?",
-                  "draft_llm_response": "You would typically start by reviewing the leave policy and then submitting the required request through HR.",
+                  "answer": "You would typically start by reviewing the leave policy and then submitting the required request through HR.",
                   "content": "The handbook explains eligibility, notice periods, and HR approval steps."
                 }
               ]

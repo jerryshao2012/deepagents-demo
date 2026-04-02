@@ -92,7 +92,7 @@ Requirements:
           "id",
           "coverage_area",
           "question",
-          "draft_llm_response"
+          "answer"
         ],
         "additionalProperties": false,
         "properties": {
@@ -105,7 +105,7 @@ Requirements:
           "question": {
             "type": "string"
           },
-          "draft_llm_response": {
+          "answer": {
             "type": "string"
           },
           "content": {
@@ -132,7 +132,7 @@ Requirements:
     { "type": "separator", "value": "---" },
     { "type": "heading", "level": 3, "value": "{item.id}. {item.coverage_area}" },
     { "type": "text", "value": "Question: {item.question}" },
-    { "type": "text", "value": "Answer: {item.draft_llm_response}" },
+    { "type": "text", "value": "Answer: {item.answer}" },
     { "type": "text", "value": "Content: {item.content}" }
   ]},
   { "type": "heading", "level": 2, "value": "Scoring Workflow" },
@@ -156,11 +156,11 @@ Before submitting, verify every item passes:
 - **Content capture**: Every item must include `content` containing the grounding RAG passage or summary that best supports the draft answer. Groundedness scoring depends on it.
 - **Caveat over certainty**: If grounding is weak for a particular answer, narrow the question scope or add a short caveat rather than overstating confidence.
 - **Draft framing**: Draft responses must be clearly framed as starting points — do not present them as validated expert answers.
-- **Response completeness**: Each `draft_llm_response` must be substantive enough (3+ sentences) for a domain expert to meaningfully review and refine.
+- **Response completeness**: Each `answer` must be substantive enough (3+ sentences) for a domain expert to meaningfully review and refine.
 - **Metric readiness**: The output must be directly exportable to a CSV in the `output/` directory with `Question` and `Answer` columns for scoring with `generate_quality_metrics.py`. `Content` is recommended, especially for better Groundedness evaluation.
 - **Schema compliance**: Output contains only schema-allowed fields:
    - Top-level: `dataset_name`, `domain`, `recommended_total_dataset_size`, `coverage_areas` (array), `items`.
-   - Item-level: `id`, `coverage_area` (string), `question`, `draft_llm_response`, `content`.
+   - Item-level: `id`, `coverage_area` (string), `question`, `answer`, `content`.
 - **Sequential IDs**: Ensure `id` for each item is a sequential string starting from "1".
 
 ### Handling Large Scale Datasets

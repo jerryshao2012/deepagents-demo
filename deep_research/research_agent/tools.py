@@ -784,7 +784,7 @@ def render_target_output(
                         item.get("id", ""),
                         item.get("coverage_area", ""),
                         item.get("question", ""),
-                        item.get("draft_llm_response", ""),
+                        item.get("answer", ""),
                         item.get("content", ""),
                     ])
             rendered += f"\n\n**Data exported to:** `{csv_path}`"
