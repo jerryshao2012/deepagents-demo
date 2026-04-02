@@ -1,4 +1,4 @@
-"""Shared model configuration for the deep research project."""
+"""Model configuration for the deep research project of skill's LLM as a judge."""
 
 from __future__ import annotations
 

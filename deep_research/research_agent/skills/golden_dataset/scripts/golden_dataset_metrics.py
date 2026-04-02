@@ -12,39 +12,29 @@ import re
 from pathlib import Path
 from typing import Iterable
 
+import yaml
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 
-from model_factory import get_configured_model
+from research_agent.skills.golden_dataset.scripts.skill_model_factory import get_configured_model
 
 load_dotenv()
 
-METRIC_NAMES = ("Similarity", "Relevance", "Coherence", "Groundedness")
+
+def load_metrics_config() -> dict:
+    """Load metric configurations from YAML file."""
+    config_path = Path(__file__).parent / "metrics_config.yaml"
+    with config_path.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+_CONFIG = load_metrics_config()
+METRIC_NAMES = tuple(_CONFIG["metrics"].keys())
 REQUIRED_INPUT_COLUMNS = ("Question", "Answer")
+JUDGE_PROMPT_TEMPLATE = _CONFIG["judge_prompt"]
 METRIC_GUIDANCE = {
-    "Similarity": (
-        "Measures how similar the response is to a human expert answer. "
-        "Score on a scale of 1 to 5, where 1 is worst and 5 is best. "
-        "Suggested goal: 3+."
-    ),
-    "Relevance": (
-        "Measures how relevant the response is to the question and context provided. "
-        "Score on a scale of 0 to 100. "
-        "0-20 means the answer completely lacks confidence, 20-40 mostly lacks confidence, "
-        "40-60 is partially confident, 60-80 is mostly confident, and 80-100 has perfect confidence. "
-        "Suggested goal: 60+."
-    ),
-    "Coherence": (
-        "Measures the quality of all sentences and how naturally they fit together. "
-        "Score on a scale of 1 to 5, where 1 is worst and 5 is best. "
-        "Suggested goal: 3+."
-    ),
-    "Groundedness": (
-        "Measures how grounded the answer is against the provided context. "
-        "Even if an answer seems true, it should score lower when it is not verifiable from context. "
-        "Score on a scale of 1 to 5, where 1 is worst and 5 is best. "
-        "Suggested goal: 3+."
-    ),
+    name: f"{details['description']} Score on a scale of {details['scale']} Suggested goal: {details['goal']}."
+    for name, details in _CONFIG["metrics"].items()
 }
 
 
@@ -66,19 +56,11 @@ def build_judge_prompt(question: str, answer: str, context: str = "") -> str:
     metric_guidance_lines = "\n".join(
         f"- {metric_name}: {METRIC_GUIDANCE[metric_name]}" for metric_name in METRIC_NAMES
     )
-    return (
-        "You are evaluating a draft golden_dataset answer for QA purposes.\n"
-        "Score the answer on four metrics and return exactly these four lines:\n"
-        "Similarity: <1-5 score>\n"
-        "Relevance: <0-100 score>\n"
-        "Coherence: <1-5 score>\n"
-        "Groundedness: <1-5 score>\n\n"
-        "Use these metric descriptions and suggested goals as best practice:\n"
-        f"{metric_guidance_lines}\n"
-        "Return numbers only, with no extra commentary.\n\n"
-        f"Question:\n{question.strip()}\n\n"
-        f"Draft Answer:\n{answer.strip()}\n\n"
-        f"Context:\n{context_block}\n"
+    return JUDGE_PROMPT_TEMPLATE.format(
+        metric_guidance_lines=metric_guidance_lines,
+        question=question.strip(),
+        answer=answer.strip(),
+        context=context_block,
     )
 
 
