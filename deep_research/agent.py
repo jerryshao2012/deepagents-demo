@@ -19,6 +19,7 @@ from research_agent.tools import (
     render_target_output,
     tavily_search,
     think_tool,
+    trigger_dataset_evaluation,
 )
 from utils import get_ssl_verify_config
 
@@ -55,7 +56,8 @@ research_sub_agent: SubAgent = {
         tavily_search,
         think_tool,
         read_doc_folder,
-        render_target_output
+        render_target_output,
+        trigger_dataset_evaluation
     ],
 }
 
@@ -69,6 +71,7 @@ agent = create_deep_agent(
         think_tool,
         read_doc_folder,
         render_target_output,
+        trigger_dataset_evaluation,
     ],
     system_prompt=INSTRUCTIONS,
     subagents=[research_sub_agent],

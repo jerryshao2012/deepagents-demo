@@ -546,3 +546,30 @@ def render_target_output(target_id: str, payload_json: str) -> str:
             rendered += f"\n\n**Error exporting to CSV:** {e}"
 
     return rendered
+
+
+@tool(parse_docstring=True)
+def trigger_dataset_evaluation(file_path: str) -> str:
+    """Evaluate a generated golden dataset CSV to compute quality metrics.
+
+    Run this tool only after you have successfully generated a golden dataset 
+    and received the CSV file path locally in your output folder. This runs a heavy
+    evaluation script to compute Similarity, Relevance, Coherence, and Groundedness.
+
+    Args:
+        file_path: The path to the CSV file to evaluate (e.g., "output/golden_dataset.csv").
+
+    Returns:
+        The result of the quality metric evaluation, including the path to the scored dataset.
+    """
+    path_obj = Path(file_path)
+    if not path_obj.exists():
+        return f"File not found: {file_path}"
+
+    try:
+        from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import score_dataset_file
+        output_csv = str(path_obj.with_name(f"{path_obj.stem}-with-metrics{path_obj.suffix}"))
+        result_path = score_dataset_file(str(path_obj), output_csv)
+        return f"Successfully evaluated dataset. Metrics saved to: {result_path}"
+    except Exception as exc:
+        return f"Failed to run metric evaluation: {exc}"

@@ -14,6 +14,7 @@ from research_agent.tools import (
     render_target_output,
     tavily_search,
     think_tool,
+    trigger_dataset_evaluation,
 )
 
 __all__ = [
@@ -21,6 +22,7 @@ __all__ = [
     "think_tool",
     "read_doc_folder",
     "render_target_output",
+    "trigger_dataset_evaluation",
     "RESEARCHER_INSTRUCTIONS",
     "RESEARCH_WORKFLOW_INSTRUCTIONS",
     "SUBAGENT_DELEGATION_INSTRUCTIONS",

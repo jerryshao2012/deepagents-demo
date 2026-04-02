@@ -126,12 +126,13 @@ model = ChatGoogleGenerativeAI(model=os.getenv("MODEL_NAME"))
 
 # Using AzureOpenAI
 from langchain_openai import AzureChatOpenAI
+from pydantic import SecretStr
 
 model = AzureChatOpenAI(
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
     azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
     api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
-    api_key=os.getenv("AZURE_OPENAI_API_KEY")
+    api_key=SecretStr(os.getenv("AZURE_OPENAI_API_KEY", ""))
 )
 
 agent = create_deep_agent(
@@ -159,3 +160,4 @@ The deep research agent adds the following custom tools beyond the built-in deep
 | `think_tool` | Strategic reflection mechanism that helps the agent pause and assess progress between searches, analyze findings, identify gaps, and plan next steps. |
 | `read_doc_folder` | Extracts text content from supported local files in a specified folder. Supports `.pdf`, `.txt`, `.md`, `.docx`, `.pptx`, and `.xlsx`. |
 | `render_target_output` | Generic target renderer that loads a target skill from `research_agent/skills/*/SKILL.md`, validates the provided JSON payload against that target's schema, and renders the final Markdown output. |
+| `trigger_dataset_evaluation` | Evaluates a generated golden dataset CSV to compute quality metrics (Similarity, Relevance, Coherence, Groundedness) using the bundled metric script and saves the result to a new CSV file. |
