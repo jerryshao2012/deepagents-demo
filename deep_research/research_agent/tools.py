@@ -520,7 +520,7 @@ def render_target_output(target_id: str, payload_json: str) -> str:
 
     rendered = _render_payload(definition["render"]["template"], payload, definition["render"]["spec"])
 
-    if target_id == "golden_dataset":
+    if target_id == "golden-dataset":
         import csv
         output_dir = Path(REPORTS_OUTPUT_FOLDER)
         output_dir.mkdir(parents=True, exist_ok=True)

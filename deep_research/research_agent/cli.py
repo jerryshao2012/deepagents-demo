@@ -5,9 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 
-from research_agent.targets import get_target_definition, list_target_ids
-
-TARGET_SLIDES = "slides"
+from research_agent.targets import get_target_definition, format_target_catalog
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -68,25 +66,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--target",
-        choices=list_target_ids(),
-        help="Optional structured output target",
-    )
-    parser.add_argument(
-        "--slides",
-        action="store_true",
-        help="Deprecated alias for `--target slides`",
+        help="Optional structured output target. Use '--target list' to see all options.",
     )
     parser.add_argument("--title", type=str, help="Optional research title for output file")
     return parser
 
 
-def normalize_target(target: str | None, slides_flag: bool) -> str | None:
-    """Normalize CLI target selection, honoring the legacy slides flag."""
-    if target:
-        return target
-    if slides_flag:
-        return TARGET_SLIDES
-    return None
+def list_targets() -> None:
+    """Print available research targets to console."""
+    catalog = format_target_catalog()
+    print("\nAvailable research targets:")
+    print(catalog)
+    print("\nUse --target <id> to select one.")
 
 
 def build_instruction(

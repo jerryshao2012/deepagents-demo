@@ -72,24 +72,28 @@ def _parse_skill_file(path: Path) -> dict[str, Any]:
         )
 
     target_id = frontmatter.get("name") or path.parent.name
-    return {
-        "id": target_id,
-        "title": frontmatter.get("title", target_id.replace("-", " ").title()),
-        "description": frontmatter.get("description", "").strip(),
-        "instructions": instructions,
-        "schema": schema,
-        "render": {"template": render_template, "spec": render_spec},
-        "skill_path": str(path),
+    targets = {
+        target_id: {
+            "id": target_id,
+            "title": frontmatter.get("title", target_id.replace("-", " ").title()),
+            "description": frontmatter.get("description", "").strip(),
+            "instructions": instructions,
+            "schema": schema,
+            "render": {"template": render_template, "spec": render_spec},
+            "skill_path": str(path),
+        }
     }
+
+    return targets
 
 
 @lru_cache(maxsize=1)
 def _load_all_targets() -> dict[str, dict[str, Any]]:
-    targets: dict[str, dict[str, Any]] = {}
+    all_targets: dict[str, dict[str, Any]] = {}
     for skill_path in sorted(SKILLS_DIR.glob("*/SKILL.md")):
-        definition = _parse_skill_file(skill_path)
-        targets[definition["id"]] = definition
-    return targets
+        skill_targets = _parse_skill_file(skill_path)
+        all_targets.update(skill_targets)
+    return all_targets
 
 
 def list_target_ids() -> list[str]:

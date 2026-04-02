@@ -46,7 +46,7 @@ class Spinner:
 from langchain_core.messages import BaseMessage, HumanMessage
 
 from agent import agent, model
-from research_agent.cli import build_instruction, build_parser, normalize_target
+from research_agent.cli import build_instruction, build_parser, list_targets
 
 
 def generate_research_title(research_content):
@@ -131,7 +131,11 @@ def main():
         parser.print_help()
         sys.exit(0)
 
-    target = normalize_target(args.target, args.slides)
+    if args.target == "list":
+        list_targets()
+        sys.exit(0)
+
+    target = args.target
     instruction = build_instruction(
         args.subject,
         doc_folder=args.doc_folder,
