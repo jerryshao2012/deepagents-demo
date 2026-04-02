@@ -732,7 +732,7 @@ def render_target_output(
 
     if target_id == "golden-dataset":
         import csv
-        output_dir = Path(REPORTS_OUTPUT_FOLDER) / "golden_dataset"
+        output_dir = Path(REPORTS_OUTPUT_FOLDER)
 
         # Prepare items for CSV: ensure non-empty ID
         items = payload.get("items", [])
@@ -768,15 +768,6 @@ def render_target_output(
         except Exception as e:
             rendered += f"\n\n**Error exporting to CSV:** {e}"
             return rendered
-
-        # Automatically run metric scoring so the agent doesn't need a follow-up tool call
-        try:
-            from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import score_dataset_file
-            metrics_path = output_dir / f"{filename}-with-metrics.csv"
-            score_dataset_file(str(csv_path), str(metrics_path))
-            rendered += f"\n\n**Quality metrics saved to:** `{metrics_path}`"
-        except Exception as e:
-            rendered += f"\n\n**Metric evaluation failed (you can run it manually):** {e}"
 
     return rendered
 

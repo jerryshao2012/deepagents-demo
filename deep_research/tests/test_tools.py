@@ -284,6 +284,72 @@ def test_render_target_output_exports_golden_dataset_content_to_csv(tmp_path, mo
     assert "Context" not in csv_text
 
 
+def test_render_target_output_exports_golden_dataset_without_running_metrics(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(tools, "REPORTS_OUTPUT_FOLDER", str(tmp_path))
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("score_dataset_file should not run during CSV export")
+
+    monkeypatch.setattr(
+        "research_agent.skills.golden_dataset.scripts.golden_dataset_metrics.score_dataset_file",
+        fail_if_called,
+    )
+
+    result = render_target_output.invoke(
+        {
+            "target_id": "golden-dataset",
+            "payload_json": """
+            {
+              "dataset_name": "HR Policy Starter",
+              "domain": "Employee handbook and HR policy",
+              "recommended_total_dataset_size": 150,
+              "coverage_areas": ["Leave"],
+              "items": [
+                {
+                  "id": "Q1",
+                  "coverage_area": "Leave",
+                  "question": "How do I request parental leave under the employee handbook?",
+                  "answer": "You would typically start by reviewing the leave policy and then submitting the required request through HR.",
+                  "content": "The handbook explains eligibility, notice periods, and HR approval steps."
+                }
+              ]
+            }
+            """,
+        }
+    )
+
+    assert "CSV exported to" in result
+    assert "Quality metrics saved to" not in result
+    assert "Metric evaluation failed" not in result
+    assert (tmp_path / "hr_policy_starter.csv").exists()
+
+
+def test_trigger_dataset_evaluation_scores_exported_golden_dataset_csv(tmp_path, monkeypatch) -> None:
+    dataset_csv = tmp_path / "starter.csv"
+    dataset_csv.write_text(
+        "ID,Coverage Area,Question,Answer,Content\n"
+        "Q1,Leave,How do I request parental leave?,Review the leave policy first.,Leave section.\n",
+        encoding="utf-8",
+    )
+
+    def fake_score_dataset_file(input_csv: str, output_csv: str):
+        assert input_csv == str(dataset_csv)
+        output_path = Path(output_csv)
+        output_path.write_text("scored", encoding="utf-8")
+        return output_path
+
+    monkeypatch.setattr(
+        "research_agent.skills.golden_dataset.scripts.golden_dataset_metrics.score_dataset_file",
+        fake_score_dataset_file,
+    )
+
+    result = tools.trigger_dataset_evaluation.invoke({"file_path": str(dataset_csv)})
+
+    assert "Successfully evaluated dataset" in result
+    assert str(tmp_path / "starter-with-metrics.csv") in result
+    assert (tmp_path / "starter-with-metrics.csv").exists()
+
+
 def test_read_doc_folder_reads_text_and_markdown_files(tmp_path: Path) -> None:
     (tmp_path / "notes.txt").write_text("alpha", encoding="utf-8")
     (tmp_path / "summary.md").write_text("# heading", encoding="utf-8")

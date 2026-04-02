@@ -48,6 +48,10 @@ from langchain_core.messages import BaseMessage, HumanMessage
 
 from agent import agent, model
 from research_agent.cli import build_instruction, build_parser, list_targets
+from research_agent.tools import trigger_dataset_evaluation
+
+
+CSV_EXPORT_PATH_RE = re.compile(r"\*\*CSV exported to:\*\*\s*`([^`]+)`")
 
 
 def generate_research_title(research_content):
@@ -128,6 +132,28 @@ def save_research_to_file(research_content, filename=None, output_folder=None):
         file.write(research_content)
 
     return str(file_path)
+
+
+def derive_output_folder(doc_folder: str | None) -> Path | None:
+    if not doc_folder:
+        return None
+    return Path("output") / Path(doc_folder).name
+
+
+def run_dataset_evaluation(file_path: str) -> str:
+    return trigger_dataset_evaluation.invoke({"file_path": file_path})
+
+
+def append_dataset_evaluation_result(research_content: str) -> str:
+    match = CSV_EXPORT_PATH_RE.search(research_content)
+    if not match:
+        return research_content
+
+    csv_path = match.group(1).strip()
+    evaluation_result = run_dataset_evaluation(csv_path)
+    if evaluation_result in research_content:
+        return research_content
+    return research_content.rstrip() + f"\n\n**Dataset evaluation:** {evaluation_result}\n"
 
 
 def main():
@@ -280,14 +306,11 @@ def main():
     files = result.get("files", {})
 
     # Determine output folder for final response
-    output_folder = None
-    if args.doc_folder:
-        doc_folder = Path(args.doc_folder)
-        # Mirror the same logic as in tools.py for output subfolders
-        output_folder = Path("output") / doc_folder.name
+    output_folder = derive_output_folder(args.doc_folder)
 
     if "/final_report.md" in files:
         file_content = file_data_to_string(files['/final_report.md'])
+        file_content = append_dataset_evaluation_result(file_content)
         filename = save_research_to_file(file_content, title, output_folder=output_folder)
 
         print("\n" + "=" * 80)
@@ -297,8 +320,9 @@ def main():
     else:
         # Fallback to the last message content
         last_message = result.get('messages', [])[-1]
-        filename = save_research_to_file(last_message, title, output_folder=output_folder)
         last_message_content = extract_message_content(last_message)
+        last_message_content = append_dataset_evaluation_result(last_message_content)
+        filename = save_research_to_file(last_message_content, title, output_folder=output_folder)
 
         print("\n" + "=" * 80)
         print(f"Final Response ({filename}):")
