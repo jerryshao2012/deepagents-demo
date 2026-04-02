@@ -194,6 +194,37 @@ def _extract_xlsx_text(file_path: Path) -> str:
     return "\n\n".join(sections)
 
 
+def _save_extracted_content(original_file_path: Path, content: str) -> str:
+    """Save extracted content to the output folder with appropriate extension.
+
+    Args:
+        original_file_path: Path to the original document
+        content: Extracted text/markdown content
+
+    Returns:
+        str: Path to the saved file
+    """
+    output_dir = Path(REPORTS_OUTPUT_FOLDER)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    suffix = original_file_path.suffix.lower()
+    # If the extracted content is markdown, save file name with extension md.
+    # If it is text, save file name with extension txt.
+    if suffix in {".pdf", ".md", ".docx", ".pptx"}:
+        new_extension = ".md"
+    else:
+        new_extension = ".txt"
+
+    # Use original filename (without extension) + new extension
+    new_filename = f"{original_file_path.stem}_extracted{new_extension}"
+    file_path = output_dir / new_filename
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+    return str(file_path)
+
+
 def _extract_supported_document(file_path: Path) -> str:
     suffix = file_path.suffix.lower()
     if suffix == ".pdf":
@@ -335,7 +366,9 @@ def read_doc_folder(folder_path: str) -> str:
         print(f"Processing document: {file_path.name}...")
         try:
             content = _extract_supported_document(file_path)
-            processed_files.append(file_path.name)
+            # Save the extracted content as well
+            saved_path = _save_extracted_content(file_path, content)
+            processed_files.append(f"{file_path.name} (saved to {saved_path})")
             extracted_text.append(f"--- Content of {file_path.name} ---\n{content}\n")
         except Exception as exc:
             failed_files.append(file_path.name)
