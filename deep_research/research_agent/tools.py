@@ -339,6 +339,15 @@ def _get_extracted_path(file_path: Path, output_folder: Path) -> Path:
     return output_folder / new_filename
 
 
+def _resolve_doc_output_subfolder(folder: Path) -> Path:
+    configured_output = Path(os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER))
+    if configured_output.name == folder.name:
+        return configured_output
+    if configured_output == Path(REPORTS_OUTPUT_FOLDER):
+        return configured_output / folder.name
+    return configured_output
+
+
 @tool(parse_docstring=True)
 def read_doc_folder(folder_path: str, specific_files: list[str] | None = None) -> str:
     """Read and extract text from supported documents in a given folder.
@@ -431,11 +440,9 @@ def read_doc_folder(folder_path: str, specific_files: list[str] | None = None) -
     extracted_text: list[str] = []
     processed_files: list[str] = []
     failed_files: list[str] = []
+    output_subfolder = _resolve_doc_output_subfolder(folder)
 
     for file_path in files_to_process:
-        # For output subfolder
-        output_subfolder = Path(os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER))
-
         target_path = _get_extracted_path(file_path, output_subfolder)
         if target_path.exists():
             print(f"Skipping {file_path.name}, already extracted to {target_path}")

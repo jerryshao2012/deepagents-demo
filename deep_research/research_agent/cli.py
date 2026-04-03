@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 
-from research_agent.targets import get_target_definition, format_target_catalog
+from research_agent.targets import format_target_catalog, get_target_definition, list_target_ids
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -66,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--target",
+        choices=["list", *list_target_ids()],
         help="Optional structured output target. Use '--target list' to see all options.",
     )
     parser.add_argument("--title", type=str, help="Optional research title for output file")

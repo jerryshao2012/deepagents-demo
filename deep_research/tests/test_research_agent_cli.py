@@ -18,7 +18,7 @@ def test_parser_accepts_doc_folder_and_target() -> None:
 def test_parser_uses_discovered_targets() -> None:
     parser = build_parser()
 
-    assert set(parser._option_string_actions["--target"].choices) == set(list_target_ids())
+    assert set(parser._option_string_actions["--target"].choices) == set(list_target_ids()) | {"list"}
 
 
 def test_build_instruction_for_slides_target() -> None:
@@ -30,7 +30,7 @@ def test_build_instruction_for_slides_target() -> None:
     assert "read_doc_folder" in instruction
     assert "'./docs'" in instruction
     assert "render_target_output" in instruction
-    assert "fewer than 3 slides" in instruction
+    assert "fewer than 5 slides" in instruction
 
 
 def test_build_instruction_for_interview_target() -> None:

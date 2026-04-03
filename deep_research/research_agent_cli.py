@@ -10,6 +10,7 @@ from pathlib import Path
 from deepagents.backends.utils import file_data_to_string
 from dotenv import load_dotenv
 
+from agent import agent, model
 from research_agent.tools import REPORTS_OUTPUT_FOLDER
 from utils import str2bool, get_ssl_verify_config
 
@@ -47,8 +48,6 @@ class Spinner:
 
 
 from langchain_core.messages import BaseMessage, HumanMessage
-
-from agent import agent, model
 from research_agent.cli import build_instruction, build_parser, list_targets
 
 CSV_EXPORT_PATH_RE = re.compile(r"\*\*CSV exported to:\*\*\s*`([^`]+)`")
@@ -134,10 +133,16 @@ def save_research_to_file(research_content, filename=None, output_folder=None):
     return str(file_path)
 
 
-def derive_output_folder(doc_folder: str | None) -> Path | None:
+def derive_output_folder(doc_folder: str | None) -> Path:
     if not doc_folder:
         return Path(REPORTS_OUTPUT_FOLDER)
     return Path(REPORTS_OUTPUT_FOLDER) / Path(doc_folder).name
+
+
+def configure_output_folder(doc_folder: str | None) -> Path:
+    output_folder = derive_output_folder(doc_folder)
+    os.environ["OUTPUT_FOLDER"] = str(output_folder)
+    return output_folder
 
 
 def main():
@@ -180,8 +185,7 @@ def main():
     print(f"SSL Verification is set to: {verify_ssl}")
 
     # Determine output folder for output
-    output_folder = derive_output_folder(args.doc_folder)
-    os.environ.setdefault("OUTPUT_FOLDER", str(output_folder))
+    output_folder = configure_output_folder(args.doc_folder)
     print(f"Output subfolder is set to: {output_folder}")
 
     # Run the agent based on verbose flag

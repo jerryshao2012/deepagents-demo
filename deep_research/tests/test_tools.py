@@ -256,6 +256,10 @@ def test_render_target_output_renders_golden_dataset_without_metric_fields() -> 
 
 def test_finalize_golden_dataset_output_exports_content_to_csv(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(tools, "REPORTS_OUTPUT_FOLDER", str(tmp_path))
+    monkeypatch.setattr(
+        "research_agent.skills.golden_dataset.pipeline.evaluate_golden_dataset_csv_file",
+        lambda file_path: f"Successfully evaluated dataset. Metrics saved to: {Path(file_path).with_name(Path(file_path).stem + '-with-metrics.csv')}",
+    )
 
     result = finalize_golden_dataset_output.invoke(
         {
@@ -359,7 +363,8 @@ def test_trigger_dataset_evaluation_scores_exported_golden_dataset_csv(tmp_path,
     assert (tmp_path / "starter-with-metrics.csv").exists()
 
 
-def test_read_doc_folder_reads_text_and_markdown_files(tmp_path: Path) -> None:
+def test_read_doc_folder_reads_text_and_markdown_files(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(tools, "REPORTS_OUTPUT_FOLDER", str(tmp_path / "output"))
     (tmp_path / "notes.txt").write_text("alpha", encoding="utf-8")
     (tmp_path / "summary.md").write_text("# heading", encoding="utf-8")
 

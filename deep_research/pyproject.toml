@@ -46,11 +46,11 @@ dev = [
 requires = ["setuptools>=73.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["research_agent"]
+[tool.setuptools.packages.find]
+include = ["research_agent", "research_agent.*"]
 
 [tool.setuptools.package-data]
-"*" = ["py.typed", "skills/*/SKILL.md"]
+"research_agent" = ["py.typed", "skills/*/SKILL.md", "skills/*/scripts/*.yaml"]
 
 [tool.ruff]
 lint.select = [

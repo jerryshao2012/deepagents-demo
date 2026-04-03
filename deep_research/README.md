@@ -178,7 +178,7 @@ What is used in the deep research agent?
   - PowerPoint (`.pptx`)
   - Excel (`.xlsx`)
   - Text and Markdown (`.txt`, `.md`)
-- **Caching**: Extracted text from documents is cached (usually in `output/reports/`) to avoid redundant processing.
+- **Caching**: Extracted text from documents is cached under the active output folder (for example `output/` or `output/<doc-folder-name>/`) to avoid redundant processing.
 - **Storage**: Findings and final reports are saved to files like `/research_request.md` and `/final_report.md` (using `write_file`).
 
 ### 3. Web Research Tools
@@ -199,7 +199,7 @@ What is used in the deep research agent?
 
 ### 6. Structured Output Targets
 - **Target Skills**: The agent can generate structured data using skills like `golden-dataset`.
-- **Validation and Finalization**: Tools like `render_target_output` and `finalize_golden_dataset_output` are used to validate schemas, export CSVs, and run quality metrics.
+- **Validation and Finalization**: Tools like `render_target_output`, `finalize_golden_dataset_output`, and `trigger_dataset_evaluation` are used to validate schemas, export CSVs, and run or re-run quality metrics.
 
 ### 7. Context Management
 - **Reflection**: The `think_tool` is used for "inner monologue" and strategic planning, helping the agent reflect on findings before deciding the next step.

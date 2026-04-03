@@ -20,6 +20,7 @@ from research_agent.tools import (
     render_target_output,
     tavily_search,
     think_tool,
+    trigger_dataset_evaluation,
 )
 from utils import get_ssl_verify_config
 
@@ -47,7 +48,7 @@ INSTRUCTIONS = (
     max_researcher_iterations=max_researcher_iterations)
 )
 
-# Create research sub-agent
+# Create research subagent
 research_sub_agent: SubAgent = {
     "name": "research-agent",
     "description": "Delegate research to the sub-agent researcher. Only give this researcher one topic at a time.",
@@ -58,6 +59,7 @@ research_sub_agent: SubAgent = {
         read_doc_folder,
         render_target_output,
         finalize_golden_dataset_output,
+        trigger_dataset_evaluation,
     ],
 }
 
@@ -72,6 +74,7 @@ agent = create_deep_agent(
         read_doc_folder,
         render_target_output,
         finalize_golden_dataset_output,
+        trigger_dataset_evaluation,
     ],
     system_prompt=INSTRUCTIONS,
     subagents=[research_sub_agent],
