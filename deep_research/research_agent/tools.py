@@ -9,17 +9,23 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import random
 import re
 from json import dumps as json_dumps
 from pathlib import Path
 
 import httpx
 import jsonschema
+import pymupdf4llm
+import pypdf
 import requests
+from docx import Document
 from dotenv import load_dotenv
 from langchain_core.tools import InjectedToolArg, tool
 from langgraph.prebuilt import InjectedState
 from markdownify import markdownify
+from openpyxl import load_workbook
+from pptx import Presentation
 from tavily import TavilyClient
 from typing_extensions import Annotated, Literal
 
@@ -94,7 +100,6 @@ def _extract_pdf_text(file_path: Path) -> str:
     """Extract PDF content as markdown without ML model downloads.\n\n    Returns:\n        str: Extracted content from the PDF file.\n    """
     try:
         print("Use PyMuPDF4LLM for PDF markdown extraction.")
-        import pymupdf4llm
 
         markdown_content = pymupdf4llm.to_markdown(str(file_path))
         if isinstance(markdown_content, list):
@@ -107,7 +112,6 @@ def _extract_pdf_text(file_path: Path) -> str:
         # Fallback to pypdf if markdown extraction fails
         try:
             print("Falling back to pypdf for PDF text extraction.")
-            import pypdf
             reader = pypdf.PdfReader(file_path)
             page_texts: list[str] = []
             for index, page in enumerate(reader.pages, start=1):
@@ -125,8 +129,6 @@ def _extract_text_file(file_path: Path) -> str:
 
 
 def _extract_docx_text(file_path: Path) -> str:
-    from docx import Document
-
     document = Document(str(file_path))
     paragraphs = [
         paragraph.text.strip()
@@ -150,8 +152,6 @@ def _extract_docx_text(file_path: Path) -> str:
 
 
 def _extract_pptx_text(file_path: Path) -> str:
-    from pptx import Presentation
-
     presentation = Presentation(str(file_path))
     slide_sections: list[str] = []
     for index, slide in enumerate(presentation.slides, start=1):
@@ -177,8 +177,6 @@ def _extract_pptx_text(file_path: Path) -> str:
 
 
 def _extract_xlsx_text(file_path: Path) -> str:
-    from openpyxl import load_workbook
-
     workbook = load_workbook(filename=str(file_path), read_only=True, data_only=True)
     sections: list[str] = []
     try:
@@ -410,9 +408,11 @@ def read_doc_folder(folder_path: str, specific_files: list[str] | None = None) -
         if total_files > MAX_FILES_TO_READ or total_size_mb > MAX_TOTAL_SIZE_MB:
             # Randomly select diverse sample from the entire file collection
             # This ensures better coverage across all documents rather than just top ones
-            import random
+            # Bound sample size by both file count limit and estimated size limit
+            avg_size_mb = total_size_mb / total_files if total_files > 0 else 0
+            max_files_by_size = max(1, int(MAX_TOTAL_SIZE_MB / avg_size_mb)) if avg_size_mb > 0 else MAX_FILES_TO_READ
+            sample_size = min(MAX_FILES_TO_READ, total_files, max_files_by_size)
 
-            sample_size = min(MAX_FILES_TO_READ, total_files)
             auto_sample = [f.name for f in random.sample(supported_files, sample_size)]
 
             # Show at most 60 files in the full listing so the context isn't blown out
