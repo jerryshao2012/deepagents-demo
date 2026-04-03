@@ -334,7 +334,7 @@ def _get_extracted_path(file_path: Path, output_folder: Path) -> Path:
         new_extension = ".txt"
 
     new_filename = f"{file_path.stem}_extracted{new_extension}"
-    return output_folder / new_filename
+    return output_folder / "extracted" / new_filename
 
 
 def _resolve_doc_output_subfolder(folder: Path) -> Path:
