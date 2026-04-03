@@ -57,6 +57,10 @@ def format_messages(messages):
         elif msg_type == "Ai":
             console.print(Panel(content, title="🤖 Assistant", border_style="green"))
         elif msg_type == "Tool":
+            # Limit tool output to 10 lines
+            lines = content.split('\n')
+            if len(lines) > 10:
+                content = '\n'.join(lines[:10]) + '\n...'
             console.print(Panel(content, title="🔧 Tool Output", border_style="yellow"))
         else:
             console.print(Panel(content, title=f"📝 {msg_type}", border_style="white"))

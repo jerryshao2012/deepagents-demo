@@ -27,17 +27,17 @@ Set your API keys in your environment:
 ```bash
 # Option 1: Using Ollama (LOCAL - FREE)
 export OLLAMA_API_BASE=http://localhost:11434
-export MODEL_NAME=glm-4.7-flash:latest  # or qwen3.5:latest, deepseek-r1:14b, etc.
+export MODEL_NAME=glm-4.7-flash:latest          # or qwen3.5:latest, deepseek-r1:14b, etc.
 export TAVILY_API_KEY=your_tavily_api_key_here  # ✅ Required for web search
 
 # Option 2: Using Cloud APIs
-export ANTHROPIC_API_KEY=your_anthropic_api_key_here  # For Claude model
-export GOOGLE_API_KEY=your_google_api_key_here        # For Gemini model ([get one here](https://ai.google.dev/gemini-api/docs))
-export TAVILY_API_KEY=your_tavily_api_key_here        # Required for web search ([get one here](https://www.tavily.com/)) with a generous free tier
-export LANGCHAIN_TRACING_V2=true                       # Enable LangSmith tracing
+export ANTHROPIC_API_KEY=your_anthropic_api_key_here      # For Claude model
+export GOOGLE_API_KEY=your_google_api_key_here            # For Gemini model ([get one here](https://ai.google.dev/gemini-api/docs))
+export TAVILY_API_KEY=your_tavily_api_key_here            # Required for web search ([get one here](https://www.tavily.com/)) with a generous free tier
+export LANGCHAIN_TRACING_V2=true                          # Enable LangSmith tracing
 export LANGSMITH_ENDPOINT=https://api.smith.langchain.com # LangSmith endpoint
-export LANGCHAIN_API_KEY=your_langsmith_api_key_here   # [LangSmith API key](https://smith.langchain.com/settings) (free to sign up)
-export LANGCHAIN_PROJECT=deep-research-deepagents      # The project name to log traces to
+export LANGCHAIN_API_KEY=your_langsmith_api_key_here      # [LangSmith API key](https://smith.langchain.com/settings) (free to sign up)
+export LANGCHAIN_PROJECT=deep-research-deepagents         # The project name to log traces to
 ```
 
 ## Usage Options
@@ -52,16 +52,66 @@ Run the standalone Python script to execute the research agent:
 uv run python research_agent_cli.py "Research AI Agents"
 ```
 
-You can optionally pass a document folder to extract custom documents and choose a structured output target:
+#### Command Line Options
 
+The CLI supports the following options:
+
+```
+positional arguments:
+  subject               Research subject. If omitted, a subject file may be used instead.
+
+optional arguments:
+  --subject-file SUBJECT_FILE
+                        Optional file path to read the research subject from
+  --verify_ssl [VERIFY_SSL]
+                        Verify SSL certificates (default: True). Set to False to skip SSL verification
+  --ssl-ca-files SSL_CA_FILES
+                        Path to a PEM CA bundle to use for HTTPS verification
+  --verbose [VERBOSE]   Show progress (default: True). When False, runs agent without progress display
+  --help, -h            Show this help message and exit
+  --doc-folder DOC_FOLDER
+                        Optional folder containing supported documents to use as research material
+  --no-web              Disable web search (Tavily) during research
+  --target {list,slides,interview,golden-dataset}
+                        Optional structured output target. Use '--target list' to see all options.
+  --title TITLE         Optional research title for output file
+```
+
+#### Examples
+
+Basic research task:
+```bash
+uv run python research_agent_cli.py "Research AI Agents"
+```
+
+With document folder and structured output:
 ```bash
 uv run python research_agent_cli.py "Research AI Agents" --doc-folder ./docs --target slides
 ```
 
-To generate an interview question kit grounded in the local documents:
-
+Generate an interview question kit:
 ```bash
 uv run python research_agent_cli.py "Research AI Agents" --doc-folder ./docs --target interview
+```
+
+Generate a golden dataset:
+```bash
+uv run python research_agent_cli.py "Generate 20 question-answer pairs for the documents provided" --doc-folder ./docs/policy/ --target golden-dataset
+```
+
+Without web search (using only local documents):
+```bash
+uv run python research_agent_cli.py "Research AI Agents" --doc-folder ./docs --no-web
+```
+
+Read subject from a file:
+```bash
+uv run python research_agent_cli.py --subject-file ./input/subject.txt --doc-folder ./docs
+```
+
+Show available structured output targets:
+```bash
+uv run python research_agent_cli.py --target list
 ```
 
 Structured targets are skill-driven. Add a new `research_agent/skills/<target>/SKILL.md`
@@ -109,7 +159,7 @@ This provides a user-friendly chat interface and visualization of files in state
 
 <img width="1917" alt="Screenshot 2026-04-03 at 12:44 11 PM" src="resources/Screenshot 2026-04-03 at 12 44 11 PM.png" />
 
-## Deep Research Agent Components
+## 🧩 Deep Research Agent Components
 
 What is used in the deep research agent?
 
