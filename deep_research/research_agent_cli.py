@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 from agent import agent, model
 from research_agent.tools import REPORTS_OUTPUT_FOLDER
-from utils import str2bool, get_ssl_verify_config
+from utils import str2bool, get_ssl_verify_config, show_prompt, format_messages
 
 # Load environment variables
 load_dotenv()
@@ -47,8 +47,31 @@ class Spinner:
         sys.stdout.flush()
 
 
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
 from research_agent.cli import build_instruction, build_parser, list_targets
+
+
+def wrap_as_message(m):
+    """Wrap a dict-based message into a LangChain BaseMessage for format_messages compatibility."""
+    if isinstance(m, BaseMessage):
+        return m
+    if not isinstance(m, dict):
+        return HumanMessage(content=str(m))
+
+    role = m.get("role", "")
+    content = m.get("content", "")
+    name = m.get("name")
+    tool_calls = m.get("tool_calls")
+
+    if role == "user" or role == "human":
+        return HumanMessage(content=content, name=name)
+    if role == "assistant" or role == "ai":
+        return AIMessage(content=content, name=name, tool_calls=tool_calls)
+    if role == "tool":
+        return ToolMessage(content=content, tool_call_id=m.get("tool_call_id", "N/A"), name=name)
+
+    return HumanMessage(content=content, name=name)
+
 
 CSV_EXPORT_PATH_RE = re.compile(r"\*\*CSV exported to:\*\*\s*`([^`]+)`")
 
@@ -173,6 +196,7 @@ def main():
         title = args.title
 
     print(f"Starting research on: {args.subject}")
+    show_prompt(instruction, title="Research Instruction")
     print("This may take a few minutes as the agent searches and analyzes...")
 
     # Run the agent with progress printouts
@@ -188,7 +212,6 @@ def main():
     output_folder = configure_output_folder(args.doc_folder)
     print(f"Output subfolder is set to: {output_folder}")
 
-    # Run the agent based on verbose flag
     if args.verbose:
         # Show progress with spinner
         spinner = Spinner("Initializing research inputs...")
@@ -221,6 +244,9 @@ def main():
 
                 if msgs:
                     last = msgs[-1]
+                    # Display the latest message using rich formatting if verbose
+                    format_messages([wrap_as_message(last)])
+
                     # Handle both dict-based and object-based messages
                     if isinstance(last, dict):
                         role = last.get("role", "")
@@ -277,6 +303,7 @@ def main():
                 verify_ssl=verify_ssl
             )
             spinner.stop()
+
             invoke_time = time.time() - start_invoke
             print(f"\n✨ Fallback research completed in {invoke_time:.1f}s!\n")
     else:
@@ -295,6 +322,10 @@ def main():
         total_time = time.time() - start_time
         print(f"\n✨ Research completed in {total_time:.1f}s!\n")
 
+    # Display messages from the result if verbose
+    if result and "messages" in result:
+        format_messages([wrap_as_message(m) for m in result["messages"]])
+
     # Output the result. The agent usually writes to /final_report.md
     files = result.get("files", {})
 
@@ -305,7 +336,6 @@ def main():
         print("\n" + "=" * 80)
         print(f"Final Report ({filename}):")
         print("=" * 80)
-        print(file_content)
     else:
         # Fallback to the last message content
         last_message = result.get('messages', [])[-1]
@@ -315,7 +345,6 @@ def main():
         print("\n" + "=" * 80)
         print(f"Final Response ({filename}):")
         print("=" * 80)
-        print(last_message_content or 'No output received.')
 
 
 if __name__ == "__main__":

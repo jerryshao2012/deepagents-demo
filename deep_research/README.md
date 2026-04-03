@@ -83,7 +83,7 @@ langgraph dev
 
 LangGraph server will open a new browser window with the Studio interface, which you can submit your search query to:
 
-<img width="2869" height="1512" alt="Screenshot 2025-11-17 at 11 42 59 AM" src="https://github.com/user-attachments/assets/03090057-c199-42fe-a0f7-769704c2124b" />
+<img width="1915" alt="Screenshot 2026-04-03 at 10 27 11 AM" src="./resources/Screenshot 2026-04-03 at 10 27 11 AM.png" />
 
 You can also connect the LangGraph server to a [UI specifically designed for deepagents](https://github.com/langchain-ai/deep-agents-ui):
 
@@ -94,11 +94,63 @@ yarn install
 yarn dev
 ```
 
-Then follow the instructions in the [deep-agents-ui README](https://github.com/langchain-ai/deep-agents-ui?tab=readme-ov-file#connecting-to-a-langgraph-server) to connect the UI to the running LangGraph server.
+Then follow the instructions in the [deep-agents-ui README](https://github.com/langchain-ai/deep-agents-ui?tab=readme-ov-file#connecting-to-a-langgraph-server) to connect the UI to the running LangGraph server. Get the Deployment URL and Assistant ID from the terminal output and langgraph.json file, respectively:
+
+- **Deployment URL**: http://127.0.1:2024
+- **Assistant ID**: research
+
+**Open Deep Agents UI** at [http://localhost:3000](http://localhost:3000) and input the Deployment URL and Assistant ID:
+
+- **Deployment URL**: The URL for the LangGraph deployment you are connecting to
+- **Assistant ID**: The ID of the assistant or agent you want to use
+- [Optional] **LangSmith API Key**: Your LangSmith API key (format: `lsv2_pt_...`). This may be required for accessing deployed LangGraph applications. You can also provide this via the `NEXT_PUBLIC_LANGSMITH_API_KEY` environment variable.
 
 This provides a user-friendly chat interface and visualization of files in state.
 
-<img width="2039" height="1495" alt="Screenshot 2025-11-17 at 1 11 27 PM" src="https://github.com/user-attachments/assets/d559876b-4c90-46fb-8e70-c16c93793fa8" />
+<img width="1917" alt="Screenshot 2026-04-03 at 12:44 11 PM" src="resources/Screenshot 2026-04-03 at 12 44 11 PM.png" />
+
+## Deep Research Agent Components
+
+What is used in the deep research agent?
+
+### 1. Planning (`write_todos`)
+- **Workflow Orchestration**: The research workflow starts with creating a todo list using the `write_todos` tool to break down the user's research request into focused tasks.
+- **Progress Tracking**: This list is used for task breakdown and ensures systematic research coverage.
+
+### 2. Filesystem & Context Gathering
+- **Document Reading**: A specialized `read_doc_folder` tool is used to extract text from various document formats, including:
+  - PDF (`.pdf`)
+  - Word (`.docx`)
+  - PowerPoint (`.pptx`)
+  - Excel (`.xlsx`)
+  - Text and Markdown (`.txt`, `.md`)
+- **Caching**: Extracted text from documents is cached under the active output folder (for example `output/` or `output/<doc-folder-name>/`) to avoid redundant processing.
+- **Storage**: Findings and final reports are saved to files like `/research_request.md` and `/final_report.md` (using `write_file`).
+
+### 3. Web Research Tools
+- **Tavily Search**: The primary tool for web research is `tavily_search`, which performs web searches to gather information.
+- **Webpage Fetching**: `fetch_webpage_content` is used to retrieve and process content from specific URLs found during searches.
+
+### 4. Sub-Agents & Delegation
+- **Delegation Strategy**: The orchestrator uses the `task()` tool (provided by the `deepagents` framework) to delegate specific research tasks to specialized sub-agents.
+- **Parallel Execution**: Sub-agents can run in parallel for comparison tasks or multi-faceted research (configured in `agent.py`).
+- **Context Isolation**: Each sub-agent operates within its own context, and findings are later synthesized by the orchestrator.
+
+### 5. Smart Defaults & Prompting
+- **Structured Prompts**: Extensive prompt templates in `research_agent/prompts.py` (e.g., `RESEARCH_WORKFLOW_INSTRUCTIONS`, `RESEARCHER_INSTRUCTIONS`) define detailed behaviors for:
+  - Research planning and limits
+  - Citation formatting (`[1]`, `[2]`...)
+  - Report writing patterns (Comparisons, Lists, Summaries)
+  - Tool usage rules (e.g., must use `think_tool` after each search)
+
+### 6. Structured Output Targets
+- **Target Skills**: The agent can generate structured data using skills like `golden-dataset`.
+- **Validation and Finalization**: Tools like `render_target_output`, `finalize_golden_dataset_output`, and `trigger_dataset_evaluation` are used to validate schemas, export CSVs, and run or re-run quality metrics.
+
+### 7. Context Management
+- **Reflection**: The `think_tool` is used for "inner monologue" and strategic planning, helping the agent reflect on findings before deciding the next step.
+- **Synthesis**: The orchestrator is responsible for consolidating findings and citations from all sub-agents into a final, coherent report.
+- **Auto-summarization**: The underlying `deepagents` framework likely handles conversation pruning or summarization when context limits are reached.
 
 ## 📚 Resources
 
@@ -162,46 +214,3 @@ The deep research agent adds the following custom tools beyond the built-in deep
 | `render_target_output` | Generic target renderer that loads a target skill from `research_agent/skills/*/SKILL.md`, validates the provided JSON payload against that target's schema, and renders the final Markdown output. |
 | `finalize_golden_dataset_output` | Golden-dataset only: validates the same JSON as `render_target_output`, exports a CSV under `output/` via `skills/golden_dataset/pipeline.py`, then runs quality metrics so export and evaluation always happen in order. |
 | `trigger_dataset_evaluation` | Evaluates an existing golden dataset CSV (or use after export); computes quality metrics using the bundled script. Prefer `finalize_golden_dataset_output` for new datasets. |
-
-## Deep Research Agent Components
-
-What is used in the deep research agent?
-
-### 1. Planning (`write_todos`)
-- **Workflow Orchestration**: The research workflow starts with creating a todo list using the `write_todos` tool to break down the user's research request into focused tasks.
-- **Progress Tracking**: This list is used for task breakdown and ensures systematic research coverage.
-
-### 2. Filesystem & Context Gathering
-- **Document Reading**: A specialized `read_doc_folder` tool is used to extract text from various document formats, including:
-  - PDF (`.pdf`)
-  - Word (`.docx`)
-  - PowerPoint (`.pptx`)
-  - Excel (`.xlsx`)
-  - Text and Markdown (`.txt`, `.md`)
-- **Caching**: Extracted text from documents is cached under the active output folder (for example `output/` or `output/<doc-folder-name>/`) to avoid redundant processing.
-- **Storage**: Findings and final reports are saved to files like `/research_request.md` and `/final_report.md` (using `write_file`).
-
-### 3. Web Research Tools
-- **Tavily Search**: The primary tool for web research is `tavily_search`, which performs web searches to gather information.
-- **Webpage Fetching**: `fetch_webpage_content` is used to retrieve and process content from specific URLs found during searches.
-
-### 4. Sub-Agents & Delegation
-- **Delegation Strategy**: The orchestrator uses the `task()` tool (provided by the `deepagents` framework) to delegate specific research tasks to specialized sub-agents.
-- **Parallel Execution**: Sub-agents can run in parallel for comparison tasks or multi-faceted research (configured in `agent.py`).
-- **Context Isolation**: Each sub-agent operates within its own context, and findings are later synthesized by the orchestrator.
-
-### 5. Smart Defaults & Prompting
-- **Structured Prompts**: Extensive prompt templates in `research_agent/prompts.py` (e.g., `RESEARCH_WORKFLOW_INSTRUCTIONS`, `RESEARCHER_INSTRUCTIONS`) define detailed behaviors for:
-  - Research planning and limits
-  - Citation formatting (`[1]`, `[2]`...)
-  - Report writing patterns (Comparisons, Lists, Summaries)
-  - Tool usage rules (e.g., must use `think_tool` after each search)
-
-### 6. Structured Output Targets
-- **Target Skills**: The agent can generate structured data using skills like `golden-dataset`.
-- **Validation and Finalization**: Tools like `render_target_output`, `finalize_golden_dataset_output`, and `trigger_dataset_evaluation` are used to validate schemas, export CSVs, and run or re-run quality metrics.
-
-### 7. Context Management
-- **Reflection**: The `think_tool` is used for "inner monologue" and strategic planning, helping the agent reflect on findings before deciding the next step.
-- **Synthesis**: The orchestrator is responsible for consolidating findings and citations from all sub-agents into a final, coherent report.
-- **Auto-summarization**: The underlying `deepagents` framework likely handles conversation pruning or summarization when context limits are reached.
