@@ -399,11 +399,12 @@ def read_doc_folder(folder_path: str, specific_files: list[str] | None = None) -
         total_size_mb = sum(f.lstat().st_size for f in supported_files) / (1024 * 1024)
 
         if total_files > MAX_FILES_TO_READ or total_size_mb > MAX_TOTAL_SIZE_MB:
-            # Build a diverse auto-sample: spread evenly across the full sorted file list
-            # so it covers early, middle, and late portions of the directory.
+            # Randomly select diverse sample from the entire file collection
+            # This ensures better coverage across all documents rather than just top ones
+            import random
+
             sample_size = min(MAX_FILES_TO_READ, total_files)
-            step = max(1, total_files // sample_size)
-            auto_sample = [supported_files[i].name for i in range(0, total_files, step)][:sample_size]
+            auto_sample = [f.name for f in random.sample(supported_files, sample_size)]
 
             # Show at most 60 files in the full listing so the context isn't blown out
             preview_list = "\n".join(
@@ -430,11 +431,6 @@ def read_doc_folder(folder_path: str, specific_files: list[str] | None = None) -
     extracted_text: list[str] = []
     processed_files: list[str] = []
     failed_files: list[str] = []
-
-    # Determine output subfolder based on input folder_path
-    # We want to avoid nested output folders like output/input/policy/
-    # If the folder is a direct child of the current directory, use its name.
-    # Otherwise, try to use a relatively clean name.
 
     for file_path in files_to_process:
         # For output subfolder
