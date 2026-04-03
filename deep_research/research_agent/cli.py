@@ -118,9 +118,16 @@ def build_instruction(
         )
         if target == "golden-dataset":
             instruction += (
-                "\n\n**Golden dataset delivery:** Immediately after a successful "
-                "`render_target_output` call, call `finalize_golden_dataset_output` with the "
-                "same JSON payload so the CSV is written and metrics run in order."
+                "\n\n**Golden dataset delivery — MANDATORY tool-call sequence (zero exceptions):**\n"
+                "After you have read the documents and drafted all items, you MUST execute these "
+                "tool calls in this exact order — do NOT write any description of your plan, do NOT "
+                "ask for confirmation, and do NOT stop after a verbal summary:\n"
+                "  1. Call `render_target_output` with target_id='golden-dataset' and the full JSON payload.\n"
+                "  2. Immediately call `finalize_golden_dataset_output` with the IDENTICAL JSON string. "
+                "This is what writes the CSV to disk — skipping it means no file is saved.\n"
+                "  3. Only after both tool calls succeed, write a short confirmation summary.\n"
+                "WARNING: Any response that says 'I will synthesize', 'Next I will call...', or "
+                "'Please stand by' without those tool calls already having been executed is wrong."
             )
 
     return instruction

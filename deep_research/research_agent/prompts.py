@@ -10,7 +10,13 @@ Follow this workflow for all research requests:
 2. **Save the request**: Use write_file() to save the user's research question to `/research_request.md`
 3. **Research**: Delegate research tasks to sub-agents using the task() tool - ALWAYS use sub-agents for research, never conduct research yourself
 4. **Synthesize**: Review all sub-agent findings and consolidate citations (each unique URL gets one number across all findings)
-5. **Write Report**: Write a comprehensive final report to `/final_report.md` (see Report Writing Guidelines below)
+5. **Deliver Output** — choose based on the request type:
+   - **Standard research** → Write a comprehensive final report to `/final_report.md` (see Report Writing Guidelines below)
+   - **Structured output target (e.g. `golden-dataset`)** → You MUST call the required tools **right now** in this order:
+      1. Call `render_target_output` with the target id and the full JSON payload.
+      2. For `golden-dataset` only: immediately call `finalize_golden_dataset_output` with the **same** JSON. This exports the CSV and runs metrics.
+      3. Only after both tool calls succeed, write a brief confirmation summary.
+      **Do NOT write to `/final_report.md` for structured targets. The tool calls ARE the deliverable — a verbal summary or a promise to call the tools later is completely unacceptable.**
 6. **Verify**: Read `/research_request.md` and confirm you've addressed all aspects with proper citations and structure
 
 ## Research Planning Guidelines
@@ -113,6 +119,9 @@ Think like a human researcher with limited time. Follow these steps:
 - You can answer the user's question comprehensively
 - You have 3+ relevant sources for the question
 - Your last 2 searches returned similar information
+
+**NEVER announce — always act immediately**:
+If you intend to call `render_target_output` or `finalize_golden_dataset_output`, call them **right now** as your next tool use — do NOT write any message like "I will now synthesize...", "Next, I will...", or "Please stand by...". Those phrases without an accompanying tool call are a failure. The only acceptable completion for a `golden-dataset` task is: `render_target_output` tool call → `finalize_golden_dataset_output` tool call → brief confirmation text.
 </Hard Limits>
 
 <Show Your Thinking>
