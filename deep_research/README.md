@@ -27,8 +27,8 @@ Set your API keys in your environment:
 ```bash
 # Option 1: Using Ollama (LOCAL - FREE)
 export OLLAMA_API_BASE=http://localhost:11434
-export MODEL_NAME=glm-4.7-flash:latest          # or qwen3.5:latest, deepseek-r1:14b, etc.
-export TAVILY_API_KEY=your_tavily_api_key_here  # ✅ Required for web search
+export MODEL_NAME=glm-4.7-flash:latest                    # or qwen3.5:latest, deepseek-r1:14b, etc.
+export TAVILY_API_KEY=your_tavily_api_key_here            # ✅ Required for web search
 
 # Option 2: Using Cloud APIs
 export ANTHROPIC_API_KEY=your_anthropic_api_key_here      # For Claude model
@@ -162,6 +162,8 @@ This provides a user-friendly chat interface and visualization of files in state
 ## 🧩 Deep Research Agent Components
 
 What is used in the deep research agent?
+
+<img width="377" alt="Deep Research Graph" src="./resources/deep_research_graph.png" />
 
 ### 1. Planning (`write_todos`)
 - **Workflow Orchestration**: The research workflow starts with creating a todo list using the `write_todos` tool to break down the user's research request into focused tasks.
