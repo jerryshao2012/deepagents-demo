@@ -8,6 +8,11 @@
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
+*Alternative installation for restricted corporate environments:*
+```bash
+pip install uv
+```
+
 Ensure you are in the `deep_research` directory:
 
 ```bash
@@ -92,6 +97,11 @@ uv run python research_agent_cli.py "Research AI Agents" --doc-folder ./docs --t
 Generate an interview question kit:
 ```bash
 uv run python research_agent_cli.py "Research AI Agents" --doc-folder ./docs --target interview
+```
+
+Prepare a comprehensive interview with questions and answers:
+```bash
+uv run python research_agent_cli.py "Preparing a 60 minutes interview with list of question and answer" --doc-folder ./docs/interview_prep --target interview-coach-pro
 ```
 
 Generate a golden dataset:
