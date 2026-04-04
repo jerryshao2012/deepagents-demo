@@ -19,10 +19,10 @@ _QUALITY_GUIDELINES_SECTION_RE = re.compile(r"^## Quality Guidelines\s*$", re.MU
 SUPPORTED_RENDER_TEMPLATES = {"markdown_blocks"}
 
 
-def _extract_schema_block(body: str, path: Path) -> tuple[str, dict[str, Any]]:
+def _extract_schema_block(body: str, path: Path) -> tuple[str, dict[str, Any] | None]:
     schema_heading = _SCHEMA_SECTION_RE.search(body)
     if not schema_heading:
-        raise ValueError(f"Skill file {path} is missing a `## Schema` section.")
+        return body.strip(), None
 
     schema_body = body[schema_heading.end():]
     json_match = _JSON_BLOCK_RE.search(schema_body)
@@ -34,10 +34,10 @@ def _extract_schema_block(body: str, path: Path) -> tuple[str, dict[str, Any]]:
     return instructions, schema
 
 
-def _extract_render_spec(body: str, path: Path) -> list[dict[str, Any]]:
+def _extract_render_spec(body: str, path: Path) -> list[dict[str, Any]] | None:
     render_heading = _RENDER_SPEC_SECTION_RE.search(body)
     if not render_heading:
-        raise ValueError(f"Skill file {path} is missing a `## Render Spec` section.")
+        return None
 
     render_body = body[render_heading.end():]
     json_match = _JSON_BLOCK_RE.search(render_body)
@@ -75,9 +75,7 @@ def _parse_skill_file(path: Path) -> dict[str, Any]:
     instructions, schema = _extract_schema_block(body, path)
     render_spec = _extract_render_spec(body, path)
     render_template = frontmatter.get("render_template")
-    if not render_template:
-        raise ValueError(f"Skill file {path} is missing `render_template` in frontmatter.")
-    if render_template not in SUPPORTED_RENDER_TEMPLATES:
+    if render_template and render_template not in SUPPORTED_RENDER_TEMPLATES:
         supported = ", ".join(sorted(SUPPORTED_RENDER_TEMPLATES))
         raise ValueError(
             f"Skill file {path} uses unsupported render_template '{render_template}'. "
@@ -93,7 +91,7 @@ def _parse_skill_file(path: Path) -> dict[str, Any]:
             "instructions": instructions,
             "quality_guidelines": _extract_quality_guidelines(body),
             "schema": schema,
-            "render": {"template": render_template, "spec": render_spec},
+            "render": {"template": render_template, "spec": render_spec} if render_spec else None,
             "defaults": frontmatter.get("defaults", {}),
             "skill_path": str(path),
         }
@@ -132,8 +130,10 @@ def format_target_catalog() -> str:
     lines = []
     for target_id in list_target_ids():
         definition = get_target_definition(target_id)
+        has_schema = bool(definition.get("schema"))
+        target_type = "Structured JSON (Requires render_target_output tool)" if has_schema else "Unstructured Markdown Document"
         lines.append(
-            f"- `{target_id}`: {definition['title']} — {definition['description']}"
+            f"- `{target_id}` [{target_type}]: {definition['title']} — {definition['description']}"
         )
     return "\n".join(lines)
 

@@ -17,6 +17,7 @@ Follow this workflow for all research requests:
       2. For `golden-dataset` only: immediately call `finalize_golden_dataset_output` with the **same** JSON. This exports the CSV and runs metrics.
       3. Only after both tool calls succeed, write a brief confirmation summary.
       **Do NOT write to `/final_report.md` for structured targets. The tool calls ARE the deliverable — a verbal summary or a promise to call the tools later is completely unacceptable.**
+   - **Unstructured target (e.g. `interview-coach-pro`)** → Write the specialized markdown content directly to `/final_report.md`. Do NOT call `render_target_output`.
 6. **Verify**: Read `/research_request.md` and confirm you've addressed all aspects with proper citations and structure
 
 ## Research Planning Guidelines
@@ -85,7 +86,7 @@ You have access to specific research tools:
 1. **tavily_search**: For conducting web searches to gather information
 2. **think_tool**: For reflection and strategic planning during research
 3. **read_doc_folder**: For extracting text from supported local documents
-4. **render_target_output**: For validating and rendering any structured output target from a target skill
+4. **render_target_output**: STRICTLY for JSON structured targets ONLY. Do NOT use for unstructured markdown targets. NEVER put raw markdown into payload_json!
 5. **finalize_golden_dataset_output**: For the `golden-dataset` target only — after `render_target_output`, call this with the **same JSON** to export CSV under `output/` and run quality metrics in one guaranteed step
 **CRITICAL: Use think_tool after each search to reflect on results and plan next steps**
 </Available Research Tools>
@@ -156,6 +157,8 @@ For `golden-dataset`, you MUST also call `finalize_golden_dataset_output` with t
 immediately after, so the CSV and metrics run — a verbal summary is NOT a substitute.
 The tool call IS the response — a verbal summary is NOT acceptable as a substitute.
 Do NOT say 'you can export this' or 'let me know if you want the CSV' — call the tools immediately.
+
+**For Unstructured targets:** do NOT call `render_target_output`. Instead, output the final markdown exactly as specified.
 
 **CRITICAL — Structured Targets: complete fully in one pass. NEVER:**
 - Announce a plan and then stop to await user confirmation

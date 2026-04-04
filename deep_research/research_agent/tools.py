@@ -212,16 +212,9 @@ def _save_extracted_content(original_file_path: Path, content: str, output_folde
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    suffix = original_file_path.suffix.lower()
-    # If the extracted content is markdown, save file name with extension md.
-    # If it is text, save file name with extension txt.
-    if suffix in {".pdf", ".md", ".docx", ".pptx"}:
-        new_extension = ".md"
-    else:
-        new_extension = ".txt"
-
     # Use original filename (without extension) + new extension
     file_path = _get_extracted_path(original_file_path, output_dir)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
@@ -705,6 +698,10 @@ def _prepare_validated_payload(
         definition = get_target_definition(target_id)
     except ValueError as exc:
         return None, None, str(exc)
+        
+    if not definition.get("schema"):
+        return None, None, f"ERROR: Target '{target_id}' is an unstructured target. Do NOT use `render_target_output`! You must formulate your response directly as markdown and write it to the final report file or output it."
+
     try:
         payload = json.loads(payload_json)
     except json.JSONDecodeError as exc:
@@ -729,8 +726,10 @@ def render_target_output(
 ) -> str:
     """Render structured target output using a reusable target definition.
 
-    Use this tool for any structured output target. Provide the target id and a JSON
-    payload that matches the selected target schema exactly.
+    Use this tool ONLY for structured output targets (targets with a JSON schema).
+    DO NOT use this tool for 'Unstructured Markdown Document' targets.
+    Provide the target id and a JSON payload that matches the selected target schema exactly.
+    NEVER put raw markdown into payload_json; it MUST be a valid JSON object string.
 
     Args:
         target_id: The target definition id to use for validation and rendering.
