@@ -16,7 +16,6 @@ from datetime import datetime
 from typing import Literal
 
 from deepagents import create_deep_agent
-from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from typing_extensions import TypedDict
@@ -29,8 +28,6 @@ from src.prompts import (
 )
 from src.tools import tavily_search
 
-# Load environment variables
-load_dotenv()
 
 class Context(TypedDict, total=False):
     """Runtime context passed via `context=` at invoke time.
