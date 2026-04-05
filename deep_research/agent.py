@@ -49,7 +49,9 @@ class ResearchState(AgentState):
     target: str | None
 
 
-class CLIInstructionMiddleware(AgentMiddleware[ResearchState, Any, Any]):
+class CLIInstructionMiddleware(AgentMiddleware):
+    state_schema = ResearchState
+
     def before_agent(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
         messages = state.get("messages", [])
         has_config = any(
