@@ -11,7 +11,7 @@ from utils import get_ssl_verify_config
 
 
 def get_configured_model():
-    """Build the first matching chat model from environment configuration."""
+    """Build the first matching chat model from the environment configuration."""
     verify_ssl = get_ssl_verify_config()
 
     if os.getenv("GOOGLE_API_KEY") and os.getenv("MODEL_NAME"):
