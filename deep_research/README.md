@@ -109,6 +109,11 @@ Generate a golden dataset:
 uv run python research_agent_cli.py "Generate 20 question-answer pairs for the documents provided" --doc-folder ./docs/policy/ --target golden-dataset
 ```
 
+Generate code using code-generator skill:
+```bash
+uv run python research_agent_cli.py --subject-file ./input/coding-create-a-image.txt --target code-generator
+```
+
 Without web search (using only local documents):
 ```bash
 uv run python research_agent_cli.py "Research AI Agents" --doc-folder ./docs --no-web
@@ -116,7 +121,7 @@ uv run python research_agent_cli.py "Research AI Agents" --doc-folder ./docs --n
 
 Read subject from a file:
 ```bash
-uv run python research_agent_cli.py --subject-file ./input/subject.txt --doc-folder ./docs
+uv run python research_agent_cli.py --subject-file ./input/interview-subject.txt --doc-folder ./docs
 ```
 
 Show available structured output targets:

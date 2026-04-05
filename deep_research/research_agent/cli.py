@@ -114,9 +114,18 @@ def build_instruction(
             f"\n\nThe requested output target is `{target}`."
             f"\nDescription: {definition['description']}"
             f"\nInstructions:\n{definition['instructions']}"
-            "\nAfter researching, please call `render_target_output` with the selected "
-            "target id and a JSON payload that matches that target schema exactly."
         )
+        if definition.get("schema"):
+            instruction += (
+                "\nAfter researching, please call `render_target_output` with the selected "
+                "target id and a JSON payload that matches that target schema exactly."
+            )
+        else:
+            instruction += (
+                "\nAfter researching, use the `write_file` tool to save your final output directly "
+                "to `/final_report.md` as Markdown text. Do NOT use `render_target_output` since this is an unstructured target. "
+                "Do NOT just say you will write it; you must actually call the `write_file` tool with the text."
+            )
         if target == "golden-dataset":
             instruction += (
                 "\n\n**Golden dataset delivery — MANDATORY tool-call sequence (zero exceptions):**\n"

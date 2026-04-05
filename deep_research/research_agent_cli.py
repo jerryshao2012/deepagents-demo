@@ -128,8 +128,8 @@ def extract_message_content(message):
 
 
 def save_research_to_file(research_content, filename=None, output_folder=None):
-    # Get current date
-    current_date = datetime.now().strftime("%Y-%m-%d")
+    # Get current date and time
+    current_date = datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
 
     # Generate a title for the research
     title = generate_research_title(research_content)

@@ -11,13 +11,13 @@ Follow this workflow for all research requests:
 3. **Research**: Delegate research tasks to sub-agents using the task() tool - ALWAYS use sub-agents for research, never conduct research yourself
 4. **Synthesize**: Review all sub-agent findings and consolidate citations (each unique URL gets one number across all findings)
 5. **Deliver Output** — choose based on the request type:
-   - **Standard research** → Write a comprehensive final report to `/final_report.md` (see Report Writing Guidelines below)
+   - **Standard research** → Use the `write_file` tool to write a comprehensive final report to `/final_report.md` (see Report Writing Guidelines below)
    - **Structured output target (e.g. `golden-dataset`)** → You MUST call the required tools **right now** in this order:
       1. Call `render_target_output` with the target id and the full JSON payload.
       2. For `golden-dataset` only: immediately call `finalize_golden_dataset_output` with the **same** JSON. This exports the CSV and runs metrics.
       3. Only after both tool calls succeed, write a brief confirmation summary.
       **Do NOT write to `/final_report.md` for structured targets. The tool calls ARE the deliverable — a verbal summary or a promise to call the tools later is completely unacceptable.**
-   - **Unstructured target (e.g. `interview-coach-pro`)** → Write the specialized markdown content directly to `/final_report.md`. Do NOT call `render_target_output`.
+   - **Unstructured target (e.g. `interview-coach-pro`)** → Use the `write_file` tool to write the specialized markdown content directly to `/final_report.md`. Do NOT call `render_target_output`.
 6. **Verify**: Read `/research_request.md` and confirm you've addressed all aspects with proper citations and structure
 
 ## Research Planning Guidelines
@@ -71,6 +71,10 @@ Simply list items with details - no introduction needed:
   ### Sources
   [1] AI Research Paper: https://example.com/paper
   [2] Industry Analysis: https://example.com/analysis
+
+## CRITICAL EXECUTION RULES
+1. **NEVER ask the user for results**: When you delegate a task via the `task()` tool, the subagent's findings will be returned directly to you in the tool's output context. You MUST read the tool output. Do NOT ask the user to provide the results.
+2. **Never pause for narrative**: When moving from synthesis to output delivery, DO NOT output a conversational message like "I will now synthesize..." or "Note on deliverable...". You MUST immediately and directly call the `write_file` tool.
 """
 
 RESEARCHER_INSTRUCTIONS = """You are a research assistant conducting research on the user's input topic. For context, today's date is {date}.
