@@ -9,8 +9,10 @@ from pathlib import Path
 
 from deepagents.backends.utils import file_data_to_string
 from dotenv import load_dotenv
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
 
 from agent import agent, model
+from research_agent.cli import build_parser, list_targets
 from research_agent.tools import REPORTS_OUTPUT_FOLDER
 from utils import str2bool, get_ssl_verify_config, show_prompt, format_messages
 
@@ -45,10 +47,6 @@ class Spinner:
             self.thread.join()
         sys.stdout.write("\r\033[K")
         sys.stdout.flush()
-
-
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
-from research_agent.cli import build_parser, list_targets
 
 
 def wrap_as_message(m):
@@ -182,7 +180,6 @@ def main():
         list_targets()
         sys.exit(0)
 
-    target = args.target
     subject = args.subject
     if not subject and args.subject_file and os.path.exists(args.subject_file):
         with open(args.subject_file, "r", encoding="utf-8") as handle:
@@ -211,6 +208,17 @@ def main():
     output_folder = configure_output_folder(args.doc_folder)
     print(f"Output subfolder is set to: {output_folder}")
 
+    messages = {
+        "messages": [
+            {
+                "role": "user",
+                "content": instruction,
+            }
+        ],
+        "doc_folder": args.doc_folder,
+        "no_web": args.no_web,
+        "target": args.target,
+    }
     if args.verbose:
         # Show progress with spinner
         spinner = Spinner("Initializing research inputs...")
@@ -219,17 +227,7 @@ def main():
         try:
             # We attempt to stream updates from LangGraph to provide visibility
             for state in agent.stream(
-                    {
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": instruction,
-                            }
-                        ],
-                        "doc_folder": args.doc_folder,
-                        "no_web": args.no_web,
-                        "target": target,
-                    },
+                    messages=messages,
                     stream_mode="values",
                     verify_ssl=verify_ssl
             ):
@@ -294,17 +292,7 @@ def main():
             spinner.start("Running fallback synchronous invoke...")
             start_invoke = time.time()
             result = agent.invoke(
-                {
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": instruction,
-                        }
-                    ],
-                    "doc_folder": args.doc_folder,
-                    "no_web": args.no_web,
-                    "target": target,
-                },
+                messages=messages,
                 verify_ssl=verify_ssl
             )
             spinner.stop()
@@ -314,17 +302,7 @@ def main():
     else:
         # Run the agent directly without showing progress
         result = agent.invoke(
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": instruction,
-                    }
-                ],
-                "doc_folder": args.doc_folder,
-                "no_web": args.no_web,
-                "target": target,
-            },
+            messages=messages,
             verify_ssl=verify_ssl
         )
         total_time = time.time() - start_time
