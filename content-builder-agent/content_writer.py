@@ -26,12 +26,17 @@ from typing import Literal
 import yaml
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.spinner import Spinner
+import ollama
+from PIL import Image
+import io
+from google import genai
 
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
@@ -88,26 +93,49 @@ def generate_cover(prompt: str, slug: str) -> str:
         prompt: Detailed description of the image to generate.
         slug: Blog post slug. Image saves to blogs/<slug>/hero.png
     """
+    # Try Ollama first
     try:
-        from google import genai
+        output_path = EXAMPLE_DIR / "blogs" / slug / "hero.png"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        client = genai.Client()
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-image",
-            contents=[prompt],
+        response = ollama.generate(
+            model="x/flux2-klein",
+            prompt=prompt,
+            options={
+                'num_inference_steps': 30
+            }
         )
 
-        for part in response.parts:
-            if part.inline_data is not None:
-                image = part.as_image()
-                output_path = EXAMPLE_DIR / "blogs" / slug / "hero.png"
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                image.save(str(output_path))
-                return f"Image saved to {output_path}"
+        # Extract image data from response
+        if 'images' in response and response['images']:
+            image_data = response['images'][0]
+            image = Image.open(io.BytesIO(image_data))
+            image.save(str(output_path))
+            return f"Image saved to {output_path} (using Ollama x/flux2-klein)"
+        else:
+            raise ValueError("No image data in Ollama response")
 
-        return "No image generated"
     except Exception as e:
-        return f"Error: {e}"
+        console.print(f"[yellow]Ollama generation failed ({e}), trying Google Gemini as backup...[/]")
+        # Fallback to Google Gemini
+        try:
+            client = genai.Client()
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-image",
+                contents=[prompt],
+            )
+
+            for part in response.parts or []:
+                if part.inline_data is not None:
+                    image = part.as_image()
+                    output_path = EXAMPLE_DIR / "blogs" / slug / "hero.png"
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    image.save(str(output_path))
+                    return f"Image saved to {output_path} (using Google Gemini)"
+
+            return "No image generated"
+        except Exception as fallback_error:
+            return f"Error (both methods failed): Ollama - {e}, Gemini - {fallback_error}"
 
 
 @tool
@@ -119,26 +147,49 @@ def generate_social_image(prompt: str, platform: str, slug: str) -> str:
         platform: Either "linkedin" or "tweets"
         slug: Post slug. Image saves to <platform>/<slug>/image.png
     """
+    # Try Ollama first
     try:
-        from google import genai
+        output_path = EXAMPLE_DIR / platform / slug / "image.png"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        client = genai.Client()
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-image",
-            contents=[prompt],
+        response = ollama.generate(
+            model="x/flux2-klein",
+            prompt=prompt,
+            options={
+                'num_inference_steps': 30
+            }
         )
 
-        for part in response.parts:
-            if part.inline_data is not None:
-                image = part.as_image()
-                output_path = EXAMPLE_DIR / platform / slug / "image.png"
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                image.save(str(output_path))
-                return f"Image saved to {output_path}"
+        # Extract image data from response
+        if 'images' in response and response['images']:
+            image_data = response['images'][0]
+            image = Image.open(io.BytesIO(image_data))
+            image.save(str(output_path))
+            return f"Image saved to {output_path} (using Ollama x/flux2-klein)"
+        else:
+            raise ValueError("No image data in Ollama response")
 
-        return "No image generated"
     except Exception as e:
-        return f"Error: {e}"
+        console.print(f"[yellow]Ollama generation failed ({e}), trying Google Gemini as backup...[/]")
+        # Fallback to Google Gemini
+        try:
+            client = genai.Client()
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-image",
+                contents=[prompt],
+            )
+
+            for part in response.parts or []:
+                if part.inline_data is not None:
+                    image = part.as_image()
+                    output_path = EXAMPLE_DIR / platform / slug / "image.png"
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    image.save(str(output_path))
+                    return f"Image saved to {output_path} (using Google Gemini)"
+
+            return "No image generated"
+        except Exception as fallback_error:
+            return f"Error (both methods failed): Ollama - {e}, Gemini - {fallback_error}"
 
 
 def load_subagents(config_path: Path) -> list:
@@ -266,9 +317,10 @@ async def main():
 
     # Use Live display for spinner during waiting periods
     with Live(display.spinner, console=console, refresh_per_second=10, transient=True) as live:
+        config: RunnableConfig = {"configurable": {"thread_id": "content-writer-demo"}}
         async for chunk in agent.astream(
                 {"messages": [("user", task)]},
-                config={"configurable": {"thread_id": "content-writer-demo"}},
+                config=config,
                 stream_mode="values",
         ):
             if "messages" in chunk:
