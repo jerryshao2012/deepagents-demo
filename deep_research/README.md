@@ -91,7 +91,7 @@ uv run python research_agent_cli.py "Research AI Agents"
 
 With document folder and structured output:
 ```bash
-uv run python research_agent_cli.py "Research AI Agents" --doc-folder ./docs --target slides
+uv run python research_agent_cli.py "Research AI Agents" --doc-folder ./docs --target study-slides
 ```
 
 Generate an interview question kit:

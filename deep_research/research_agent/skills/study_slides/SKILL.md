@@ -1,5 +1,5 @@
 ---
-name: slides
+name: study-slides
 title: Learning Slides
 description: Quick-learning presentation markup with fewer than 5 slides and speaking notes.
 render_template: markdown_blocks

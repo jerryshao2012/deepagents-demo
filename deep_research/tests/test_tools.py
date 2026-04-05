@@ -11,7 +11,7 @@ from research_agent.tools import (
 def test_render_target_output_renders_slides_from_definition() -> None:
     result = render_target_output.invoke(
         {
-            "target_id": "slides",
+            "target_id": "study-slides",
             "payload_json": """
             {
               "topic": "AI Agents",
@@ -69,7 +69,7 @@ def test_render_target_output_formats_45_minute_interview_kit() -> None:
 def test_render_target_output_reports_schema_validation_errors() -> None:
     result = render_target_output.invoke(
         {
-            "target_id": "slides",
+            "target_id": "study-slides",
             "payload_json": "{\"topic\": \"AI Agents\", \"slides\": [{\"title\": \"Missing fields\"}]}",
         }
     )

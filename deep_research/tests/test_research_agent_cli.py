@@ -7,12 +7,12 @@ def test_parser_accepts_doc_folder_and_target() -> None:
     parser = build_parser()
 
     args = parser.parse_args(
-        ["Research AI Agents", "--doc-folder", "./docs", "--target", "slides"]
+        ["Research AI Agents", "--doc-folder", "./docs", "--target", "study-slides"]
     )
 
     assert args.subject == "Research AI Agents"
     assert args.doc_folder == "./docs"
-    assert args.target == "slides"
+    assert args.target == "study-slides"
 
 
 def test_parser_uses_discovered_targets() -> None:
@@ -23,7 +23,7 @@ def test_parser_uses_discovered_targets() -> None:
 
 def test_build_instruction_for_slides_target() -> None:
     instruction = build_instruction(
-        "AI Agents", doc_folder="./docs", target="slides"
+        "AI Agents", doc_folder="./docs", target="study-slides"
     )
 
     assert "Research the following subject: AI Agents" in instruction
@@ -54,9 +54,9 @@ def test_build_instruction_for_golden_dataset_target() -> None:
 
 
 def test_target_definition_is_loaded_from_skill() -> None:
-    definition = get_target_definition("slides")
+    definition = get_target_definition("study-slides")
 
-    assert definition["id"] == "slides"
+    assert definition["id"] == "study-slides"
     assert "schema" in definition
     assert "render" in definition
     assert "skill_path" in definition
