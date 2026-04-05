@@ -48,7 +48,7 @@ class Spinner:
 
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
-from research_agent.cli import build_instruction, build_parser, list_targets
+from research_agent.cli import build_parser, list_targets
 
 
 def wrap_as_message(m):
@@ -183,13 +183,12 @@ def main():
         sys.exit(0)
 
     target = args.target
-    instruction = build_instruction(
-        args.subject,
-        doc_folder=args.doc_folder,
-        target=target,
-        subject_file=args.subject_file,
-        no_web=args.no_web,
-    )
+    subject = args.subject
+    if not subject and args.subject_file and os.path.exists(args.subject_file):
+        with open(args.subject_file, "r", encoding="utf-8") as handle:
+            subject = handle.read().strip()
+
+    instruction = f"Research the following subject: {subject}"
     title = None
 
     if args.title:
@@ -227,6 +226,9 @@ def main():
                                 "content": instruction,
                             }
                         ],
+                        "doc_folder": args.doc_folder,
+                        "no_web": args.no_web,
+                        "target": target,
                     },
                     stream_mode="values",
                     verify_ssl=verify_ssl
@@ -299,6 +301,9 @@ def main():
                             "content": instruction,
                         }
                     ],
+                    "doc_folder": args.doc_folder,
+                    "no_web": args.no_web,
+                    "target": target,
                 },
                 verify_ssl=verify_ssl
             )
@@ -316,6 +321,9 @@ def main():
                         "content": instruction,
                     }
                 ],
+                "doc_folder": args.doc_folder,
+                "no_web": args.no_web,
+                "target": target,
             },
             verify_ssl=verify_ssl
         )
