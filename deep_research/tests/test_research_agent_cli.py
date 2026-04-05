@@ -21,7 +21,7 @@ def test_parser_uses_discovered_targets() -> None:
     assert set(parser._option_string_actions["--target"].choices) == set(list_target_ids()) | {"list"}
 
 
-def test_build_instruction_for_slides_target() -> None:
+def test_build_instruction_for_study_slides_target() -> None:
     instruction = build_instruction(
         "AI Agents", doc_folder="./docs", target="study-slides"
     )
