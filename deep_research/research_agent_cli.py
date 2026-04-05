@@ -227,7 +227,7 @@ def main():
         try:
             # We attempt to stream updates from LangGraph to provide visibility
             for state in agent.stream(
-                    messages=messages,
+                    messages,
                     stream_mode="values",
                     verify_ssl=verify_ssl
             ):
@@ -292,7 +292,7 @@ def main():
             spinner.start("Running fallback synchronous invoke...")
             start_invoke = time.time()
             result = agent.invoke(
-                messages=messages,
+                messages,
                 verify_ssl=verify_ssl
             )
             spinner.stop()
@@ -302,7 +302,7 @@ def main():
     else:
         # Run the agent directly without showing progress
         result = agent.invoke(
-            messages=messages,
+            messages,
             verify_ssl=verify_ssl
         )
         total_time = time.time() - start_time
