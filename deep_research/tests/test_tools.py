@@ -77,6 +77,50 @@ def test_render_target_output_reports_schema_validation_errors() -> None:
     assert "Schema validation failed" in result
 
 
+def test_render_target_output_accepts_dict_payload_for_study_slides() -> None:
+    result = render_target_output.invoke(
+        {
+            "target_id": "study-slides",
+            "payload_json": {
+                "topic": "AI Agents",
+                "slides": [
+                    {
+                        "title": "What Matters",
+                        "bullets": ["Agents plan work", "Agents use tools"],
+                        "speaker_notes": "Keep this high level.",
+                    }
+                ],
+            },
+        }
+    )
+
+    assert result.startswith("# Presentation: AI Agents")
+    assert "## Slide 1: What Matters" in result
+
+
+def test_render_target_output_normalizes_legacy_study_slides_fields() -> None:
+    result = render_target_output.invoke(
+        {
+            "target_id": "study-slides",
+            "payload_json": {
+                "slides": [
+                    {
+                        "title": "Understanding Memory",
+                        "content": ["Hierarchy of memory", "Project and user memory files"],
+                        "speaker_notes": "Explain where long-lived guidance belongs.",
+                        "slide_number": 1,
+                    }
+                ]
+            },
+        }
+    )
+
+    assert result.startswith("# Presentation:")
+    assert "## Slide 1: Understanding Memory" in result
+    assert "- Hierarchy of memory" in result
+    assert "slide_number" not in result
+
+
 def test_render_target_output_rejects_missing_required_fields() -> None:
     result = render_target_output.invoke(
         {

@@ -690,8 +690,44 @@ def _render_payload(template: str, payload, render_spec: list[dict[str, object]]
     raise ValueError(f"Unsupported render template: {template}")
 
 
+def _normalize_legacy_target_payload(target_id: str, payload: dict) -> dict:
+    """Apply narrow target-specific compatibility fixes before validation."""
+    if target_id != "study-slides":
+        return payload
+
+    slides = payload.get("slides")
+    if not isinstance(slides, list):
+        return payload
+
+    normalized_slides: list[dict] = []
+    for slide in slides:
+        if not isinstance(slide, dict):
+            normalized_slides.append(slide)
+            continue
+
+        normalized_slide = dict(slide)
+
+        # Older prompts sometimes used `content` instead of `bullets`.
+        if "bullets" not in normalized_slide and "content" in normalized_slide:
+            content = normalized_slide.get("content")
+            if isinstance(content, list):
+                normalized_slide["bullets"] = [str(item) for item in content]
+            elif isinstance(content, str):
+                normalized_slide["bullets"] = [content]
+
+        # Some generations add metadata the schema does not allow.
+        normalized_slide.pop("content", None)
+        normalized_slide.pop("slide_number", None)
+
+        normalized_slides.append(normalized_slide)
+
+    payload = dict(payload)
+    payload["slides"] = normalized_slides
+    return payload
+
+
 def _prepare_validated_payload(
-        target_id: str, payload_json: str
+        target_id: str, payload_json: str | dict
 ) -> tuple[dict | None, dict | None, str | None]:
     """Parse JSON, apply defaults, validate against schema. Returns (definition, payload, error_message)."""
     try:
@@ -702,10 +738,15 @@ def _prepare_validated_payload(
     if not definition.get("schema"):
         return None, None, f"ERROR: Target '{target_id}' is an unstructured target. Do NOT use `render_target_output`! You must formulate your response directly as markdown and write it to the final report file or output it."
 
-    try:
-        payload = json.loads(payload_json)
-    except json.JSONDecodeError as exc:
-        return None, None, f"Invalid JSON payload: {exc}"
+    if isinstance(payload_json, dict):
+        payload = payload_json
+    else:
+        try:
+            payload = json.loads(payload_json)
+        except json.JSONDecodeError as exc:
+            return None, None, f"Invalid JSON payload: {exc}"
+
+    payload = _normalize_legacy_target_payload(target_id, payload)
 
     payload = _fill_defaults(target_id, payload)
     payload = _coerce_integers(payload, definition["schema"])
@@ -721,7 +762,7 @@ def _prepare_validated_payload(
 @tool(parse_docstring=True)
 def render_target_output(
         target_id: str,
-        payload_json: str,
+        payload_json: str | dict,
         state: Annotated[dict, InjectedState] = None,
 ) -> str:
     """Render structured target output using a reusable target definition.
@@ -729,11 +770,12 @@ def render_target_output(
     Use this tool ONLY for structured output targets (targets with a JSON schema).
     DO NOT use this tool for 'Unstructured Markdown Document' targets.
     Provide the target id and a JSON payload that matches the selected target schema exactly.
-    NEVER put raw markdown into payload_json; it MUST be a valid JSON object string.
+    The payload may be either a JSON object string or a dict-like JSON object.
+    NEVER put raw markdown into payload_json.
 
     Args:
         target_id: The target definition id to use for validation and rendering.
-        payload_json: A JSON object string matching the target schema.
+        payload_json: A JSON object string or dict matching the target schema.
         state: LangGraph state
 
     Returns:

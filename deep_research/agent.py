@@ -19,6 +19,7 @@ from research_agent.prompts import (
     RESEARCH_WORKFLOW_INSTRUCTIONS,
     SUBAGENT_DELEGATION_INSTRUCTIONS,
 )
+from research_agent.deepagents_compat import patch_deepagents_task_tool_result_extraction
 from research_agent.tools import (
     finalize_golden_dataset_output,
     read_doc_folder,
@@ -31,6 +32,9 @@ from utils import get_ssl_verify_config, str2bool
 
 # Load environment variables
 load_dotenv()
+
+# Ensure task() returns the subagent's final content even when it is not stored in `.text`.
+patch_deepagents_task_tool_result_extraction()
 
 # Create SSL verification setting - CLI flag takes precedence over env var
 verify_ssl = get_ssl_verify_config()
