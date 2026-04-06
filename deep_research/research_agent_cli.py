@@ -205,7 +205,7 @@ def should_retry_with_invoke(result: dict, target: str | None = None) -> bool:
 
 def save_research_to_file(research_content, filename=None, output_folder=None):
     # Get current date and time
-    current_date = datetime.now().strftime("%Y-%m-%d %I:%M:%S %p")
+    current_date = datetime.now().strftime("%Y-%m-%d_%I_%M_%S_%p")
 
     # Generate a title for the research
     title = generate_research_title(research_content)
