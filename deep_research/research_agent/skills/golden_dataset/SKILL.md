@@ -46,6 +46,7 @@ Requirements:
   **Do NOT skip steps 1 or 2. A verbal description of the dataset is NOT a substitute for the tool calls.**
   - Optional: use `trigger_dataset_evaluation` only if you need to re-run metrics on an existing CSV file path.
 - Produce a reviewable starter batch with exactly 12 items unless the user explicitly asks for a different count.
+- Questions and answers are bsed on extracted knowledge documents in markdown format from `output/<sub-folder>` (from the provided documents).
 - Questions must sound like realistic non-expert customer questions.
 - Every question must be self-contained and unambiguous.
 - Cover the major domain areas visible in the provided materials.

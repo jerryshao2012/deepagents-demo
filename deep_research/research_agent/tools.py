@@ -363,7 +363,6 @@ def read_doc_folder(
     Returns:
         Extracted text from supported documents, a summary for large folders, or an error message.
     """
-    # --- Resolve the configured doc_folder from agent state ---
     configured_doc_folder: str | None = None
     if state and isinstance(state, dict):
         configured_doc_folder = state.get("doc_folder")
