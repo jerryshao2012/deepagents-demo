@@ -340,7 +340,11 @@ def _resolve_doc_output_subfolder(folder: Path) -> Path:
 
 
 @tool(parse_docstring=True)
-def read_doc_folder(folder_path: str, specific_files: list[str] | None = None) -> str:
+def read_doc_folder(
+        folder_path: str,
+        specific_files: list[str] | None = None,
+        state: Annotated[dict, InjectedState] = None,
+) -> str:
     """Read and extract text from supported documents in a given folder.
 
     Use this tool when you need to research from local documents instead of or in addition
@@ -354,23 +358,44 @@ def read_doc_folder(folder_path: str, specific_files: list[str] | None = None) -
         folder_path: The absolute or relative path to the folder containing document files.
         specific_files: Optional list of filenames within the folder to read specifically.
             If provided, only these files will be processed, bypassing general limits.
+        state: LangGraph state (injected automatically, do not supply).
 
     Returns:
         Extracted text from supported documents, a summary for large folders, or an error message.
     """
-    folder = Path(folder_path)
+    # --- Resolve the configured doc_folder from agent state ---
+    configured_doc_folder: str | None = None
+    if state and isinstance(state, dict):
+        configured_doc_folder = state.get("doc_folder")
 
-    # If the folder doesn't exist, try resolving it relative to the deep_research package
-    if not folder.exists():
-        package_root = Path(__file__).resolve().parent.parent
-        alternate_folder = package_root / folder_path
-        if alternate_folder.exists() and alternate_folder.is_dir():
-            folder = alternate_folder
+    # No doc_folder configured → block all filesystem access.
+    # The tool is only meaningful when an explicit folder has been provided via --doc-folder.
+    if not configured_doc_folder:
+        return (
+            "Error: No document folder has been configured for this research task. "
+            "Pass --doc-folder <path> when invoking the CLI to enable local document reading. "
+            "Do NOT attempt to read from any other filesystem path."
+        )
+
+    allowed_root = Path(configured_doc_folder).resolve()
+
+    # Resolve the requested path and check it is within the allowed root.
+    folder = Path(folder_path).resolve()
+    try:
+        folder.relative_to(allowed_root)
+        # Path is within allowed_root — use it as-is.
+    except ValueError:
+        # Requested path is outside the configured doc_folder → redirect to the root.
+        print(
+            f"[read_doc_folder] Redirecting '{folder_path}' → '{allowed_root}' "
+            f"(only the configured doc_folder is permitted)."
+        )
+        folder = allowed_root
 
     if not folder.exists():
-        return f"Error: Folder {folder_path} does not exist."
+        return f"Error: Folder '{folder}' does not exist."
     if not folder.is_dir():
-        return f"Error: {folder_path} is not a folder."
+        return f"Error: '{folder}' is not a directory."
 
     # Use a set for faster lookup if specific_files is provided
     specific_set = set(specific_files) if specific_files else None
@@ -734,7 +759,7 @@ def _prepare_validated_payload(
         definition = get_target_definition(target_id)
     except ValueError as exc:
         return None, None, str(exc)
-        
+
     if not definition.get("schema"):
         return None, None, f"ERROR: Target '{target_id}' is an unstructured target. Do NOT use `render_target_output`! You must formulate your response directly as markdown and write it to the final report file or output it."
 
