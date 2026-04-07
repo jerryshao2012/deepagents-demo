@@ -101,6 +101,8 @@ def show_prompt(prompt_text: str, title: str = "Prompt", border_style: str = "bl
 
 
 def str2bool(v, defaultValue=None):
+    if v is None:
+        return defaultValue
     if isinstance(v, bool):
         return v
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
