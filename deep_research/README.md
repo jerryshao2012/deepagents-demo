@@ -155,8 +155,34 @@ You can also connect the LangGraph server to a [UI specifically designed for dee
 ```bash
 git clone https://github.com/langchain-ai/deep-agents-ui.git
 cd deep-agents-ui
+
+# Install yarn
+npm install -g yarn
+npm config set "bin-links" true
+# Add %AppData%\npm to PATH for Windows
+
+# For corporation network
+yarn config set "strict-ssl" false
+# Get configuration from npm config list
+yarn config set registry <url>
+
 yarn install
 yarn dev
+```
+
+If it is still not working and prohibited by coporate network, then you have to switch back to use `npm`. We can use the yarn-to-npm CLI tool to automate the conversion of the lockfile and scripts.
+1. Install:
+```bash
+npm install -g yarn-to-npm
+```
+2. Run:
+```bash
+yarn-to-npm migrate
+```
+3. Run:
+```bash
+npm install --legacy-peer-deps
+npm run dev
 ```
 
 Then follow the instructions in the [deep-agents-ui README](https://github.com/langchain-ai/deep-agents-ui?tab=readme-ov-file#connecting-to-a-langgraph-server) to connect the UI to the running LangGraph server. Get the Deployment URL and Assistant ID from the terminal output and langgraph.json file, respectively:
