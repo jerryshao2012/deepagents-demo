@@ -109,6 +109,16 @@ Generate a golden dataset:
 uv run python research_agent_cli.py "Generate 20 question-answer pairs for the documents provided" --doc-folder ./docs/policy/ --target golden-dataset
 ```
 
+<img width="774" alt="Deep Research Graph" src="./resources/Deep_Research_Agent_with_Golden_Dataset_Generation_Skill.png" />
+
+1. **Context Injection**: A curated set of "Source-of-Truth" documents (PDFs, Markdown, or technical specs) is provided to the agent's filesystem.
+2. **Synthesis-First Approach**: The agent is instructed to use the Knowledge Retrieval tool (searching the local filesystem) as its primary source.
+3. **Golden Dataset Skill (The Auditor)**:
+   - **Question Generation**: It analyzes the provided documents to identify key technical facts, contradictions, or complex logic. 
+   - **Context Pinpointing**: It maps the generated question directly to the specific paragraph or page in the local document. 
+   - **Answer Extraction**: It generates the "Ideal Answer" based strictly on that local context.
+4. **Tavily as a Fallback (Optional)**: Global search is treated as an exception—only triggered if the provided documents are explicitly incomplete, and usually flagged as "out-of-distribution" for the golden set.
+
 Generate code using code-generator skill:
 ```bash
 uv run python research_agent_cli.py --subject-file ./input/coding-create-a-image.txt --target code-generator
