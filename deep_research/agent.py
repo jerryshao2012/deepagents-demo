@@ -160,12 +160,23 @@ class ResearchStateMiddleware(AgentMiddleware):
 
     def _extract_parameters_from_user_input(self, state: ResearchState, messages: list) -> dict[str, Any]:
         """Extract doc_folder, target, and no_web from user message patterns."""
-        user_message = next(
-            (m.get("content") or m.content for m in messages
-             if isinstance(m, dict) and m.get("role") == "user"
-             or (hasattr(m, "content") and not isinstance(m, SystemMessage))),
-            None
-        )
+        user_message = None
+        for m in messages:
+            # Handle dictionary messages
+            if isinstance(m, dict):
+                if m.get("role") == "user":
+                    user_message = m.get("content")
+                    break
+            # Handle LangChain message objects (not SystemMessage)
+            elif hasattr(m, "content") and not isinstance(m, SystemMessage):
+                # Check if it's a HumanMessage or similar user message type
+                if hasattr(m, "type") and m.type == "human":
+                    user_message = m.content
+                    break
+                # Fallback: if it has content and isn't a SystemMessage, treat as user message
+                elif not hasattr(m, "type"):
+                    user_message = m.content
+                    break
 
         if not user_message:
             return {}
