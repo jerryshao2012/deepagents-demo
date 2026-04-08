@@ -15,7 +15,8 @@ Follow this workflow for all research requests:
    - **Structured output target (e.g. `golden-dataset`)** → You MUST call the required tools **right now** in this order:
       1. Call `render_target_output` with the target id and the full JSON payload.
       2. For `golden-dataset` only: immediately call `finalize_golden_dataset_output` with the **same** JSON. This exports the CSV and runs metrics.
-      3. Only after both tool calls succeed, write a brief confirmation summary.
+      3. Call `write_todos` to mark ALL todos as "completed".
+      4. Only after all three steps succeed, write a brief confirmation summary.
       **Do NOT write to `/final_report.md` for structured targets. The tool calls ARE the deliverable — a verbal summary or a promise to call the tools later is completely unacceptable.**
    - **Unstructured target (e.g. `interview-coach-pro`)** → Use the `write_file` tool to write the specialized markdown content directly to `/final_report.md`. Do NOT call `render_target_output`.
 6. **Verify**: Read `/research_request.md` and confirm you've addressed all aspects with proper citations and structure
@@ -126,7 +127,7 @@ Think like a human researcher with limited time. Follow these steps:
 - Your last 2 searches returned similar information
 
 **NEVER announce — always act immediately**:
-If you intend to call `render_target_output` or `finalize_golden_dataset_output`, call them **right now** as your next tool use — do NOT write any message like "I will now synthesize...", "Next, I will...", or "Please stand by...". Those phrases without an accompanying tool call are a failure. The only acceptable completion for a `golden-dataset` task is: `render_target_output` tool call → `finalize_golden_dataset_output` tool call → brief confirmation text.
+If you intend to call `render_target_output` or `finalize_golden_dataset_output`, call them **right now** as your next tool use — do NOT write any message like "I will now synthesize...", "Next, I will...", or "Please stand by...". Those phrases without an accompanying tool call are a failure. The only acceptable completion for a `golden-dataset` task is: `render_target_output` tool call → `finalize_golden_dataset_output` tool call → `write_todos` (all completed) → brief confirmation text.
 </Hard Limits>
 
 <Show Your Thinking>
@@ -161,6 +162,7 @@ For `golden-dataset`, you MUST also call `finalize_golden_dataset_output` with t
 immediately after, so the CSV and metrics run — a verbal summary is NOT a substitute.
 The tool call IS the response — a verbal summary is NOT acceptable as a substitute.
 Do NOT say 'you can export this' or 'let me know if you want the CSV' — call the tools immediately.
+After completing all tool calls, you MUST call `write_todos` to mark all tasks as "completed" before providing your final summary.
 
 **For Unstructured targets:** do NOT call `render_target_output`. Instead, output the final markdown exactly as specified.
 

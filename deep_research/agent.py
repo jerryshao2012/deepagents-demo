@@ -42,13 +42,6 @@ load_dotenv()
 # Ensure task() returns the subagent's final content even when it is not stored in `.text`.
 patch_deepagents_task_tool_result_extraction()
 
-# Normalize OUTPUT_FOLDER for deepagents filesystem tools compatibility (cross-platform)
-# This ensures paths work correctly with glob, ls, and other filesystem tools
-if "OUTPUT_FOLDER" not in os.environ:
-    os.environ["OUTPUT_FOLDER"] = _normalize_path_for_filesystem_tools(REPORTS_OUTPUT_FOLDER)
-else:
-    os.environ["OUTPUT_FOLDER"] = _normalize_path_for_filesystem_tools(os.environ["OUTPUT_FOLDER"])
-
 # Create SSL verification setting - CLI flag takes precedence over env var
 verify_ssl = get_ssl_verify_config()
 
@@ -155,7 +148,12 @@ class ResearchStateMiddleware(AgentMiddleware):
         # Step 1: Extract doc_folder and target from user message if not already set
         updates = self._extract_parameters_from_user_input(state, messages)
 
-        # Step 2: Build instruction based on full state (including extracted parameters)
+        # Step 2: Configure OUTPUT_FOLDER based on extracted doc_folder
+        if updates.get("doc_folder") or (state.get("doc_folder") and not updates):
+            doc_folder = updates.get("doc_folder") or state.get("doc_folder")
+            self._configure_output_folder(doc_folder)
+
+        # Step 3: Build instruction based on full state (including extracted parameters)
         if updates:
             merged_state: ResearchState = {**state, **updates}  # type: ignore[assignment]
         else:
@@ -210,6 +208,18 @@ class ResearchStateMiddleware(AgentMiddleware):
 
         # Remove None values from updates
         return {k: v for k, v in updates.items() if v is not None}
+
+    @staticmethod
+    def _configure_output_folder(doc_folder: str | None) -> None:
+        """Configure OUTPUT_FOLDER environment variable based on doc_folder."""
+        if not doc_folder:
+            output_folder = REPORTS_OUTPUT_FOLDER
+        else:
+            output_folder = str(Path(REPORTS_OUTPUT_FOLDER) / Path(doc_folder).name)
+
+        # Normalize path for deepagents filesystem tools compatibility (cross-platform)
+        normalized_path = _normalize_path_for_filesystem_tools(output_folder)
+        os.environ["OUTPUT_FOLDER"] = normalized_path
 
     @staticmethod
     def _extract_doc_folder(user_message: str) -> str | None:

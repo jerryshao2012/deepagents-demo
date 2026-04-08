@@ -50,8 +50,9 @@ Requirements:
 - **COMPLETION SEQUENCE — follow these steps in order after all items are drafted:**
   1. Call `render_target_output` with `target_id="golden-dataset"` and your JSON object (including `items`). This validates the payload and returns the Markdown preview.
   2. Call `finalize_golden_dataset_output` with the **same JSON string** as step 1. Implementation lives under `research_agent/skills/golden_dataset/` (`pipeline.py`): it writes the CSV to `./output/` and runs evaluation in one atomic step so export always precedes metrics.
-  3. Only after steps 1–2 succeed, write a brief summary to the user.
-  **Do NOT skip steps 1 or 2. A verbal description of the dataset is NOT a substitute for the tool calls.**
+  3. Call `write_todos` to mark ALL todos as "completed".
+  4. Only after steps 1–3 succeed, write a brief summary to the user.
+  **Do NOT skip steps 1, 2, or 3. A verbal description of the dataset is NOT a substitute for the tool calls.**
   - Optional: use `trigger_dataset_evaluation` only if you need to re-run metrics on an existing CSV file path.
 - Produce a reviewable starter batch with exactly 12 items unless the user explicitly asks for a different count.
 - Questions and answers are bsed on extracted knowledge documents in markdown format from `./output/<sub-folder>` (from the provided documents).
