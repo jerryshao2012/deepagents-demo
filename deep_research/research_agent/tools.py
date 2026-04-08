@@ -45,7 +45,7 @@ _folder_listing_cache: dict[str, list[Path]] = {}
 MAX_GLOB_DEPTH = 3
 SUPPORTED_DOC_SUFFIXES = {".pdf", ".txt", ".md", ".docx", ".pptx", ".xlsx"}
 
-REPORTS_OUTPUT_FOLDER = "output"
+REPORTS_OUTPUT_FOLDER = "./output"
 MAX_FILES_TO_READ = 20
 MAX_TOTAL_SIZE_MB = 50
 
@@ -877,7 +877,7 @@ def trigger_dataset_evaluation(file_path: str) -> str:
     and runs this evaluation in order. Use this tool to re-run metrics on an existing CSV.
 
     Args:
-        file_path: The path to the CSV file to evaluate (e.g., "output/golden_dataset.csv").
+        file_path: The path to the CSV file to evaluate (e.g., "./output/golden_dataset.csv").
 
     Returns:
         The result of the quality metric evaluation, including the path to the scored dataset.
