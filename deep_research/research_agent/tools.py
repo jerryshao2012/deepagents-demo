@@ -38,7 +38,11 @@ verify_ssl = get_ssl_verify_config()
 tavily_session = requests.Session()
 tavily_session.verify = verify_ssl
 tavily_client = TavilyClient(session=tavily_session)
+# Global in‑memory cache for folder listings (path → list of Path objects)
+_folder_listing_cache: dict[str, list[Path]] = {}
 
+# Limit recursion depth for recursive glob to avoid walking deep trees
+MAX_GLOB_DEPTH = 3
 SUPPORTED_DOC_SUFFIXES = {".pdf", ".txt", ".md", ".docx", ".pptx", ".xlsx"}
 
 REPORTS_OUTPUT_FOLDER = "output"
@@ -399,11 +403,21 @@ def read_doc_folder(
     # Use a set for faster lookup if specific_files is provided
     specific_set = set(specific_files) if specific_files else None
 
-    # Filter for supported files and potentially specific files
-    supported_files = sorted(
-        file_path for file_path in folder.iterdir()
-        if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_DOC_SUFFIXES
-    )
+    # ---------- Cached folder listing ----------
+    cache_key = str(folder.resolve())
+    if cache_key in _folder_listing_cache:
+        supported_files = _folder_listing_cache[cache_key]
+    else:
+        all_candidates: list[Path] = []
+        for file_path in folder.rglob("*"):
+            # Enforce max recursion depth to avoid walking deep trees
+            if len(file_path.relative_to(folder).parts) > MAX_GLOB_DEPTH:
+                continue
+            if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_DOC_SUFFIXES:
+                all_candidates.append(file_path)
+        supported_files = sorted(all_candidates)
+        _folder_listing_cache[cache_key] = supported_files
+    # ------------------------------------------
 
     if not supported_files:
         return (
