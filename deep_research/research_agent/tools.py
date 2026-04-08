@@ -861,6 +861,9 @@ def finalize_golden_dataset_output(
 
     For the ``golden-dataset`` target, call this after ``render_target_output`` with the
     same JSON. This writes the CSV under the output folder and runs metrics in one step.
+    It also generates:
+    - `/golden_dataset_metrics.md`: Markdown table of all items with quality metrics
+    - `/final_report.md`: Comprehensive report of the entire golden dataset generation process
 
     Args:
         payload_json: JSON object matching the golden-dataset schema (same payload as ``render_target_output``).
@@ -871,7 +874,7 @@ def finalize_golden_dataset_output(
     """
     from research_agent.skills.golden_dataset.pipeline import (
         GOLDEN_DATASET_TARGET_ID,
-        evaluate_golden_dataset_csv_file,
+        evaluate_and_report_golden_dataset,
         export_golden_dataset_csv,
     )
 
@@ -882,10 +885,43 @@ def finalize_golden_dataset_output(
     try:
         output_subfolder = Path(os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER))
         csv_path = export_golden_dataset_csv(payload, output_subfolder)
-        evaluation_result = evaluate_golden_dataset_csv_file(str(csv_path))
+        
+        # Evaluate and generate reports
+        metrics_csv_path, markdown_content, final_report_content = evaluate_and_report_golden_dataset(
+            csv_path=csv_path,
+            payload=payload,
+            output_folder=output_subfolder
+        )
+        
+        # Write metrics markdown file
+        metrics_md_path = output_subfolder / "golden_dataset_metrics.md"
+        with open(metrics_md_path, "w", encoding="utf-8") as f:
+            f.write(markdown_content)
+        
+        # Write final report
+        final_report_path = output_subfolder / "final_report.md"
+        with open(final_report_path, "w", encoding="utf-8") as f:
+            f.write(final_report_content)
+        
+        # Update state files if available
+        if state is not None:
+            files = state.get("files", {})
+            files["/golden_dataset_metrics.md"] = {
+                "path": str(metrics_md_path),
+                "content": markdown_content.encode("utf-8")
+            }
+            files["/final_report.md"] = {
+                "path": str(final_report_path),
+                "content": final_report_content.encode("utf-8")
+            }
+            state["files"] = files
+        
         return (
             f"**CSV exported to:** `{csv_path}`\n\n"
-            f"**Evaluation:** {evaluation_result}"
+            f"**Metrics CSV:** `{metrics_csv_path}`\n\n"
+            f"**Metrics Markdown:** `{metrics_md_path}`\n\n"
+            f"**Final Report:** `{final_report_path}`\n\n"
+            f"All files have been generated successfully!"
         )
     except Exception as e:
         return f"**Error exporting or evaluating golden dataset:** {e}"

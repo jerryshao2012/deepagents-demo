@@ -307,7 +307,7 @@ def main():
     print("This may take a few minutes as the agent searches and analyzes...")
 
     # Run the agent with progress printouts
-    result = None
+    result = {}
     start_time = time.time()
     last_time = start_time
 

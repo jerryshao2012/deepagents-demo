@@ -9,9 +9,11 @@ from __future__ import annotations
 import csv
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
+import pandas as pd
 import yaml
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
@@ -157,3 +159,125 @@ def score_dataset_file(input_csv: str, output_csv: str) -> Path:
 def metrics_to_json(scores: dict[str, float]) -> str:
     """Serialize metrics for logging or downstream tooling."""
     return json.dumps(scores, sort_keys=True)
+
+
+def convert_csv_to_markdown(csv_path: str) -> str:
+    """Convert a CSV file to a Markdown table format.
+    
+    Args:
+        csv_path: Path to the CSV file with metrics columns.
+        
+    Returns:
+        Markdown formatted table string.
+    """
+    try:
+        df = pd.read_csv(csv_path)  # type: ignore[call-overload]
+        # Convert to markdown table without index
+        markdown_table = df.to_markdown(index=False)
+        return markdown_table
+    except Exception as e:
+        return f"Error converting CSV to markdown: {e}"
+
+
+def generate_golden_dataset_report(
+        csv_path: str,
+        metrics_csv_path: str,
+        markdown_content: str,
+        payload: dict
+) -> str:
+    """Generate a comprehensive final report for the golden dataset generation process.
+    
+    Args:
+        csv_path: Path to the original CSV file.
+        metrics_csv_path: Path to the CSV file with quality metrics.
+        markdown_content: The markdown table content from metrics CSV.
+        payload: The golden dataset payload with metadata.
+        
+    Returns:
+        Complete markdown report content.
+    """
+    dataset_name = payload.get("dataset_name", "Unknown Dataset")
+    domain = payload.get("domain", "General")
+    total_items = len(payload.get("items", []))
+    coverage_areas = payload.get("coverage_areas", [])
+
+    # Calculate summary statistics from metrics if available
+    metrics_summary = ""
+    try:
+        df = pd.read_csv(metrics_csv_path)  # type: ignore[call-overload]
+        metric_columns = [col for col in df.columns if col in METRIC_NAMES]
+
+        if metric_columns:
+            metrics_summary = "\n## Quality Metrics Summary\n\n"
+            metrics_summary += "| Metric | Mean | Min | Max | Std Dev |\n"
+            metrics_summary += "|--------|------|-----|-----|---------|\n"
+
+            for metric in metric_columns:
+                mean_val = df[metric].mean()
+                min_val = df[metric].min()
+                max_val = df[metric].max()
+                std_val = df[metric].std()
+                metrics_summary += f"| {metric} | {mean_val:.2f} | {min_val:.2f} | {max_val:.2f} | {std_val:.2f} |\n"
+
+            # Add goal achievements
+            metrics_summary += "\n### Goal Achievement\n\n"
+            for metric in metric_columns:
+                min_goal = _CONFIG["metrics"][metric]["goal"]
+                mean_val = df[metric].mean()
+                achieved = "✅" if mean_val >= min_goal else "⚠️"
+                metrics_summary += f"- {achieved} **{metric}**: {mean_val:.2f} (goal: {min_goal}+)\n"
+    except Exception as e:
+        metrics_summary = f"\n## Quality Metrics Summary\n\nCould not calculate summary statistics: {e}\n"
+
+    # Build the complete report
+    report = f"""# Golden Dataset Generation Report: {dataset_name}
+
+**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+## Overview
+
+- **Dataset Name:** {dataset_name}
+- **Domain:** {domain}
+- **Total Items:** {total_items}
+- **Coverage Areas:** {', '.join(coverage_areas) if coverage_areas else 'N/A'}
+
+## Process Summary
+
+This report documents the complete golden dataset generation and evaluation process:
+
+1. ✅ Generated {total_items} question-answer pairs based on research findings
+2. ✅ Exported dataset to CSV: `{csv_path}`
+3. ✅ Evaluated quality metrics using LLM judge model
+4. ✅ Generated metrics-enhanced CSV: `{metrics_csv_path}`
+5. ✅ Created this comprehensive report
+
+{metrics_summary}
+
+## Detailed Metrics Table
+
+The following table shows all items with their quality metrics:
+
+{markdown_content}
+
+## Recommendations
+
+Based on the quality metrics:
+
+1. **Review Low-Scoring Items:** Focus on items where any metric falls below the suggested goal
+2. **Expert Validation:** Have domain experts review and replace draft answers with authoritative responses
+3. **Content Enhancement:** For items with low Groundedness scores, consider adding more supporting RAG content
+4. **Iterative Improvement:** Use these metrics as a baseline for future dataset refinements
+
+## Files Generated
+
+- Original CSV: `{csv_path}`
+- Metrics CSV: `{metrics_csv_path}`
+- This Report: `/final_report.md`
+- Metrics Table: `/golden_dataset_metrics.md`
+
+---
+
+*Report generated automatically by the Golden Dataset Skill*
+"""
+
+    return report

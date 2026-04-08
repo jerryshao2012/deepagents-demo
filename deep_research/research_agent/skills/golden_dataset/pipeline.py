@@ -66,3 +66,42 @@ def evaluate_golden_dataset_csv_file(file_path: str) -> str:
         return f"Successfully evaluated dataset. Metrics saved to: {result_path}"
     except Exception as exc:
         return f"Failed to run metric evaluation: {exc}"
+
+
+def evaluate_and_report_golden_dataset(
+        csv_path: Path,
+        payload: dict,
+        output_folder: Path
+) -> tuple[Path, str, str]:
+    """Evaluate golden dataset CSV and generate both metrics markdown and final report.
+    
+    Args:
+        csv_path: Path to the original CSV file.
+        payload: The golden dataset payload with metadata.
+        output_folder: Output folder for generated files.
+        
+    Returns:
+        Tuple of (metrics_csv_path, markdown_content, final_report_content).
+    """
+    from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import (
+        convert_csv_to_markdown,
+        generate_golden_dataset_report,
+        score_dataset_file,
+    )
+
+    # Step 1: Run quality metrics
+    metrics_csv_path_str = str(csv_path.with_name(f"{csv_path.stem}-with-metrics{csv_path.suffix}"))
+    metrics_csv_path = Path(score_dataset_file(str(csv_path), metrics_csv_path_str))
+
+    # Step 2: Convert metrics CSV to markdown table
+    markdown_content = convert_csv_to_markdown(str(metrics_csv_path))
+
+    # Step 3: Generate comprehensive final report
+    final_report_content = generate_golden_dataset_report(
+        csv_path=str(csv_path),
+        metrics_csv_path=str(metrics_csv_path),
+        markdown_content=markdown_content,
+        payload=payload
+    )
+
+    return metrics_csv_path, markdown_content, final_report_content

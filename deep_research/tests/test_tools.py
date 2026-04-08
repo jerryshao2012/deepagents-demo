@@ -300,9 +300,20 @@ def test_render_target_output_renders_golden_dataset_without_metric_fields() -> 
 
 def test_finalize_golden_dataset_output_exports_content_to_csv(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(tools, "REPORTS_OUTPUT_FOLDER", str(tmp_path))
+
+    def fake_evaluate_and_report(csv_path, payload, output_folder):
+        from pathlib import Path
+        metrics_csv = Path(str(csv_path).replace(".csv", "-with-metrics.csv"))
+        metrics_csv.write_text(
+            "ID,Coverage Area,Question,Answer,Content,Similarity,Relevance,Coherence,Groundedness\nQ1,Leave,How?,Answer.,Content.,3,75,4,3\n",
+            encoding="utf-8")
+        markdown_content = "| ID | Question | Answer | Similarity | Relevance | Coherence | Groundedness |\n|----|----------|--------|------------|-----------|-----------|--------------|\n| Q1 | How? | Answer. | 3 | 75 | 4 | 3 |"
+        final_report = "# Report\n\nTest report content"
+        return metrics_csv, markdown_content, final_report
+
     monkeypatch.setattr(
-        "research_agent.skills.golden_dataset.pipeline.evaluate_golden_dataset_csv_file",
-        lambda file_path: f"Successfully evaluated dataset. Metrics saved to: {Path(file_path).with_name(Path(file_path).stem + '-with-metrics.csv')}",
+        "research_agent.skills.golden_dataset.pipeline.evaluate_and_report_golden_dataset",
+        fake_evaluate_and_report,
     )
 
     result = finalize_golden_dataset_output.invoke(
@@ -334,19 +345,25 @@ def test_finalize_golden_dataset_output_exports_content_to_csv(tmp_path, monkeyp
     assert "Content" in csv_text
     assert "eligibility, notice periods, and HR approval steps" in csv_text
     assert "Context" not in csv_text
+    # Check that new files are generated
+    assert (tmp_path / "golden_dataset_metrics.md").exists()
+    assert (tmp_path / "final_report.md").exists()
 
 
 def test_finalize_golden_dataset_output_runs_metrics(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(tools, "REPORTS_OUTPUT_FOLDER", str(tmp_path))
 
-    def fake_score_dataset_file(input_csv: str, output_csv: str):
-        output_path = Path(output_csv)
-        output_path.write_text("scored content", encoding="utf-8")
-        return str(output_path)
+    def fake_evaluate_and_report(csv_path, payload, output_folder):
+        from pathlib import Path
+        metrics_csv = Path(str(csv_path).replace(".csv", "-with-metrics.csv"))
+        metrics_csv.write_text("scored content", encoding="utf-8")
+        markdown_content = "| Metric | Value |\n|--------|-------|\n| Test | 1 |"
+        final_report = "# Final Report\n\nComplete report"
+        return metrics_csv, markdown_content, final_report
 
     monkeypatch.setattr(
-        "research_agent.skills.golden_dataset.scripts.golden_dataset_metrics.score_dataset_file",
-        fake_score_dataset_file,
+        "research_agent.skills.golden_dataset.pipeline.evaluate_and_report_golden_dataset",
+        fake_evaluate_and_report,
     )
 
     result = finalize_golden_dataset_output.invoke(
@@ -372,13 +389,17 @@ def test_finalize_golden_dataset_output_runs_metrics(tmp_path, monkeypatch) -> N
     )
 
     assert "CSV exported to" in result
-    assert "Successfully evaluated dataset" in result
-    assert "Metrics saved to" in result
+    assert "Metrics CSV:" in result
+    assert "Metrics Markdown:" in result
+    assert "Final Report:" in result
     csv_path = tmp_path / "hr_policy_starter.csv"
     assert csv_path.exists()
     metrics_csv_path = tmp_path / "hr_policy_starter-with-metrics.csv"
     assert metrics_csv_path.exists()
     assert metrics_csv_path.read_text() == "scored content"
+    # Verify new files exist
+    assert (tmp_path / "golden_dataset_metrics.md").exists()
+    assert (tmp_path / "final_report.md").exists()
 
 
 def test_trigger_dataset_evaluation_scores_exported_golden_dataset_csv(tmp_path, monkeypatch) -> None:
