@@ -195,6 +195,14 @@ This provides a user-friendly chat interface and visualization of files in state
 
 <img width="1917" alt="Screenshot 2026-04-03 at 12:44 11 PM" src="resources/Screenshot 2026-04-03 at 12 44 11 PM.png" />
 
+Example:
+```text
+Generate 20 pair of question and answer using the `golden-dataset` skill for the documents provided in this folder '.\docs\policy\'.
+```
+```text
+Give me an overview of AI Evaluation through Harness Engineering
+```
+
 ## 🧩 Deep Research Agent Components
 
 What is used in the deep research agent?
