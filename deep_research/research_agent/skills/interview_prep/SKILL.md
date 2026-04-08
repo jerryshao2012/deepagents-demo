@@ -1,6 +1,13 @@
 ---
 name: interview-coach-pro
 description: Generates behavioral interview questions and STAR-format answers based on a job description and a PDF resume. Designed for a 60-minute interview session.
+keywords:
+  - "interview-coach"
+  - "interview.*coach"
+  - "behavioral.*interview"
+  - "star.*format"
+  - "star.*answer"
+  - "interview.*preparation"
 ---
 
 # Instructions for the Interview Coach Pro Skill

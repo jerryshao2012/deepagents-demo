@@ -3,6 +3,14 @@ name: golden-dataset
 title: Golden Dataset Starter
 description: Produce a Golden Dataset starter pack with realistic customer questions and draft LLM answers only. Use for deep research outputs that should cover Golden Dataset steps 1 and 2, then score the exported CSV separately with the bundled quality-metrics script.
 render_template: markdown_blocks
+keywords:
+  - "golden-dataset"
+  - "golden dataset"
+  - "create.*ga.*pair"
+  - "question.*answer"
+  - "qa.*dataset"
+  - "qa.*pair"
+  - "q&a"
 defaults:
   - field: domain
     if_null: true

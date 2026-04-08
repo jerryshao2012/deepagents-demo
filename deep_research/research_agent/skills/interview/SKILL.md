@@ -3,6 +3,11 @@ name: interview
 title: Interview Kit
 description: A grounded 45-minute interview question kit with time-boxed questions and follow-up prompts.
 render_template: markdown_blocks
+keywords:
+  - "interview.*kit"
+  - "interview.*question"
+  - "prepare.*interview"
+  - "interview.*agenda"
 defaults:
   - field: topic
     if_null: true
