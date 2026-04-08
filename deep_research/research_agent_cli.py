@@ -72,6 +72,7 @@ def wrap_as_message(m):
 
 
 CSV_EXPORT_PATH_RE = re.compile(r"\*\*CSV exported to:\*\*\s*`([^`]+)`")
+MAX_STREAM_DIAGNOSTIC_CHARS = 600
 
 
 def generate_research_title(research_content):
@@ -166,6 +167,36 @@ def _looks_like_incomplete_delegation(content: str) -> bool:
         "use the render_target_output tool to generate the final deliverable",
     )
     return any(marker in text for marker in markers)
+
+
+def _truncate_for_log(content: str, max_chars: int = MAX_STREAM_DIAGNOSTIC_CHARS) -> str:
+    text = content.strip().replace("\n", " ")
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "..."
+
+
+def _is_azure_content_filter_error(error: Exception) -> bool:
+    text = str(error).lower()
+    markers = (
+        "content filter",
+        "content_filter"
+        "responsibleai"
+        "safety system",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _last_stream_message_diagnostics(state: dict | None) -> tuple[str, str, str]:
+    if not state:
+        return "", "", ""
+
+    messages = state.get("messages", [])
+    if not messages:
+        return "", "", ""
+    last = messages[-1]
+    role, name, content = _message_role_name_content(last)
+    return role, name, _truncate_for_log(content)
 
 
 def select_output_content(result: dict, target: str | None = None) -> str:
@@ -301,6 +332,8 @@ def main():
         # Show progress with spinner
         spinner = Spinner("Initializing research inputs...")
         spinner.start()
+        last_stream_state = None
+        last_tool_name = ""
 
         try:
             # We attempt to stream updates from LangGraph to provide visibility
@@ -322,6 +355,7 @@ def main():
 
                 if msgs:
                     last = msgs[-1]
+                    last_stream_state = state
                     # Display the latest message using rich formatting if verbose
                     format_messages([wrap_as_message(last)])
 
@@ -341,9 +375,12 @@ def main():
                     if role == "ai" and tool_calls:
                         for tc in tool_calls:
                             tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "unknown")
+                            last_tool_name = tc_name
                             print(f"⚙️  Agent decided to act: Calling `{tc_name}`... (⏱️  {step_time:.1f}s)")
                             next_spinner_msg = f"Executing `{tc_name}`..."
                     elif role == "tool":
+                        if name:
+                            last_tool_name = name
                         print(
                             f"✅ Executed tool `{name}` successfully (output size: {len(content)} chars) (⏱️  {step_time:.1f}s)")
                         next_spinner_msg = "Analyzing tool output..."
@@ -363,9 +400,21 @@ def main():
         except Exception as e:
             spinner.stop()
             total_time = time.time() - start_time
-            # Fallback to invoke if stream doesn't work out of the box
-            print(
-                f"⚠️ Streaming not fully supported or interrupted ({e}), running normally... (failed after {total_time:.1f}s)")
+            role, name, preview = _last_stream_message_diagnostics(last_stream_state)
+            diagnostic_tool_name = name or last_tool_name or "unknown"
+
+            if _is_azure_content_filter_error(e):
+                print("⚠️  Streaming interrupted by Azure Content Filtering."
+                      f"Switching to fallback invoke... (failed after {total_time:.1f}s)"
+                      )
+            else:
+                print(f"⚠️  Streaming not fully supported ({e}), running normally... (failed after {total_time:.1f}s)")
+
+            print(f"🔎  Stream diagnostics: "
+                  f"last_tool=`{diagnostic_tool_name}`, last_role=`{role or 'unknown'}`"
+                  )
+            if preview:
+                print(f"🔎  Preview of last message (truncated): {preview}")
 
             spinner.start("Running fallback synchronous invoke...")
             start_invoke = time.time()
