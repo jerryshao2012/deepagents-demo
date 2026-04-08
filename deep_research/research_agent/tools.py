@@ -50,6 +50,32 @@ MAX_FILES_TO_READ = 20
 MAX_TOTAL_SIZE_MB = 50
 
 
+def _normalize_path_for_filesystem_tools(path_str: str) -> str:
+    """Normalize paths for cross-platform compatibility with deepagents filesystem tools.
+    
+    Deepagents filesystem tools (glob, ls, etc.) expect paths relative to the working directory.
+    This function ensures paths start with './' instead of '/' for proper resolution on all platforms.
+    
+    Args:
+        path_str: The path string to normalize
+        
+    Returns:
+        Normalized path string with proper relative prefix
+    """
+    if not path_str:
+        return path_str
+
+    # Convert Windows backslashes to forward slashes for consistency
+    normalized = path_str.replace('\\', '/')
+
+    # If path starts with '/', it's being treated as absolute from root
+    # Convert to relative path by adding './' prefix
+    if normalized.startswith('/') and not normalized.startswith('./'):
+        normalized = './' + normalized.lstrip('/')
+
+    return normalized
+
+
 def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float = 60.0) -> dict:
     api_key = os.getenv("TAVILY_API_KEY")
     if not api_key:

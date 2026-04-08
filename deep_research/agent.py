@@ -3,6 +3,7 @@
 This module creates a deep research agent with custom tools and prompts
 for conducting web research with strategic thinking and context management.
 """
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -30,6 +31,8 @@ from research_agent.tools import (
     tavily_search,
     think_tool,
     trigger_dataset_evaluation,
+    _normalize_path_for_filesystem_tools,
+    REPORTS_OUTPUT_FOLDER,
 )
 from utils import get_ssl_verify_config, str2bool
 
@@ -38,6 +41,13 @@ load_dotenv()
 
 # Ensure task() returns the subagent's final content even when it is not stored in `.text`.
 patch_deepagents_task_tool_result_extraction()
+
+# Normalize OUTPUT_FOLDER for deepagents filesystem tools compatibility (cross-platform)
+# This ensures paths work correctly with glob, ls, and other filesystem tools
+if "OUTPUT_FOLDER" not in os.environ:
+    os.environ["OUTPUT_FOLDER"] = _normalize_path_for_filesystem_tools(REPORTS_OUTPUT_FOLDER)
+else:
+    os.environ["OUTPUT_FOLDER"] = _normalize_path_for_filesystem_tools(os.environ["OUTPUT_FOLDER"])
 
 # Create SSL verification setting - CLI flag takes precedence over env var
 verify_ssl = get_ssl_verify_config()
