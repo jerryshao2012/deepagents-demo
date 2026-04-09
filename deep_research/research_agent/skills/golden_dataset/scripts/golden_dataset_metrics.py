@@ -222,7 +222,9 @@ def generate_golden_dataset_report(
             # Add goal achievements
             metrics_summary += "\n### Goal Achievement\n\n"
             for metric in metric_columns:
-                min_goal = _CONFIG["metrics"][metric]["goal"]
+                goal_str = _CONFIG["metrics"][metric]["goal"]
+                # Extract numeric value from goal string (e.g., "3+" -> 3.0)
+                min_goal = float(re.search(r'\d+(?:\.\d+)?', str(goal_str)).group())
                 mean_val = df[metric].mean()
                 achieved = "✅" if mean_val >= min_goal else "⚠️"
                 metrics_summary += f"- {achieved} **{metric}**: {mean_val:.2f} (goal: {min_goal}+)\n"

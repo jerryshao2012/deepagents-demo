@@ -49,7 +49,7 @@ Do not do Step 3 or Step 4 (defined in the [Producing Golden Datasets](https://g
 Requirements:
 - **COMPLETION SEQUENCE — follow these steps in order after all items are drafted:**
   1. Call `render_target_output` with `target_id="golden-dataset"` and your JSON object (including `items`). This validates the payload and returns the Markdown preview.
-  2. Call `finalize_golden_dataset_output` with the **same JSON string** as step 1. Implementation lives under `research_agent/skills/golden_dataset/` (`pipeline.py`): it writes the CSV to `./output/`, runs evaluation, generates a markdown table at `/golden_dataset_metrics.md`, and creates a comprehensive final report at `/final_report.md` in one atomic step.
+  2. Call `finalize_golden_dataset_output` with the **same JSON string** as step 1. Implementation lives under `research_agent/skills/golden_dataset/` (`pipeline.py`): it writes the CSV to `./output/`, runs evaluation, generates a markdown table and calls `write_todos` to save as `/golden_dataset_metrics.md`, and creates a comprehensive final report and calls `write_todos` to save as `/final_report.md` in one atomic step.
   3. Call `write_todos` to mark ALL todos as "completed".
   4. Only after steps 1–3 succeed, write a brief summary to the user.
   **Do NOT skip steps 1, 2, or 3. A verbal description of the dataset is NOT a substitute for the tool calls.**
