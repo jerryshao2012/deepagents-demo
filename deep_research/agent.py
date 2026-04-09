@@ -232,12 +232,15 @@ class ResearchStateMiddleware(AgentMiddleware):
         # Look for --doc-folder pattern
         doc_match = re.search(r"--doc-folder\s+['\"]?([^\s'\"]+)['\"]?", user_message)
         if doc_match:
-            return doc_match.group(1)
+            # Normalize Windows backslashes to forward slashes
+            return doc_match.group(1).replace('\\', '/')
 
         # Look for path patterns like ./docs/policy/ or .\docs\policy\ or quoted paths
         path_match = re.search(r"['\"](\.[/\\][^'\"]+)['\"]", user_message)
         if path_match:
             potential_path = path_match.group(1)
+            # Normalize Windows backslashes to forward slashes
+            potential_path = potential_path.replace('\\', '/')
             if "doc" in potential_path.lower() or "policy" in potential_path.lower() or "folder" in potential_path.lower():
                 return potential_path
 
@@ -245,6 +248,8 @@ class ResearchStateMiddleware(AgentMiddleware):
         unquoted_match = re.search(r"(\.[/\\][\w/\\.]+)", user_message)
         if unquoted_match:
             potential_path = unquoted_match.group(1)
+            # Normalize Windows backslashes to forward slashes
+            potential_path = potential_path.replace('\\', '/')
             if any(keyword in potential_path.lower() for keyword in ["doc", "policy", "data", "input", "file"]):
                 return potential_path
 

@@ -250,7 +250,8 @@ def _save_extracted_content(original_file_path: Path, content: str, output_folde
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(content)
 
-    return str(file_path)
+    # Return normalized relative path for deepagents filesystem tools compatibility
+    return _normalize_path_for_filesystem_tools(str(file_path))
 
 
 def _extract_supported_document(file_path: Path) -> str:
@@ -560,7 +561,8 @@ def save_research_report(report_title: str, content: str) -> str:
     with open(file_path, 'w', encoding='utf-8') as f:
         f.write(content)
 
-    return str(file_path)
+    # Return normalized relative path for deepagents filesystem tools compatibility
+    return _normalize_path_for_filesystem_tools(str(file_path))
 
 
 def _coerce_integers(value, schema):
