@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from langchain.tools import BaseTool, ToolRuntime
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import StructuredTool
 from langgraph.types import Command
@@ -53,8 +53,8 @@ def patch_deepagents_task_tool_result_extraction() -> None:
         return
 
     def _build_task_tool(
-        subagents: list[dict[str, Any]],
-        task_description: str | None = None,
+            subagents: list[dict[str, Any]],
+            task_description: str | None = None,
     ) -> BaseTool:
         subagent_graphs: dict[str, Runnable] = {
             spec["name"]: spec["runnable"] for spec in subagents
@@ -96,8 +96,44 @@ def patch_deepagents_task_tool_result_extraction() -> None:
                 }
             )
 
+        def _build_subagent_context_message(state: dict) -> SystemMessage | None:
+            """Build a SystemMessage with task configuration context for the subagent.
+
+            This ensures subagents know about configured resources (doc_folder,
+            target, no_web) so they can call the right tools — even when the
+            orchestrator's task description doesn't explicitly mention them.
+            """
+            parts: list[str] = []
+
+            doc_folder = state.get("doc_folder")
+            if doc_folder:
+                parts.append(
+                    f"A document folder is configured for this research task: '{doc_folder}'.\n"
+                    "You MUST use the `read_doc_folder` tool with this path whenever you need "
+                    "to access or reference document content. Previously extracted files are "
+                    "cached on disk, so repeated calls are fast."
+                )
+
+            target = state.get("target")
+            if target:
+                parts.append(f"The active output target is `{target}`.")
+
+            no_web = state.get("no_web")
+            if no_web:
+                parts.append(
+                    "**Web search is DISABLED for this task.** "
+                    "Do NOT use tavily_search. Rely on local documents and internal knowledge only."
+                )
+
+            if not parts:
+                return None
+
+            return SystemMessage(
+                content="Task context (injected automatically):\n" + "\n".join(parts)
+            )
+
         def _validate_and_prepare_state(
-            subagent_type: str, description: str, runtime: ToolRuntime
+                subagent_type: str, description: str, runtime: ToolRuntime
         ) -> tuple[Runnable, dict]:
             subagent = subagent_graphs[subagent_type]
             subagent_state = {
@@ -105,19 +141,27 @@ def patch_deepagents_task_tool_result_extraction() -> None:
                 for k, v in runtime.state.items()
                 if k not in subagents_module._EXCLUDED_STATE_KEYS
             }
-            subagent_state["messages"] = [HumanMessage(content=description)]
+
+            # Build messages: optional context SystemMessage + task HumanMessage
+            messages: list = []
+            context_msg = _build_subagent_context_message(subagent_state)
+            if context_msg:
+                messages.append(context_msg)
+            messages.append(HumanMessage(content=description))
+            subagent_state["messages"] = messages
+
             return subagent, subagent_state
 
         def task(
-            description: Annotated[
-                str,
-                "A detailed description of the task for the subagent to perform autonomously. Include all necessary context and specify the expected output format.",
-            ],
-            subagent_type: Annotated[
-                str,
-                "The type of subagent to use. Must be one of the available agent types listed in the tool description.",
-            ],
-            runtime: ToolRuntime,
+                description: Annotated[
+                    str,
+                    "A detailed description of the task for the subagent to perform autonomously. Include all necessary context and specify the expected output format.",
+                ],
+                subagent_type: Annotated[
+                    str,
+                    "The type of subagent to use. Must be one of the available agent types listed in the tool description.",
+                ],
+                runtime: ToolRuntime,
         ) -> str | Command:
             if subagent_type not in subagent_graphs:
                 allowed_types = ", ".join(f"`{name}`" for name in subagent_graphs)
@@ -134,15 +178,15 @@ def patch_deepagents_task_tool_result_extraction() -> None:
             return _return_command_with_state_update(result, runtime.tool_call_id)
 
         async def atask(
-            description: Annotated[
-                str,
-                "A detailed description of the task for the subagent to perform autonomously. Include all necessary context and specify the expected output format.",
-            ],
-            subagent_type: Annotated[
-                str,
-                "The type of subagent to use. Must be one of the available agent types listed in the tool description.",
-            ],
-            runtime: ToolRuntime,
+                description: Annotated[
+                    str,
+                    "A detailed description of the task for the subagent to perform autonomously. Include all necessary context and specify the expected output format.",
+                ],
+                subagent_type: Annotated[
+                    str,
+                    "The type of subagent to use. Must be one of the available agent types listed in the tool description.",
+                ],
+                runtime: ToolRuntime,
         ) -> str | Command:
             if subagent_type not in subagent_graphs:
                 allowed_types = ", ".join(f"`{name}`" for name in subagent_graphs)

@@ -403,7 +403,8 @@ def read_doc_folder(
     if not configured_doc_folder:
         return (
             "Error: No document folder has been configured for this research task. "
-            "Pass --doc-folder <path> when invoking the CLI to enable local document reading. "
+            "Pass --doc-folder <path> when invoking the CLI, or include the folder path "
+            "(e.g. '--doc-folder ./docs/policy/') in your message when using the API. "
             "Do NOT attempt to read from any other filesystem path."
         )
 
