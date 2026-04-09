@@ -73,6 +73,9 @@ def _normalize_path_for_filesystem_tools(path_str: str) -> str:
     # Convert to relative path by adding './' prefix
     if normalized.startswith('/') and not normalized.startswith('./'):
         normalized = './' + normalized.lstrip('/')
+    # Ensure relative paths also start with './' for explicit relative reference
+    elif not normalized.startswith('./') and not normalized.startswith('/'):
+        normalized = './' + normalized
 
     return normalized
 
