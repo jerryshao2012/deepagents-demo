@@ -71,7 +71,8 @@ def evaluate_golden_dataset_csv_file(file_path: str) -> str:
 def evaluate_and_report_golden_dataset(
         csv_path: Path,
         payload: dict,
-        output_folder: Path
+        output_folder: Path,
+        elapsed_seconds: float = 0.0
 ) -> tuple[Path, str, str]:
     """Evaluate golden dataset CSV and generate both metrics markdown and final report.
     
@@ -79,6 +80,7 @@ def evaluate_and_report_golden_dataset(
         csv_path: Path to the original CSV file.
         payload: The golden dataset payload with metadata.
         output_folder: Output folder for generated files.
+        elapsed_seconds: Total time spent in agent chat (in seconds).
         
     Returns:
         Tuple of (metrics_csv_path, markdown_content, final_report_content).
@@ -101,7 +103,8 @@ def evaluate_and_report_golden_dataset(
         csv_path=str(csv_path),
         metrics_csv_path=str(metrics_csv_path),
         markdown_content=markdown_content,
-        payload=payload
+        payload=payload,
+        elapsed_seconds=elapsed_seconds
     )
 
     return metrics_csv_path, markdown_content, final_report_content

@@ -873,6 +873,7 @@ def finalize_golden_dataset_output(
     Returns:
         Paths to the exported CSV and metrics output, or a validation or runtime error message.
     """
+    import time
     from research_agent.skills.golden_dataset.pipeline import (
         GOLDEN_DATASET_TARGET_ID,
         evaluate_and_report_golden_dataset,
@@ -884,6 +885,10 @@ def finalize_golden_dataset_output(
         return err
 
     try:
+        # Calculate elapsed time from agent start
+        start_time = state.get("agent_start_time") if state else None
+        elapsed_seconds = (time.time() - start_time) if start_time else 0.0
+
         output_subfolder = Path(os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER))
         csv_path = export_golden_dataset_csv(payload, output_subfolder)
 
@@ -891,7 +896,8 @@ def finalize_golden_dataset_output(
         metrics_csv_path, markdown_content, final_report_content = evaluate_and_report_golden_dataset(
             csv_path=csv_path,
             payload=payload,
-            output_folder=output_subfolder
+            output_folder=output_subfolder,
+            elapsed_seconds=elapsed_seconds
         )
 
         # Write metrics markdown file

@@ -124,6 +124,7 @@ class ResearchState(AgentState):
     doc_folder: str | None
     no_web: bool | None
     target: str | None
+    agent_start_time: float | None
 
 
 class ResearchStateMiddleware(AgentMiddleware):
@@ -135,7 +136,13 @@ class ResearchStateMiddleware(AgentMiddleware):
     state_schema = ResearchState
 
     def before_agent(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
+        import time
         messages = state.get("messages", [])
+
+        # Capture agent start time if not already set
+        updates: dict[str, Any] = {}
+        if state.get("agent_start_time") is None:
+            updates["agent_start_time"] = time.time()
 
         # Check if system instructions already exist
         has_config = any(
@@ -143,21 +150,19 @@ class ResearchStateMiddleware(AgentMiddleware):
             for m in messages
         )
         if has_config:
-            return None
+            return updates if updates else None
 
         # Step 1: Extract doc_folder and target from user message if not already set
-        updates = self._extract_parameters_from_user_input(state, messages)
+        extracted_updates = self._extract_parameters_from_user_input(state, messages)
+        updates.update(extracted_updates)
 
         # Step 2: Configure OUTPUT_FOLDER based on extracted doc_folder
-        if updates.get("doc_folder") or (state.get("doc_folder") and not updates):
+        if updates.get("doc_folder") or (state.get("doc_folder") and not extracted_updates):
             doc_folder = updates.get("doc_folder") or state.get("doc_folder")
             self._configure_output_folder(doc_folder)
 
         # Step 3: Build instruction based on full state (including extracted parameters)
-        if updates:
-            merged_state: ResearchState = {**state, **updates}  # type: ignore[assignment]
-        else:
-            merged_state = state
+        merged_state: ResearchState = {**state, **updates}  # type: ignore[assignment]
         instruction = self._build_system_instruction(merged_state)
 
         result = updates if updates else {}

@@ -183,7 +183,8 @@ def generate_golden_dataset_report(
         csv_path: str,
         metrics_csv_path: str,
         markdown_content: str,
-        payload: dict
+        payload: dict,
+        elapsed_seconds: float = 0.0
 ) -> str:
     """Generate a comprehensive final report for the golden dataset generation process.
     
@@ -192,6 +193,7 @@ def generate_golden_dataset_report(
         metrics_csv_path: Path to the CSV file with quality metrics.
         markdown_content: The markdown table content from metrics CSV.
         payload: The golden dataset payload with metadata.
+        elapsed_seconds: Total time spent in agent chat (in seconds).
         
     Returns:
         Complete markdown report content.
@@ -235,6 +237,7 @@ def generate_golden_dataset_report(
     report = f"""# Golden Dataset Generation Report: {dataset_name}
 
 **Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+**Time Spent:** {elapsed_seconds:.2f} seconds
 
 ## Overview
 
