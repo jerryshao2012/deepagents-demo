@@ -237,6 +237,7 @@ def generate_golden_dataset_report(
     report = f"""# Golden Dataset Generation Report: {dataset_name}
 
 **Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
 **Time Spent:** {elapsed_seconds:.2f} seconds
 
 ## Overview
