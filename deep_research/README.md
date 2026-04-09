@@ -25,7 +25,12 @@ Install packages:
 uv sync
 ```
 
-*(If `uv` is not available on your system, you can use traditional pip: `pip install -r requirements.txt`)*
+* If `uv` is not available on your system, you can install uv: 
+```bash
+pip install uv
+# In Windows if PATH is not setup properly
+python -m uv sync
+```
 
 Set your API keys in your environment:
 
