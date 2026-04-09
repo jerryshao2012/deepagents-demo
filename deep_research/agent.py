@@ -231,32 +231,45 @@ class ResearchStateMiddleware(AgentMiddleware):
 
     @staticmethod
     def _extract_doc_folder(user_message: str) -> str | None:
-        """Extract doc_folder from user message patterns."""
+        """Extract doc_folder from user message patterns and verify it exists."""
+        potential_path: str | None = None
+
         # Look for --doc-folder pattern
         doc_match = re.search(r"--doc-folder\s+['\"]?([^\s'\"]+)['\"]?", user_message)
         if doc_match:
             # Normalize Windows backslashes to forward slashes
-            return doc_match.group(1).replace('\\', '/')
+            potential_path = doc_match.group(1).replace('\\', '/')
 
-        # Look for path patterns like ./docs/policy/ or .\docs\policy\ or quoted paths
-        path_match = re.search(r"['\"](\.[/\\][^'\"]+)['\"]", user_message)
-        if path_match:
-            potential_path = path_match.group(1)
-            # Normalize Windows backslashes to forward slashes
-            potential_path = potential_path.replace('\\', '/')
-            if "doc" in potential_path.lower() or "policy" in potential_path.lower() or "folder" in potential_path.lower():
-                return potential_path
+        if not potential_path:
+            # Look for path patterns like ./docs/policy/ or .\docs\policy\ or quoted paths
+            path_match = re.search(r"['\"](\.[/\\][^'\"]+)['\"]", user_message)
+            if path_match:
+                p = path_match.group(1).replace('\\', '/')
+                if "doc" in p.lower() or "policy" in p.lower() or "folder" in p.lower():
+                    potential_path = p
 
-        # Look for unquoted paths that contain common document folder names
-        unquoted_match = re.search(r"(\.[/\\][\w/\\.]+)", user_message)
-        if unquoted_match:
-            potential_path = unquoted_match.group(1)
-            # Normalize Windows backslashes to forward slashes
-            potential_path = potential_path.replace('\\', '/')
-            if any(keyword in potential_path.lower() for keyword in ["doc", "policy", "data", "input", "file"]):
-                return potential_path
+        if not potential_path:
+            # Look for unquoted paths that contain common document folder names
+            # Matches ./path/to/dir, /path/to/dir, or path/to/dir
+            unquoted_match = re.search(r"((?:\.?/)?[\w/\\.-]+(?:[/\\][\w/\\.-]+)+)", user_message)
+            if unquoted_match:
+                p = unquoted_match.group(1).replace('\\', '/')
+                if any(keyword in p.lower() for keyword in ["doc", "policy", "data", "input", "file"]):
+                    potential_path = p
 
-        return None
+        if not potential_path:
+            return None
+
+        # Verify the path exists; if not, check if it's inside 'deep_research'
+        path = Path(potential_path)
+        if not path.exists():
+            # Try to prefix with deep_research if not already
+            if not potential_path.startswith("./deep_research/") and not potential_path.startswith("deep_research/"):
+                deep_path = Path("deep_research") / potential_path.lstrip("./")
+                if deep_path.exists():
+                    return str(deep_path)
+
+        return potential_path
 
     @staticmethod
     def _extract_target(user_message: str) -> str | None:
