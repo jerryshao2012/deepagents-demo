@@ -7,36 +7,52 @@ import os
 import httpx
 from pydantic import SecretStr
 
+from retry_utils import retry_on_rate_limit
 from utils import get_ssl_verify_config
 
 
 def get_configured_model():
-    """Build the first matching chat model from the environment configuration."""
+    """Build the first matching chat model from the environment configuration with rate limit retry."""
     verify_ssl = get_ssl_verify_config()
 
     if os.getenv("GOOGLE_API_KEY") and os.getenv("MODEL_NAME"):
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        return ChatGoogleGenerativeAI(
+        model = ChatGoogleGenerativeAI(
             model=os.getenv("MODEL_NAME", "gemini-3-pro-preview"),
             temperature=0.0,
         )
+        # Wrap invoke methods with retry logic
+        model.invoke = retry_on_rate_limit(model.invoke)
+        if hasattr(model, 'ainvoke'):
+            model.ainvoke = retry_on_rate_limit(model.ainvoke)
+        return model
 
     if os.getenv("ANTHROPIC_API_KEY") and os.getenv("MODEL_NAME"):
         from langchain.chat_models import init_chat_model
 
-        return init_chat_model(
+        model = init_chat_model(
             model=os.getenv("MODEL_NAME", "anthropic:claude-sonnet-4-5-20250929"),
             temperature=0.0,
         )
+        # Wrap invoke methods with retry logic
+        model.invoke = retry_on_rate_limit(model.invoke)
+        if hasattr(model, 'ainvoke'):
+            model.ainvoke = retry_on_rate_limit(model.ainvoke)
+        return model
 
     if os.getenv("OLLAMA_API_BASE") and os.getenv("MODEL_NAME"):
         from langchain.chat_models import init_chat_model
 
-        return init_chat_model(
+        model = init_chat_model(
             model=f"ollama:{os.getenv('MODEL_NAME')}",
             base_url=os.getenv("OLLAMA_API_BASE"),
         )
+        # Wrap invoke methods with retry logic
+        model.invoke = retry_on_rate_limit(model.invoke)
+        if hasattr(model, 'ainvoke'):
+            model.ainvoke = retry_on_rate_limit(model.ainvoke)
+        return model
 
     if (
             os.getenv("AZURE_OPENAI_ENDPOINT")
@@ -46,12 +62,17 @@ def get_configured_model():
     ):
         from langchain_openai import AzureChatOpenAI
 
-        return AzureChatOpenAI(
+        model = AzureChatOpenAI(
             azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
             azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
             api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
             api_key=SecretStr(os.getenv("AZURE_OPENAI_API_KEY", "")),
             http_client=httpx.Client(verify=verify_ssl),
         )
+        # Wrap invoke methods with retry logic
+        model.invoke = retry_on_rate_limit(model.invoke)
+        if hasattr(model, 'ainvoke'):
+            model.ainvoke = retry_on_rate_limit(model.ainvoke)
+        return model
 
     raise ValueError("No model found. Please set up a model")

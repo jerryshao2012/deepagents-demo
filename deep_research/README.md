@@ -25,9 +25,8 @@ Install packages:
 uv sync
 ```
 
-* If `uv` is not available on your system, you can install uv: 
+* If `uv` is not available on your system path, you can ry: 
 ```bash
-pip install uv
 # In Windows if PATH is not setup properly
 python -m uv sync
 ```
@@ -315,3 +314,120 @@ The deep research agent adds the following custom tools beyond the built-in deep
 | `render_target_output` | Generic target renderer that loads a target skill from `research_agent/skills/*/SKILL.md`, validates the provided JSON payload against that target's schema, and renders the final Markdown output. |
 | `finalize_golden_dataset_output` | Golden-dataset only: validates the same JSON as `render_target_output`, exports a CSV under `output/` via `skills/golden_dataset/pipeline.py`, then runs quality metrics so export and evaluation always happen in order. |
 | `trigger_dataset_evaluation` | Evaluates an existing golden dataset CSV (or use after export); computes quality metrics using the bundled script. Prefer `finalize_golden_dataset_output` for new datasets. |
+
+## 🛡️ Rate Limit Handling
+
+### Overview
+
+Model API calls have rate limits that can cause report generation to fail. The deep research agent includes an **automatic retry mechanism with exponential backoff** that gracefully handles rate limit errors from any model provider (OpenAI, Anthropic, Google, Azure, Ollama).
+
+### How It Works
+
+1. **Automatic Detection**: Rate limit errors are automatically detected (429 errors, "too many requests", quota exceeded, etc.)
+2. **Exponential Backoff**: When a rate limit is hit, the system waits before retrying:
+   - First retry: ~1 second wait
+   - Second retry: ~2 seconds wait  
+   - Third retry: ~4 seconds wait
+   - Fourth retry: ~8 seconds wait
+   - Fifth retry: ~16 seconds wait
+   - (capped at maximum backoff of 60 seconds)
+3. **Jitter**: Random variation (±50%) is added to prevent "thundering herd" when multiple clients retry simultaneously
+4. **Maximum Retries**: By default, retries up to 5 times before giving up
+5. **Smart Filtering**: Content filter errors (Azure) are NOT retried as they won't succeed on retry
+
+### Configuration
+
+All retry behavior is configurable via environment variables in your `.env` file:
+
+```bash
+# Maximum number of retry attempts when rate limit errors occur
+MODEL_MAX_RETRIES=5
+
+# Initial backoff time in seconds before first retry
+MODEL_INITIAL_BACKOFF=1.0
+
+# Maximum backoff time in seconds (cap for exponential backoff)
+MODEL_MAX_BACKOFF=60.0
+
+# Multiplier for exponential backoff (backoff = initial * multiplier^attempt)
+MODEL_BACKOFF_MULTIPLIER=2.0
+
+# Add jitter to prevent thundering herd problem (true/false)
+MODEL_RETRY_JITTER=true
+```
+
+### Tuning Recommendations
+
+#### For Strict Rate Limits (e.g., free tier APIs)
+```bash
+MODEL_MAX_RETRIES=10
+MODEL_INITIAL_BACKOFF=2.0
+MODEL_MAX_BACKOFF=120.0
+MODEL_BACKOFF_MULTIPLIER=2.0
+```
+
+#### For Lenient Rate Limits (e.g., paid tiers)
+```bash
+MODEL_MAX_RETRIES=3
+MODEL_INITIAL_BACKOFF=0.5
+MODEL_MAX_BACKOFF=30.0
+MODEL_BACKOFF_MULTIPLIER=1.5
+```
+
+#### For Local Models (Ollama)
+```bash
+MODEL_MAX_RETRIES=2
+MODEL_INITIAL_BACKOFF=0.5
+MODEL_MAX_BACKOFF=10.0
+MODEL_BACKOFF_MULTIPLIER=1.5
+```
+
+### What Gets Retried
+
+The retry wrapper is automatically applied to all model invocations (`model.invoke()` and `model.ainvoke()`) across all agents in this project.
+
+### Error Messages You'll See
+
+When rate limits are hit, you'll see warning messages like:
+```
+WARNING:retry_utils:Rate limit hit in invoke (attempt 1/6). Retrying in 1.23s... Error: Rate limit exceeded: 429 Too Many Requests
+```
+
+If all retries are exhausted:
+```
+ERROR:retry_utils:Rate limit error persisted after 5 retries in invoke. Last error: Rate limit exceeded
+```
+
+### Troubleshooting
+
+#### Still Getting Failures?
+
+1. **Increase max retries**: Set `MODEL_MAX_RETRIES=10` or higher
+2. **Increase initial backoff**: Set `MODEL_INITIAL_BACKOFF=5.0` to start with longer waits
+3. **Check your API quota**: You may need to upgrade your plan
+4. **Review logs**: Check which specific error is occurring
+
+#### Retries Taking Too Long?
+
+1. **Reduce max retries**: Set `MODEL_MAX_RETRIES=2`
+2. **Reduce backoff multiplier**: Set `MODEL_BACKOFF_MULTIPLIER=1.5`
+3. **Disable jitter**: Set `MODEL_RETRY_JITTER=false`
+
+#### Want to Disable Retries?
+
+Set `MODEL_MAX_RETRIES=0` in your `.env` file.
+
+### Verification
+
+You can verify the retry mechanism is working correctly by running:
+
+```bash
+python tests/test_retry_utils.py
+```
+
+This will run a series of verification tests to ensure rate limit detection, backoff calculation, and retry logic are functioning properly.
+
+To run with pytest instead:
+```bash
+pytest tests/test_retry_utils.py -v
+```

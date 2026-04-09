@@ -45,14 +45,24 @@ from langchain_ollama import ChatOllama
 # Load environment variables
 load_dotenv("../.env", override=True)
 
+# Add deep_research to path for retry utilities
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent / "deep_research"))
+from retry_utils import retry_on_rate_limit
+
 EXAMPLE_DIR = Path(__file__).parent
 console = Console()
 
-# Initialize Ollama model from environment
+# Initialize Ollama model from environment with retry wrapper
 model = ChatOllama(
     model=os.getenv("MODEL_NAME", "glm-4.7-flash:latest"),
     base_url=os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
 )
+# Wrap invoke methods with retry logic
+model.invoke = retry_on_rate_limit(model.invoke)
+if hasattr(model, 'ainvoke'):
+    model.ainvoke = retry_on_rate_limit(model.ainvoke)
 
 
 # Web search tool for the researcher subagent
