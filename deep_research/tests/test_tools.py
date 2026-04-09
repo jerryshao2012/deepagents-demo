@@ -506,3 +506,48 @@ def test_read_doc_folder_reports_unsupported_and_empty_cases(tmp_path: Path) -> 
     )
 
     assert "No supported document files found" in result
+
+
+def test_ls_lists_files_and_directories(tmp_path: Path) -> None:
+    (tmp_path / "file1.txt").touch()
+    (tmp_path / "dir1").mkdir()
+    (tmp_path / "dir1" / "file2.txt").touch()
+
+    result = tools.ls.invoke({"path": str(tmp_path)})
+
+    assert "file1.txt" in result
+    assert "dir1/" in result
+    assert "file2.txt" not in result
+
+
+def test_ls_handles_nonexistent_path(tmp_path: Path) -> None:
+    result = tools.ls.invoke({"path": str(tmp_path / "nonexistent")})
+    assert "Error: Path" in result
+    assert "not found" in result
+
+
+def test_glob_finds_files_matching_pattern(tmp_path: Path) -> None:
+    (tmp_path / "test1.md").touch()
+    (tmp_path / "test2.md").touch()
+    (tmp_path / "other.txt").touch()
+    subdir = tmp_path / "sub"
+    subdir.mkdir()
+    (subdir / "test3.md").touch()
+
+    # Simple glob
+    result = tools.glob.invoke({"pattern": f"{tmp_path}/*.md"})
+    assert "test1.md" in result
+    assert "test2.md" in result
+    assert "other.txt" not in result
+    assert "test3.md" not in result
+
+    # Recursive glob
+    result = tools.glob.invoke({"pattern": f"{tmp_path}/**/*.md"})
+    assert "test1.md" in result
+    assert "test2.md" in result
+    assert "test3.md" in result
+
+
+def test_glob_handles_nonexistent_base_path() -> None:
+    result = tools.glob.invoke({"pattern": "/nonexistent/path/*.md"})
+    assert "Error: Base path" in result

@@ -69,7 +69,13 @@ def _normalize_path_for_filesystem_tools(path_str: str) -> str:
     # Convert Windows backslashes to forward slashes for consistency
     normalized = path_str.replace('\\', '/')
 
-    # If path starts with '/', it's being treated as absolute from root
+    # If it's a real absolute path that exists, return it as-is
+    # This is important for tests and cases where the user provides a real absolute path
+    if Path(normalized.split('*')[0].split('?')[0]).is_absolute() and Path(
+            normalized.split('*')[0].split('?')[0]).exists():
+        return normalized
+
+    # If path starts with '/', it's being treated as absolute from root but likely intended as relative to project
     # Convert to relative path by adding './' prefix
     if normalized.startswith('/') and not normalized.startswith('./'):
         normalized = './' + normalized.lstrip('/')
@@ -372,6 +378,104 @@ def _resolve_doc_output_subfolder(folder: Path) -> Path:
     if configured_output == Path(REPORTS_OUTPUT_FOLDER):
         return configured_output / folder.name
     return configured_output
+
+
+@tool(parse_docstring=True)
+def ls(path: str) -> str:
+    """List files in a directory.
+
+    Args:
+        path: The path to the directory to list.
+
+    Returns:
+        A list of files in the directory or an error message.
+    """
+    normalized_path = _normalize_path_for_filesystem_tools(path)
+    p = Path(normalized_path)
+    if not p.exists():
+        return f"Error: Path '{path}' not found"
+    if not p.is_dir():
+        return f"Error: Path '{path}' is not a directory"
+
+    try:
+        files = [f.name + ("/" if f.is_dir() else "") for f in p.iterdir()]
+        return "\n".join(sorted(files))
+    except Exception as e:
+        return f"Error listing directory '{path}': {e}"
+
+
+@tool(parse_docstring=True)
+def glob(pattern: str) -> str:
+    """Find files matching a glob pattern.
+
+    Args:
+        pattern: The glob pattern to match (e.g., "**/*.md").
+
+    Returns:
+        A list of matching file paths or an error message.
+    """
+    normalized_pattern = _normalize_path_for_filesystem_tools(pattern)
+
+    # If it's a real absolute path or starts with ./, use it
+    if normalized_pattern.startswith('./') or (len(normalized_pattern) > 0 and normalized_pattern[0] == '/') or (
+            len(normalized_pattern) > 1 and normalized_pattern[1] == ':'):
+        # Determine if it's an absolute path from the start
+        is_absolute = (len(normalized_pattern) > 0 and normalized_pattern[0] == '/') or (
+                    len(normalized_pattern) > 1 and normalized_pattern[1] == ':')
+
+        # For glob, we need to split the fixed part from the pattern part
+        # We can't just use Path(normalized_pattern) because it might not like wildcards in some OS calls
+        if is_absolute:
+            # On Unix, parts[0] is '/'
+            parts = Path(normalized_pattern.split('*')[0].split('?')[0]).parts
+            # Reconstruct the base path from fixed parts
+            base_path = Path(*parts)
+            # The rest is the pattern
+            glob_pattern = normalized_pattern[len(str(base_path)):]
+            if glob_pattern.startswith('/'):
+                glob_pattern = glob_pattern[1:]
+            if not glob_pattern:
+                glob_pattern = "*"
+        else:
+            path_obj = Path(normalized_pattern)
+            parts = path_obj.parts
+            fixed_parts = []
+            pattern_parts = []
+            found_wildcard = False
+            for part in parts:
+                if '*' in part or '?' in part:
+                    found_wildcard = True
+                if found_wildcard:
+                    pattern_parts.append(part)
+                else:
+                    fixed_parts.append(part)
+
+            if not fixed_parts:
+                base_path = Path(".")
+            else:
+                base_path = Path(*fixed_parts)
+
+            glob_pattern = "/".join(pattern_parts) if pattern_parts else "*"
+    else:
+        # Fallback for simple patterns or relative patterns without ./
+        if "/" in normalized_pattern:
+            base_path_str, glob_pattern = normalized_pattern.rsplit("/", 1)
+            if not glob_pattern:  # case like "path/to/dir/"
+                glob_pattern = "*"
+            base_path = Path(base_path_str)
+        else:
+            base_path = Path(".")
+            glob_pattern = normalized_pattern
+
+    if not base_path.exists():
+        return f"Error: Base path for pattern '{pattern}' not found"
+
+    try:
+        # If it's a recursive glob, handle it
+        matches = list(base_path.glob(glob_pattern))
+        return "\n".join(sorted(str(m.relative_to(base_path)) for m in matches))
+    except Exception as e:
+        return f"Error running glob for pattern '{pattern}': {e}"
 
 
 @tool(parse_docstring=True)
