@@ -54,8 +54,12 @@ Requirements:
   4. Only after steps 1–3 succeed, write a brief summary to the user.
   **Do NOT skip steps 1, 2, or 3. A verbal description of the dataset is NOT a substitute for the tool calls.**
   - Optional: use `trigger_dataset_evaluation` only if you need to re-run metrics on an existing CSV file path.
+- **DOCUMENT ACCESS WORKFLOW**: 
+  - Step 1: If not already done, call `read_doc_folder` on the configured doc folder (e.g., `./docs/policy/`) to extract source documents to `./output/<sub-folder>/extracted/`.
+  - Step 2: Use filesystem tools (`ls`, `glob`, `read_file`) to read the extracted markdown files from `./output/<sub-folder>/extracted/`. These contain the pre-extracted, searchable content.
+  - Step 3: Base all questions, answers, and content references on these extracted markdown files—NOT on the raw source documents in `./docs/`.
 - Produce a reviewable starter batch with exactly 12 items unless the user explicitly asks for a different count.
-- Questions and answers are bsed on extracted knowledge documents in markdown format from `./output/<sub-folder>` (from the provided documents).
+- Questions and answers are based on extracted knowledge documents in markdown format from `./output/<sub-folder>/extracted/` (NOT from `./docs/<sub-folder>/`). For example, if documents were provided from `./docs/policy/`, read the extracted content from `./output/policy/extracted/`. Use `read_file` or filesystem tools to access these pre-extracted markdown files.
 - Questions must sound like realistic non-expert customer questions.
 - Every question must be self-contained and unambiguous.
 - Cover the major domain areas visible in the provided materials.
@@ -189,8 +193,8 @@ Before submitting, verify every item passes:
 
 If the `doc-folder` contains thousands of files or very large files (hundreds of GBs):
 
-1. **Tiered Discovery**: Call `read_doc_folder` once. If it returns a summary instead of full text, review the file list.
-2. **Selective Sampling**: Identify a representative subset of files (e.g., one from each major subfolder or topic-related filenames). If the research subject is broad or mentions no specific area, **automatically sample a diverse set of documents** from the list to cover a range of topics without asking for confirmation.
-3. **Specific Reading**: Use the `specific_files` parameter in `read_doc_folder` to read only those selected files. Do this automatically based on your sampling decision.
-4. **Iterative Coverage**: If needed, repeat the process for different "coverage areas" to ensure the 12 items are well-distributed across the entire large dataset.
-5. **Summarization**: For very large individual documents, if they fail to read or are too long, focus on their executive summaries or introductions if available as separate files.
+1. **Initial Extraction**: First, call `read_doc_folder` on the configured doc folder (e.g., `./docs/policy/`) to trigger extraction of documents to `./output/<sub-folder>/extracted/`. This may return an auto-sample if the folder is too large.
+2. **Access Extracted Content**: After extraction, read the markdown files from `./output/<sub-folder>/extracted/` using filesystem tools like `read_file`, `ls`, or `glob`. These are the pre-extracted, searchable markdown versions of your source documents.
+3. **Selective Sampling**: If there are many extracted files, identify a representative subset based on filenames or subfolders. If the research subject is broad or mentions no specific area, **automatically sample a diverse set of extracted files** to cover a range of topics without asking for confirmation.
+4. **Iterative Coverage**: If needed, repeat the process for different "coverage areas" to ensure the items are well-distributed across the entire dataset.
+5. **Summarization**: For very large individual extracted documents, focus on their executive summaries or introductions if available.
