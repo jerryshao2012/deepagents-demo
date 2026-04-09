@@ -375,6 +375,27 @@ def _resolve_doc_output_subfolder(folder: Path) -> Path:
 
 
 @tool(parse_docstring=True)
+def read_file(file_path: str) -> str:
+    """Read the content of a file.
+
+    Args:
+        file_path: The path to the file to read.
+
+    Returns:
+        The content of the file or an error message if the file not found.
+    """
+    normalized_path = _normalize_path_for_filesystem_tools(file_path)
+    path = Path(normalized_path)
+    if not path.exists():
+        return f"Error: File '{file_path}' not found"
+
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception as e:
+        return f"Error reading file '{file_path}': {e}"
+
+
+@tool(parse_docstring=True)
 def read_doc_folder(
         folder_path: str,
         specific_files: list[str] | None = None,

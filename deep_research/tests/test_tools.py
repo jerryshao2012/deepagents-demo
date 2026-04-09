@@ -301,7 +301,7 @@ def test_render_target_output_renders_golden_dataset_without_metric_fields() -> 
 def test_finalize_golden_dataset_output_exports_content_to_csv(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(tools, "REPORTS_OUTPUT_FOLDER", str(tmp_path))
 
-    def fake_evaluate_and_report(csv_path, payload, output_folder):
+    def fake_evaluate_and_report(csv_path, payload, output_folder, elapsed_seconds=None):
         from pathlib import Path
         metrics_csv = Path(str(csv_path).replace(".csv", "-with-metrics.csv"))
         metrics_csv.write_text(
@@ -353,7 +353,7 @@ def test_finalize_golden_dataset_output_exports_content_to_csv(tmp_path, monkeyp
 def test_finalize_golden_dataset_output_runs_metrics(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(tools, "REPORTS_OUTPUT_FOLDER", str(tmp_path))
 
-    def fake_evaluate_and_report(csv_path, payload, output_folder):
+    def fake_evaluate_and_report(csv_path, payload, output_folder, elapsed_seconds=None):
         from pathlib import Path
         metrics_csv = Path(str(csv_path).replace(".csv", "-with-metrics.csv"))
         metrics_csv.write_text("scored content", encoding="utf-8")
@@ -405,7 +405,7 @@ def test_finalize_golden_dataset_output_runs_metrics(tmp_path, monkeypatch) -> N
 def test_finalize_golden_dataset_output_updates_state_with_text_file_data(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(tools, "REPORTS_OUTPUT_FOLDER", str(tmp_path))
 
-    def fake_evaluate_and_report(csv_path, payload, output_folder):
+    def fake_evaluate_and_report(csv_path, payload, output_folder, elapsed_seconds=None):
         from pathlib import Path
 
         metrics_csv = Path(str(csv_path).replace(".csv", "-with-metrics.csv"))
@@ -486,7 +486,10 @@ def test_read_doc_folder_reads_text_and_markdown_files(tmp_path: Path, monkeypat
     (tmp_path / "notes.txt").write_text("alpha", encoding="utf-8")
     (tmp_path / "summary.md").write_text("# heading", encoding="utf-8")
 
-    result = read_doc_folder.invoke({"folder_path": str(tmp_path)})
+    result = read_doc_folder.func(
+        folder_path=str(tmp_path),
+        state={"doc_folder": str(tmp_path)}
+    )
 
     assert "--- Content of notes.txt ---" in result
     assert "alpha" in result
@@ -497,6 +500,9 @@ def test_read_doc_folder_reads_text_and_markdown_files(tmp_path: Path, monkeypat
 def test_read_doc_folder_reports_unsupported_and_empty_cases(tmp_path: Path) -> None:
     (tmp_path / "image.png").write_bytes(b"png")
 
-    result = read_doc_folder.invoke({"folder_path": str(tmp_path)})
+    result = read_doc_folder.func(
+        folder_path=str(tmp_path),
+        state={"doc_folder": str(tmp_path)}
+    )
 
     assert "No supported document files found" in result
