@@ -23,9 +23,10 @@ def get_configured_model():
             temperature=0.0,
         )
         # Wrap invoke methods with retry logic
-        model.invoke = retry_on_rate_limit(model.invoke)
-        if hasattr(model, 'ainvoke'):
-            model.ainvoke = retry_on_rate_limit(model.ainvoke)
+        original_invoke = model.invoke
+        original_ainvoke = model.ainvoke
+        model.invoke = retry_on_rate_limit(original_invoke)
+        model.ainvoke = retry_on_rate_limit(original_ainvoke)
         return model
 
     if os.getenv("ANTHROPIC_API_KEY") and os.getenv("MODEL_NAME"):
@@ -36,9 +37,10 @@ def get_configured_model():
             temperature=0.0,
         )
         # Wrap invoke methods with retry logic
-        model.invoke = retry_on_rate_limit(model.invoke)
-        if hasattr(model, 'ainvoke'):
-            model.ainvoke = retry_on_rate_limit(model.ainvoke)
+        original_invoke = model.invoke
+        original_ainvoke = model.ainvoke
+        model.invoke = retry_on_rate_limit(original_invoke)
+        model.ainvoke = retry_on_rate_limit(original_ainvoke)
         return model
 
     if os.getenv("OLLAMA_API_BASE") and os.getenv("MODEL_NAME"):
@@ -49,9 +51,10 @@ def get_configured_model():
             base_url=os.getenv("OLLAMA_API_BASE"),
         )
         # Wrap invoke methods with retry logic
-        model.invoke = retry_on_rate_limit(model.invoke)
-        if hasattr(model, 'ainvoke'):
-            model.ainvoke = retry_on_rate_limit(model.ainvoke)
+        original_invoke = model.invoke
+        original_ainvoke = model.ainvoke
+        model.invoke = retry_on_rate_limit(original_invoke)
+        model.ainvoke = retry_on_rate_limit(original_ainvoke)
         return model
 
     if (
@@ -70,9 +73,10 @@ def get_configured_model():
             http_client=httpx.Client(verify=verify_ssl),
         )
         # Wrap invoke methods with retry logic
-        model.invoke = retry_on_rate_limit(model.invoke)
-        if hasattr(model, 'ainvoke'):
-            model.ainvoke = retry_on_rate_limit(model.ainvoke)
+        original_invoke = model.invoke
+        original_ainvoke = model.ainvoke
+        model.invoke = retry_on_rate_limit(original_invoke)
+        model.ainvoke = retry_on_rate_limit(original_ainvoke)
         return model
 
     raise ValueError("No model found. Please set up a model")
