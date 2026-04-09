@@ -57,7 +57,7 @@ Requirements:
 - **DOCUMENT ACCESS WORKFLOW**: 
   - Step 1: Call `read_doc_folder` on the configured doc folder (e.g., `./docs/policy/`). This will extract documents and return a summary showing saved paths like `output/policy/extracted/filename.pdf_extracted.md`.
   - Step 2: **IMPORTANT**: Use the EXACT file paths shown in the `read_doc_folder` output. When you see "saved to output/policy/extracted/file.md", use that path with `read_file` as `output/policy/extracted/file.md` (do NOT add leading `/`).
-  - Step 3: If filesystem tools (`ls`, `glob`) return paths starting with `/` (like `/output/policy/extracted/`), strip the leading `/`  and add `./` before using with `read_file`. Always use relative paths starting with `./output/` not `/output/`.
+  - Step 3: If filesystem tools (`ls`, `glob`) return paths starting with `/` (like `/output/policy/extracted/`), strip the leading `/` before using with `read_file`. Always use relative paths starting with `output/` not `/output/`.
   - Step 4: Base all questions, answers, and content references on these extracted markdown files—NOT on the raw source documents in `./docs/`.
 - Produce a reviewable starter batch with exactly 12 items unless the user explicitly asks for a different count.
 - Questions and answers are based on extracted knowledge documents in markdown format from `./output/<sub-folder>/extracted/` (NOT from `./docs/<sub-folder>/`). For example, if documents were provided from `./docs/policy/`, read the extracted content from `./output/policy/extracted/`. Use `read_file` or filesystem tools to access these pre-extracted markdown files.
