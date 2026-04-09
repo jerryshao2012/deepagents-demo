@@ -60,10 +60,8 @@ model = ChatOllama(
     base_url=os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
 )
 # Wrap invoke methods with retry logic
-original_invoke = model.invoke
-original_ainvoke = model.ainvoke
-model.invoke = retry_on_rate_limit(original_invoke)
-model.ainvoke = retry_on_rate_limit(original_ainvoke)
+object.__setattr__(model, 'invoke', retry_on_rate_limit(model.invoke))
+object.__setattr__(model, 'ainvoke', retry_on_rate_limit(model.ainvoke))
 
 
 # Web search tool for the researcher subagent
