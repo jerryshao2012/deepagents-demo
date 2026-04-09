@@ -19,6 +19,7 @@ import jsonschema
 import pymupdf4llm
 import pypdf
 import requests
+from deepagents.backends.utils import create_file_data
 from docx import Document
 from dotenv import load_dotenv
 from langchain_core.tools import InjectedToolArg, tool
@@ -885,37 +886,31 @@ def finalize_golden_dataset_output(
     try:
         output_subfolder = Path(os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER))
         csv_path = export_golden_dataset_csv(payload, output_subfolder)
-        
+
         # Evaluate and generate reports
         metrics_csv_path, markdown_content, final_report_content = evaluate_and_report_golden_dataset(
             csv_path=csv_path,
             payload=payload,
             output_folder=output_subfolder
         )
-        
+
         # Write metrics markdown file
         metrics_md_path = output_subfolder / "golden_dataset_metrics.md"
         with open(metrics_md_path, "w", encoding="utf-8") as f:
             f.write(markdown_content)
-        
+
         # Write final report
         final_report_path = output_subfolder / "final_report.md"
         with open(final_report_path, "w", encoding="utf-8") as f:
             f.write(final_report_content)
-        
+
         # Update state files if available
         if state is not None:
             files = state.get("files", {})
-            files["/golden_dataset_metrics.md"] = {
-                "path": str(metrics_md_path),
-                "content": markdown_content.encode("utf-8")
-            }
-            files["/final_report.md"] = {
-                "path": str(final_report_path),
-                "content": final_report_content.encode("utf-8")
-            }
+            files["/golden_dataset_metrics.md"] = create_file_data(markdown_content)
+            files["/final_report.md"] = create_file_data(final_report_content)
             state["files"] = files
-        
+
         return (
             f"**CSV exported to:** `{csv_path}`\n\n"
             f"**Metrics CSV:** `{metrics_csv_path}`\n\n"

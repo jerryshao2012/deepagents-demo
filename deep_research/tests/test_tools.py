@@ -402,6 +402,59 @@ def test_finalize_golden_dataset_output_runs_metrics(tmp_path, monkeypatch) -> N
     assert (tmp_path / "final_report.md").exists()
 
 
+def test_finalize_golden_dataset_output_updates_state_with_text_file_data(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(tools, "REPORTS_OUTPUT_FOLDER", str(tmp_path))
+
+    def fake_evaluate_and_report(csv_path, payload, output_folder):
+        from pathlib import Path
+
+        metrics_csv = Path(str(csv_path).replace(".csv", "-with-metrics.csv"))
+        metrics_csv.write_text("scored content", encoding="utf-8")
+        markdown_content = "| Metric | Value |\n|--------|-------|\n| Test | 1 |"
+        final_report = "# Final Report\n\nComplete report"
+        return metrics_csv, markdown_content, final_report
+
+    monkeypatch.setattr(
+        "research_agent.skills.golden_dataset.pipeline.evaluate_and_report_golden_dataset",
+        fake_evaluate_and_report,
+    )
+
+    state = {"files": {}}
+
+    result = finalize_golden_dataset_output.func(
+        payload_json="""
+        {
+          "dataset_name": "HR Policy Starter",
+          "domain": "Employee handbook and HR policy",
+          "recommended_total_dataset_size": 150,
+          "coverage_areas": ["Leave"],
+          "items": [
+            {
+              "id": "Q1",
+              "coverage_area": "Leave",
+              "question": "How do I request parental leave under the employee handbook?",
+              "answer": "You would typically start by reviewing the leave policy and then submitting the required request through HR.",
+              "content": "The handbook explains eligibility, notice periods, and HR approval steps."
+            }
+          ]
+        }
+        """,
+        state=state,
+    )
+
+    assert "All files have been generated successfully!" in result
+    assert state["files"]["/golden_dataset_metrics.md"]["content"] == [
+        "| Metric | Value |",
+        "|--------|-------|",
+        "| Test | 1 |",
+    ]
+    assert state["files"]["/final_report.md"]["content"] == [
+        "# Final Report",
+        "",
+        "Complete report",
+    ]
+
+
 def test_trigger_dataset_evaluation_scores_exported_golden_dataset_csv(tmp_path, monkeypatch) -> None:
     dataset_csv = tmp_path / "starter.csv"
     dataset_csv.write_text(
