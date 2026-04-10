@@ -48,9 +48,9 @@ patch_deepagents_task_tool_result_extraction()
 # Create SSL verification setting - CLI flag takes precedence over env var
 verify_ssl = get_ssl_verify_config()
 
-# Limits
-max_concurrent_research_units = 3
-max_researcher_iterations = 3
+# Limits - configurable via environment variables
+MAX_CONCURRENT_RESEARCH_UNITS = int(os.environ.get("MAX_CONCURRENT_RESEARCH_UNITS", "3"))
+MAX_RESEARCHER_ITERATIONS = int(os.environ.get("MAX_RESEARCHER_ITERATIONS", "3"))
 
 # Get current date
 current_date = datetime.now().strftime("%Y-%m-%d")
@@ -345,8 +345,8 @@ INSTRUCTIONS = (
         + "=" * 80
         + "\n\n"
         + SUBAGENT_DELEGATION_INSTRUCTIONS.format(
-    max_concurrent_research_units=max_concurrent_research_units,
-    max_researcher_iterations=max_researcher_iterations)
+    max_concurrent_research_units=MAX_CONCURRENT_RESEARCH_UNITS,
+    max_researcher_iterations=MAX_RESEARCHER_ITERATIONS)
 )
 
 # Create research subagent

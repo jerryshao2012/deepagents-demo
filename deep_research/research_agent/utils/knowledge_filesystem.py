@@ -3,14 +3,18 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from langchain_core.tools import tool
 
-# Constants moved from tools.py
-MAX_GLOB_DEPTH = 3
+# Load environment variables
+load_dotenv()
+# These can be configured via environment variables with sensible defaults
+MAX_GLOB_DEPTH = int(os.environ.get("MAX_GLOB_DEPTH", "3"))
+REPORTS_OUTPUT_FOLDER = os.environ.get("REPORTS_OUTPUT_FOLDER", "./output")
+MAX_FILES_TO_READ = int(os.environ.get("MAX_FILES_TO_READ", "20"))
+MAX_TOTAL_SIZE_MB = int(os.environ.get("MAX_TOTAL_SIZE_MB", "50"))
+
 SUPPORTED_DOC_SUFFIXES = {".pdf", ".txt", ".md", ".docx", ".pptx", ".xlsx"}
-REPORTS_OUTPUT_FOLDER = "./output"
-MAX_FILES_TO_READ = 20
-MAX_TOTAL_SIZE_MB = 50
 
 # Global in‑memory cache for folder listings (path → list of Path objects)
 _folder_listing_cache: dict[str, list[Path]] = {}

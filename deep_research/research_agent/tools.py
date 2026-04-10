@@ -17,9 +17,9 @@ from deepagents.backends.utils import create_file_data
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
-from research_agent.utils.extractors import _extract_supported_document
+from research_agent.utils.content_extractors import _extract_supported_document
 # Import modularized utilities and tools
-from research_agent.utils.filesystem import (  # noqa: F401
+from research_agent.utils.knowledge_filesystem import (  # noqa: F401
     MAX_GLOB_DEPTH,
     MAX_FILES_TO_READ,
     MAX_TOTAL_SIZE_MB,
@@ -33,11 +33,11 @@ from research_agent.utils.filesystem import (  # noqa: F401
     glob,
     read_file,
 )
-from research_agent.utils.rendering import (  # noqa: F401
+from research_agent.utils.result_rendering import (  # noqa: F401
     _prepare_validated_payload,
     render_target_output,
 )
-from research_agent.utils.search import (  # noqa: F401
+from research_agent.utils.web_search import (  # noqa: F401
     tavily_search,
 )
 
