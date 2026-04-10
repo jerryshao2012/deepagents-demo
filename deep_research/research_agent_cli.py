@@ -274,6 +274,12 @@ def configure_output_folder(doc_folder: str | None) -> Path:
     # Normalize path for deepagents filesystem tools compatibility (cross-platform)
     normalized_path = _normalize_path_for_filesystem_tools(str(output_folder))
     os.environ["OUTPUT_FOLDER"] = normalized_path
+    # Persist doc_folder so read_doc_folder can access it inside subagents
+    # whose state schema doesn't carry the key.
+    if doc_folder:
+        os.environ["DOC_FOLDER"] = doc_folder
+    else:
+        os.environ.pop("DOC_FOLDER", None)
     return Path(normalized_path)
 
 

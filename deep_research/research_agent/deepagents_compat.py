@@ -106,12 +106,19 @@ def patch_deepagents_task_tool_result_extraction() -> None:
             parts: list[str] = []
 
             doc_folder = state.get("doc_folder")
+            # Fallback: subagent state schema may not include doc_folder.
+            if not doc_folder:
+                import os as _os
+                doc_folder = _os.environ.get("DOC_FOLDER")
             if doc_folder:
                 parts.append(
                     f"A document folder is configured for this research task: '{doc_folder}'.\n"
                     "You MUST use the `read_doc_folder` tool with this path whenever you need "
                     "to access or reference document content. Previously extracted files are "
-                    "cached on disk, so repeated calls are fast."
+                    "cached on disk, so repeated calls are fast.\n"
+                    "IMPORTANT: After calling `read_doc_folder`, use ONLY the file paths "
+                    "returned in the tool output. Do NOT assume filenames from the task "
+                    "description are correct — always discover actual files via the tool."
                 )
 
             target = state.get("target")

@@ -86,6 +86,11 @@ def read_doc_folder(
     if state and isinstance(state, dict):
         configured_doc_folder = state.get("doc_folder")
 
+    # Fallback: subagent state schemas may not include doc_folder, so the
+    # orchestrator also persists it as an environment variable.
+    if not configured_doc_folder:
+        configured_doc_folder = os.environ.get("DOC_FOLDER")
+
     if not configured_doc_folder:
         return (
             "Error: No document folder has been configured for this research task. "
@@ -182,6 +187,12 @@ def read_doc_folder(
     summary_lines = [f"Processed {len(processed_files)}/{len(files_to_process)} supported file(s) from {folder}."]
     if processed_files: summary_lines.append(f"Files processed: {', '.join(processed_files)}")
     if failed_files: summary_lines.append(f"Files failed: {', '.join(failed_files)}")
+    summary_lines.append(
+        "\nIMPORTANT: Use ONLY the file paths listed above. Do NOT reference "
+        "filenames from the user's prompt if they differ from the actual files "
+        "discovered here. If you need to read individual files, use the exact "
+        "paths shown in 'Files processed' above with the `read_file` tool."
+    )
     print("\n".join(summary_lines))
     return "\n".join(summary_lines + [""] + extracted_text)
 

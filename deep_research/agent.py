@@ -219,7 +219,12 @@ class ResearchStateMiddleware(AgentMiddleware):
 
     @staticmethod
     def _configure_output_folder(doc_folder: str | None) -> None:
-        """Configure OUTPUT_FOLDER environment variable based on doc_folder."""
+        """Configure OUTPUT_FOLDER and DOC_FOLDER environment variables.
+
+        DOC_FOLDER is persisted as an env var so that subagent state schemas
+        (which may not include ``doc_folder``) can still access it as a
+        fallback inside ``read_doc_folder``.
+        """
         if not doc_folder:
             output_folder = REPORTS_OUTPUT_FOLDER
         else:
@@ -228,6 +233,13 @@ class ResearchStateMiddleware(AgentMiddleware):
         # Normalize path for deepagents filesystem tools compatibility (cross-platform)
         normalized_path = _normalize_path_for_filesystem_tools(output_folder)
         os.environ["OUTPUT_FOLDER"] = normalized_path
+
+        # Persist doc_folder so read_doc_folder can fall back to it inside
+        # subagents whose state schema doesn't carry the key.
+        if doc_folder:
+            os.environ["DOC_FOLDER"] = doc_folder
+        else:
+            os.environ.pop("DOC_FOLDER", None)
 
     @staticmethod
     def _extract_doc_folder(user_message: str) -> str | None:
