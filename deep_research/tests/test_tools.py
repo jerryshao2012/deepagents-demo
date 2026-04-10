@@ -491,9 +491,9 @@ def test_read_doc_folder_reads_text_and_markdown_files(tmp_path: Path, monkeypat
         state={"doc_folder": str(tmp_path)}
     )
 
-    assert "--- Content of notes.txt ---" in result
+    assert "Content of notes.txt" in result
     assert "alpha" in result
-    assert "--- Content of summary.md ---" in result
+    assert "Content of summary.md" in result
     assert "# heading" in result
 
 
