@@ -11,7 +11,7 @@ from langgraph.prebuilt import InjectedState
 from research_agent.targets import get_target_definition
 
 
-def _coerce_integers(value, schema):
+def _coerce_integers(value: object, schema: dict) -> object:
     if isinstance(value, dict):
         props = schema.get('properties', {})
         return {k: _coerce_integers(v, props.get(k, {})) for k, v in value.items()}
@@ -233,6 +233,10 @@ def _prepare_validated_payload(
     payload = _normalize_legacy_target_payload(target_id, payload)
     payload = _fill_defaults(target_id, payload)
     payload = _coerce_integers(payload, definition["schema"])
+    
+    # Ensure payload is a dict after coercion
+    if not isinstance(payload, dict):
+        return None, None, "Error: Payload coercion resulted in non-dict type"
 
     try:
         jsonschema.validate(instance=payload, schema=definition["schema"])

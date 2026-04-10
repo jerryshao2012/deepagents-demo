@@ -6,6 +6,7 @@ render_template: markdown_blocks
 keywords:
   - "golden-dataset"
   - "golden dataset"
+  - "golden.*dataset"
   - "create.*ga.*pair"
   - "question.*answer"
   - "qa.*dataset"

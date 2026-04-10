@@ -212,7 +212,7 @@ def _save_extracted_content(original_file_path: Path, content: str, output_folde
 
 def save_research_report(report_title: str, content: str) -> str:
     """Save a research report to the output folder."""
-    output_subfolder = Path(os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER))
+    output_subfolder = Path(os.environ.get("OUTPUT_FOLDER") or REPORTS_OUTPUT_FOLDER)
     output_subfolder.mkdir(parents=True, exist_ok=True)
     safe_title = re.sub(r"[^a-zA-Z0-9_\- ]", "", report_title).strip()[:100]
     safe_title = safe_title.replace(" ", "_")
@@ -262,7 +262,7 @@ def finalize_golden_dataset_output(
             elapsed_seconds = time.time() - start_time
         else:
             elapsed_seconds = 0.0
-        output_subfolder = Path(os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER))
+        output_subfolder = Path(os.environ.get("OUTPUT_FOLDER") or REPORTS_OUTPUT_FOLDER)
         csv_path = export_golden_dataset_csv(payload, output_subfolder)
         metrics_csv_path, markdown_content, final_report_content = evaluate_and_report_golden_dataset(
             csv_path=csv_path, payload=payload, output_folder=output_subfolder, elapsed_seconds=elapsed_seconds
