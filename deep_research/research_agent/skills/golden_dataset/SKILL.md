@@ -162,7 +162,7 @@ Requirements:
     "Exports the dataset to CSV in the `./output/` directory",
     "Runs quality metrics evaluation (Similarity, Relevance, Coherence, Groundedness)",
     "Generates `/golden_dataset_metrics.md` with a markdown table of all items and their metrics",
-    "Creates `/final_report.md` with comprehensive analysis including summary statistics, goal achievements, and recommendations. Use `humanizer` skill in the end to generate a human-readable report."
+    "Creates `/final_report.md` with comprehensive analysis including summary statistics, goal achievements, and recommendations. The report is automatically rewritten to remove AI writing patterns before saving."
   ]},
   { "type": "text", "value": "Evaluation best practice: Similarity measures closeness to a human expert answer on a 1-5 scale with a suggested goal of 3+. Relevance measures how well the answer addresses the question and content on a 0-100 scale with a suggested goal of 60+. Coherence measures how naturally the sentences fit together on a 1-5 scale with a suggested goal of 3+. Groundedness measures how verifiable the answer is against the provided content on a 1-5 scale with a suggested goal of 3+." },
   { "type": "heading", "level": 2, "value": "Reviewer Note" },

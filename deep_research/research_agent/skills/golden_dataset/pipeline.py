@@ -90,6 +90,9 @@ def evaluate_and_report_golden_dataset(
         generate_golden_dataset_report,
         score_dataset_file,
     )
+    from research_agent.skills.golden_dataset.scripts.humanize_report import (
+        humanize_report,
+    )
 
     # Step 1: Run quality metrics
     metrics_csv_path_str = str(csv_path.with_name(f"{csv_path.stem}-with-metrics{csv_path.suffix}"))
@@ -106,5 +109,8 @@ def evaluate_and_report_golden_dataset(
         payload=payload,
         elapsed_seconds=elapsed_seconds
     )
+
+    # Step 4: Humanize the report to remove AI writing patterns
+    final_report_content = humanize_report(final_report_content)
 
     return metrics_csv_path, markdown_content, final_report_content
