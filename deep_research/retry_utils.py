@@ -8,9 +8,14 @@ import os
 import time
 from functools import wraps
 from typing import Any, Callable, TypeVar, List, Tuple
+
 import tiktoken
+from dotenv import load_dotenv
 
 from utils import str2bool
+
+# Load environment variables
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +27,8 @@ BACKOFF_MULTIPLIER = float(os.getenv("MODEL_BACKOFF_MULTIPLIER", "2.0"))
 JITTER_ENABLED = str2bool(os.getenv("MODEL_RETRY_JITTER", "true"), True)
 
 # Proactive Rate Limiting Configuration
-MODEL_TPM = int(os.getenv("MODEL_TPM", "0"))
-MODEL_RPM = int(os.getenv("MODEL_RPM", "0"))
+MODEL_TPM = int(os.getenv("MODEL_TPM", "120000"))
+MODEL_RPM = int(os.getenv("MODEL_RPM", "500"))
 
 T = TypeVar("T")
 
@@ -260,7 +265,8 @@ class AsyncRateLimiter:
                 # 2. Enforce Micro-burst Protection (RPM/Interval)
                 elapsed = now - self.last_request_time
 
-                if used_tokens + estimated_tokens <= self.safe_tpm and (self.last_request_time == 0.0 or elapsed >= self.min_interval):
+                if used_tokens + estimated_tokens <= self.safe_tpm and (
+                        self.last_request_time == 0.0 or elapsed >= self.min_interval):
                     # Capacity available: Record and proceed
                     self.token_window.append((now, estimated_tokens))
                     self.last_request_time = now
