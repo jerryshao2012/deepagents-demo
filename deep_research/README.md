@@ -226,8 +226,9 @@ git clone https://github.com/langchain-ai/deep-agents-ui.git
 cd deep-agents-ui
 
 # Install yarn
-npm install -g yarn
 npm config set "bin-links" true
+npm config set "strict-ssl" false
+npm install -g yarn
 # Add %AppData%\npm to PATH for Windows
 
 # For corporation network
