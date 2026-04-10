@@ -47,6 +47,34 @@ export LANGCHAIN_TRACING_V2=true                          # Enable LangSmith tra
 export LANGSMITH_ENDPOINT=https://api.smith.langchain.com # LangSmith endpoint
 export LANGCHAIN_API_KEY=your_langsmith_api_key_here      # [LangSmith API key](https://smith.langchain.com/settings) (free to sign up)
 export LANGCHAIN_PROJECT=deep-research-deepagents         # The project name to log traces to
+
+# Research Agent Configuration
+# Maximum number of concurrent research units (sub-agents) that can run simultaneously
+MAX_CONCURRENT_RESEARCH_UNITS=3
+# Maximum number of iterations per researcher agent before stopping
+MAX_RESEARCHER_ITERATIONS=3
+
+# Filesystem and Output Configuration
+# Maximum directory depth for glob pattern matching
+MAX_GLOB_DEPTH=3
+# Default output folder for generated reports and documents
+REPORTS_OUTPUT_FOLDER=./output
+# Maximum number of files to read in a single operation
+MAX_FILES_TO_READ=20
+# Maximum total size in MB for batch file reading operations
+MAX_TOTAL_SIZE_MB=50
+
+# Rate Limit Retry Configuration (Optional)
+# Maximum number of retry attempts when rate limit errors occur
+MODEL_MAX_RETRIES=5
+# Initial backoff time in seconds before first retry
+MODEL_INITIAL_BACKOFF=1.0
+# Maximum backoff time in seconds (cap for exponential backoff)
+MODEL_MAX_BACKOFF=60.0
+# Multiplier for exponential backoff (backoff = initial * multiplier^attempt)
+MODEL_BACKOFF_MULTIPLIER=2.0
+# Add jitter to prevent thundering herd problem (true/false)
+MODEL_RETRY_JITTER=true
 ```
 
 ## Usage Options
