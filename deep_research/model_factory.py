@@ -7,7 +7,7 @@ import os
 import httpx
 from pydantic import SecretStr
 
-from retry_utils import retry_on_rate_limit
+from retry_utils import wrap_model_with_rate_limiting
 from utils import get_ssl_verify_config
 
 
@@ -22,10 +22,7 @@ def get_configured_model():
             model=os.getenv("MODEL_NAME", "gemini-3-pro-preview"),
             temperature=0.0,
         )
-        # Wrap invoke methods with retry logic using object.__setattr__ to bypass Pydantic validation
-        object.__setattr__(model, 'invoke', retry_on_rate_limit(model.invoke))
-        object.__setattr__(model, 'ainvoke', retry_on_rate_limit(model.ainvoke))
-        return model
+        return wrap_model_with_rate_limiting(model)
 
     if os.getenv("ANTHROPIC_API_KEY") and os.getenv("MODEL_NAME"):
         from langchain.chat_models import init_chat_model
@@ -34,10 +31,7 @@ def get_configured_model():
             model=os.getenv("MODEL_NAME", "anthropic:claude-sonnet-4-5-20250929"),
             temperature=0.0,
         )
-        # Wrap invoke methods with retry logic
-        object.__setattr__(model, 'invoke', retry_on_rate_limit(model.invoke))
-        object.__setattr__(model, 'ainvoke', retry_on_rate_limit(model.ainvoke))
-        return model
+        return wrap_model_with_rate_limiting(model)
 
     if os.getenv("OLLAMA_API_BASE") and os.getenv("MODEL_NAME"):
         from langchain.chat_models import init_chat_model
@@ -46,10 +40,7 @@ def get_configured_model():
             model=f"ollama:{os.getenv('MODEL_NAME')}",
             base_url=os.getenv("OLLAMA_API_BASE"),
         )
-        # Wrap invoke methods with retry logic
-        object.__setattr__(model, 'invoke', retry_on_rate_limit(model.invoke))
-        object.__setattr__(model, 'ainvoke', retry_on_rate_limit(model.ainvoke))
-        return model
+        return wrap_model_with_rate_limiting(model)
 
     if (
             os.getenv("AZURE_OPENAI_ENDPOINT")
@@ -66,9 +57,6 @@ def get_configured_model():
             api_key=SecretStr(os.getenv("AZURE_OPENAI_API_KEY", "")),
             http_client=httpx.Client(verify=verify_ssl),
         )
-        # Wrap invoke methods with retry logic
-        object.__setattr__(model, 'invoke', retry_on_rate_limit(model.invoke))
-        object.__setattr__(model, 'ainvoke', retry_on_rate_limit(model.ainvoke))
-        return model
+        return wrap_model_with_rate_limiting(model)
 
     raise ValueError("No model found. Please set up a model")

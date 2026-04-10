@@ -64,18 +64,45 @@ MAX_FILES_TO_READ=20
 # Maximum total size in MB for batch file reading operations
 MAX_TOTAL_SIZE_MB=50
 
-# Rate Limit Retry Configuration (Optional)
-# Maximum number of retry attempts when rate limit errors occur
-MODEL_MAX_RETRIES=5
-# Initial backoff time in seconds before first retry
-MODEL_INITIAL_BACKOFF=1.0
-# Maximum backoff time in seconds (cap for exponential backoff)
-MODEL_MAX_BACKOFF=60.0
-# Multiplier for exponential backoff (backoff = initial * multiplier^attempt)
-MODEL_BACKOFF_MULTIPLIER=2.0
-# Add jitter to prevent thundering herd problem (true/false)
-MODEL_RETRY_JITTER=true
+---
+
+## 🛡️ Reliability & Rate Limiting
+
+When building high-throughput agents, treating LLM providers as finite-capacity systems is critical. This project implements a dual-layer approach to ensure reliability:
+
+### 1. Proactive Rate Shaping
+Instead of waiting for `429 Too Many Requests` errors, the harness proactively controls the flow of tokens and requests. This is handled by the `AsyncRateLimiter` in `deep_research/retry_utils.py`.
+
+- **TPM (Tokens Per Minute) Control**: Tracks a rolling 60-second window of estimated tokens to stay under deployment quotas.
+- **RPM (Requests Per Minute) Pacing**: Ensures requests are evenly spaced to avoid triggering micro-burst limits (often 1–10 seconds).
+- **Safe Margins**: Operates at ~80% of hard limits to absorb jitter and shared usage.
+
+To enable, set these environment variables:
+```properties
+# Proactive Rate Shaping (TPM and RPM limits)
+# Set these based on your provider's deployment quotas
+# Tokens Per Minute:
+# Represents the maximum number of tokens (input + output) you are allowed to send to the model provider within a
+# rolling 60-second window.
+MODEL_TPM=120000
+# Requests Per Minute:
+# Represents the maximum number of individual API calls you can make per minute.
+MODEL_RPM=500
 ```
+
+### 2. Reactive Retries
+For unpredictable server-side issues or shared capacity drops, a reactive layer handles retries with **Exponential Backoff and Jitter**.
+
+- **Jitter**: Prevents "thundering herd" problems by randomizing retry delays.
+- **Header Respect**: Logic can be extended to respect `Retry-After` headers from providers.
+- **Configurable**: Adjust `MODEL_MAX_RETRIES` and `MODEL_INITIAL_BACKOFF` as needed.
+
+### Strategic Recommendations
+1. **Estimate accurately**: Use `tiktoken` (integrated in `AsyncRateLimiter`) for precise token counting.
+2. **Layer your defenses**: Always use proactive shaping *with* reactive retries.
+3. **Deployment-specific limits**: Configure unique limits for different models or regions to maximize throughput.
+
+---
 
 ## Usage Options
 
@@ -367,19 +394,15 @@ Model API calls have rate limits that can cause report generation to fail. The d
 
 All retry behavior is configurable via environment variables in your `.env` file:
 
-```bash
+```properties
 # Maximum number of retry attempts when rate limit errors occur
 MODEL_MAX_RETRIES=5
-
 # Initial backoff time in seconds before first retry
 MODEL_INITIAL_BACKOFF=1.0
-
 # Maximum backoff time in seconds (cap for exponential backoff)
 MODEL_MAX_BACKOFF=60.0
-
 # Multiplier for exponential backoff (backoff = initial * multiplier^attempt)
 MODEL_BACKOFF_MULTIPLIER=2.0
-
 # Add jitter to prevent thundering herd problem (true/false)
 MODEL_RETRY_JITTER=true
 ```

@@ -7,7 +7,8 @@ import logging
 import os
 import time
 from functools import wraps
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, TypeVar, List, Tuple
+import tiktoken
 
 from utils import str2bool
 
@@ -19,6 +20,10 @@ INITIAL_BACKOFF = float(os.getenv("MODEL_INITIAL_BACKOFF", "1.0"))
 MAX_BACKOFF = float(os.getenv("MODEL_MAX_BACKOFF", "60.0"))
 BACKOFF_MULTIPLIER = float(os.getenv("MODEL_BACKOFF_MULTIPLIER", "2.0"))
 JITTER_ENABLED = str2bool(os.getenv("MODEL_RETRY_JITTER", "true"), True)
+
+# Proactive Rate Limiting Configuration
+MODEL_TPM = int(os.getenv("MODEL_TPM", "0"))
+MODEL_RPM = int(os.getenv("MODEL_RPM", "0"))
 
 T = TypeVar("T")
 
@@ -177,6 +182,93 @@ def retry_on_rate_limit(
     if func is not None:
         return decorator(func)
     return decorator
+
+
+def wrap_model_with_rate_limiting(model: Any) -> Any:
+    """
+    Apply both proactive rate shaping and reactive retries to a model.
+    """
+    # 1. Reactive Retries (Decorator)
+    # Wrap invoke methods with retry logic using object.__setattr__ to bypass Pydantic validation
+    object.__setattr__(model, 'invoke', retry_on_rate_limit(model.invoke))
+    object.__setattr__(model, 'ainvoke', retry_on_rate_limit(model.ainvoke))
+
+    # 2. Proactive Rate Shaping (if limits are configured)
+    if MODEL_TPM > 0 and MODEL_RPM > 0:
+        rate_limiter = AsyncRateLimiter(tpm=MODEL_TPM, rpm=MODEL_RPM)
+        original_ainvoke = model.ainvoke
+
+        async def ainvoke_with_shaping(*args, **kwargs):
+            # Extract prompt from messages/input to estimate tokens
+            # This is a simplification; LangChain inputs vary
+            prompt_str = str(args[0]) if args else str(kwargs.get("input", ""))
+            max_tokens = kwargs.get("max_tokens", 1000) or 1000
+
+            tokens = rate_limiter.estimate_tokens(prompt_str, max_tokens)
+            await rate_limiter.wait_for_capacity(tokens)
+            return await original_ainvoke(*args, **kwargs)
+
+        object.__setattr__(model, 'ainvoke', ainvoke_with_shaping)
+
+    return model
+
+
+class AsyncRateLimiter:
+    """
+    Proactive rate shaping to avoid 429s by controlling request flow.
+    Supports both Token Per Minute (TPM) and Request Per Minute (RPM) limits.
+    """
+
+    def __init__(self, tpm: int, rpm: int, safe_margin: float = 0.8):
+        # Configuration
+        self.safe_tpm = int(tpm * safe_margin)
+        self.min_interval = 60.0 / (rpm * safe_margin)  # Calculated from RPM
+        self.window_seconds = 60.0
+
+        # State
+        self.token_window: List[Tuple[float, int]] = []
+        self.last_request_time = 0.0
+        self.lock = asyncio.Lock()
+
+        # Tokenizer (optional, for accuracy)
+        try:
+            self.tokenizer = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            self.tokenizer = None
+
+    def estimate_tokens(self, prompt: str, max_tokens: int) -> int:
+        """Estimate total tokens for a request."""
+        if self.tokenizer:
+            prompt_tokens = len(self.tokenizer.encode(prompt))
+        else:
+            prompt_tokens = int(len(prompt) / 4)
+        return prompt_tokens + max_tokens
+
+    async def wait_for_capacity(self, estimated_tokens: int) -> None:
+        """Blocks until capacity is available under the TPM and RPM limits."""
+        async with self.lock:
+            while True:
+                now = time.time()
+
+                # 1. Enforce Token Quota (TPM) rolling window
+                self.token_window = [
+                    (t, tok) for (t, tok) in self.token_window
+                    if now - t < self.window_seconds
+                ]
+                used_tokens = sum(tok for _, tok in self.token_window)
+
+                # 2. Enforce Micro-burst Protection (RPM/Interval)
+                elapsed = now - self.last_request_time
+
+                if used_tokens + estimated_tokens <= self.safe_tpm and (self.last_request_time == 0.0 or elapsed >= self.min_interval):
+                    # Capacity available: Record and proceed
+                    self.token_window.append((now, estimated_tokens))
+                    self.last_request_time = now
+                    return
+
+                # Calculate required sleep time (pacing)
+                sleep_time = max(0.1, self.min_interval - elapsed)
+                await asyncio.sleep(sleep_time)
 
 
 class RetryConfig:
