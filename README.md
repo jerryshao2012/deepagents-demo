@@ -4,77 +4,74 @@
   Agents, patterns, and applications you can build with Deep Agents.
 </p>
 
-## Harness Architecture
+## Harness Architecture: The "Deep Agent" Pattern
 
-**Agent = Model + Harness**
+**Deep Agent = Reasoning Model + Orchestration Harness**
 
-The model provides intelligence. The harness makes that intelligence useful.
-
-The point of the diagram is that model quality alone is not enough. A practical agent needs systems around the model so it can persist work, execute actions, access fresh information, manage context, and coordinate specialized behaviors.
+While the model provides raw intelligence, the **Harness** is what makes that intelligence dependable for complex, long-running tasks. Deep Agents shift from simple "Chat" patterns to "Deep" patterns by baking structured planning, stateful memory, and resource management directly into the architecture.
 
 ```mermaid
 flowchart TB
-    subgraph A["Agent = Model + Harness"]
+    subgraph A["Deep Agent = Model + Harness"]
         direction LR
-        M["Model"]
+        M["Model<br/>(Reasoning)"]
         P["+"]
-        H["Harness<br/>(everything outside the model)"]
+        H["Harness<br/>(Capabilities)"]
     end
 
-    L["A model alone is not enough"] --> C["Each missing capability is supplied by the harness"]
+    L["A model alone is not enough"] --> C["The harness supplies 'Deep' capabilities"]
 
-    C --> H1["01. Filesystem<br/>Workspace, artifacts, persistence, Git-friendly workflows"]
-    C --> H2["02. Bash + Sandbox<br/>Code execution, isolation, write-run-fix loops"]
-    C --> H3["03. Memory (AGENTS.md)<br/>Durable instructions and reusable knowledge"]
-    C --> H4["04. Web Search + MCP<br/>Fresh information and external tools"]
-    C --> H5["05. Context Engineering<br/>Planning, delegation, progressive disclosure, context control"]
-    C --> H6["06. Orchestration + Hooks<br/>Subagents, routing, approvals, middleware, policy"]
+    C --> H1["01. Virtual Filesystem<br/>Offloads large tool results (20k+ tokens) to disk; uses ls, read, write, grep"]
+    C --> H2["02. Structured Planning<br/>Built-in 'write_todos' tool for persistent goal tracking and adaptation"]
+    C --> H3["03. Subagent Tasking<br/>'task' tool for spawning specialized agents with clean, parallel contexts"]
+    C --> H4["04. Durable Memory<br/>LangGraph Store for project-wide history and cross-thread persistence"]
+    C --> H5["05. Context Engineering<br/>Automatic summarization and history offloading at 85% token usage"]
+    C --> H6["06. Secure Execution<br/>Bash + Sandboxes for isolated, multi-turn write-run-fix loops"]
 ```
 
-### The Six Harness Components
+### The Six Harness Pillars
 
-1. **Filesystem**
-   - Gives the agent a working directory for inputs, outputs, notes, and intermediate artifacts.
+1. **Virtual Filesystem (Scalable Context)**
+   - Prevents context window rot by offloading large data (logs, docs, artifacts) to a workspace.
+   - Agents see truncated previews and use `read_file` or `grep` to fetch specific details on-demand.
    - Makes progress durable across turns and runs.
-   - Works well with Git for versioning, rollback, and collaboration.
 
-2. **Bash + Sandbox**
-   - Lets the agent execute commands and run code instead of only describing what should happen.
-   - Sandboxing adds isolation, safety controls, and reproducibility.
-   - Enables the core build loop: write -> run -> inspect -> fix.
+2. **Structured Planning (`write_todos`)**
+   - Moves planning from "hidden reasoning" to "explicit state".
+   - Agents maintain a persistent To-Do list to track multi-stage objectives.
+   - Allows the agent to resume, pivot, and report progress reliably over long sessions.
 
-3. **Memory (`AGENTS.md`)**
-   - Stores durable instructions, policies, and reusable knowledge outside the model weights.
-   - Keeps behavior consistent across runs.
-   - Can be updated as the agent learns better workflows or constraints.
+3. **Specialized Subagents (Task Tool)**
+   - The `task` tool spawns ephemeral subagents for isolated context-heavy work.
+   - Enables **Parallelism**: Multiple subtasks can run concurrently without cluttering the main agent's history.
+   - Prevents the "main thread" from becoming overloaded with irrelevant sub-task details.
 
-4. **Web Search + MCP**
-   - Connects the agent to fresh information and external systems.
-   - Web search handles current or missing knowledge.
-   - MCP generalizes this idea so the agent can use external tools and services.
+4. **Durable Memory (`AGENTS.md` & Store)**
+   - Combines file-based memory (Git-friendly) with a structured **LangGraph Store**.
+   - Persists project-specific quirks, user preferences, and learned workflows across different conversational threads.
 
-5. **Context Engineering**
-   - Decides what the model sees, when it sees it, and what stays out of context.
-   - Includes planning, skill loading, delegation, context resets/compression, and progressive disclosure.
-   - Prevents context bloat/rot so the model can stay focused on the active task.
+5. **Context Engineering (Automatic Compression)**
+   - Actively manages the model's focus.
+   - When context hits 85%, the system automatically summarizes the history and archives old messages to the filesystem.
+   - Ensures agents can run indefinitely without hitting hard token limits or losing critical context.
 
-6. **Orchestration + Hooks**
-   - Coordinates subagents, tools, routing, approvals, and runtime policies.
-   - Hooks and middleware let you enforce behavior at execution time, not only in prompts.
-   - This is what makes an agent dependable instead of just clever.
+6. **Secure Orchestration + Hooks**
+   - Coordinates tools, routing, and approvals via middleware and runtime hooks.
+   - Provides isolation through Bash sandboxes (Modal, Daytona, Runloop) for safe code execution.
+   - Enforces business logic and safety policies at the execution layer, not just through prompting.
 
 ### How This Maps to the Examples Here
 
 This repository is consistent with the diagram. Not every example uses all six components, but together the examples cover the full harness:
 
-| Harness component | Where it shows up in this repo |
+| Deep Agent Pillar | Where it shows up in this repo |
 |---------|-------------|
-| Filesystem | `content-builder-agent` and `text-to-sql-agent` both use `FilesystemBackend`; `ralph_mode` uses the filesystem as the agent's persistent worklog across fresh iterations. |
-| Bash + Sandbox | `ralph_mode` supports remote sandboxes such as Modal, Daytona, AgentCore, and Runloop; `nvidia_deep_agent` executes code inside a Modal sandbox. |
-| Memory (`AGENTS.md`) | `content-builder-agent`, `text-to-sql-agent`, `downloading_agents`, and `nvidia_deep_agent` all center memory files as persistent instructions. |
-| Web Search + MCP | `deep_research`, `content-builder-agent`, and `nvidia_deep_agent` use web search tools; the research example README also explicitly notes that custom tools can be provided through MCP servers. |
-| Context Engineering | `deep_research` uses planning, delegated subagents, and constrained research loops; `text-to-sql-agent` uses planning plus on-demand skills; `ralph_mode` demonstrates the "fresh context each loop" pattern. |
-| Orchestration + Hooks | `deep_research` and `nvidia_deep_agent` orchestrate specialized subagents; `nvidia_deep_agent` also shows runtime routing through `context_schema` and includes commented `interrupt_on` hooks for human approval on tool execution. |
+| **Virtual Filesystem** | `content-builder-agent` and `text-to-sql-agent` both use `FilesystemBackend` to persist artifacts; `ralph_mode` uses the filesystem as the agent's persistent worklog across iterations. |
+| **Structured Planning** | `deep_research` and `text-to-sql-agent` use `write_todos` to maintain stateful plans; `ralph_mode` demonstrates the "fresh context each loop" planning pattern. |
+| **Specialized Subagents** | `deep_research` and `nvidia_deep_agent` orchestrate specialized subagents via the `task` tool for parallel URL discovery and analysis. |
+| **Durable Memory** | `content-builder-agent`, `text-to-sql-agent`, `downloading_agents`, and `nvidia_deep_agent` all center memory files (`AGENTS.md`) as persistent instructions. |
+| **Context Engineering** | `deep_research` uses planning and constrained research loops; `text-to-sql-agent` uses on-demand skill loading; all examples benefit from automatic context compression. |
+| **Secure Execution** | `ralph_mode` supports remote sandboxes like Modal, Daytona, and Runloop; `nvidia_deep_agent` executes code inside a Modal sandbox. |
 
 ### A Practical Reading of the Diagram
 
