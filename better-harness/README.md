@@ -71,6 +71,33 @@ Copy the example and edit it for your repo:
 cp examples/deepagents_example.toml my_experiment.toml
 ```
 
+### Model Configuration
+
+**Using Ollama (Local):**
+
+1. Install Ollama: https://ollama.ai
+2. Pull the model:
+   ```bash
+   ollama pull gemma4:latest
+   ollama serve
+   ```
+3. Set environment variable:
+   ```bash
+   export OLLAMA_API_BASE=http://localhost:11434
+   ```
+4. Update your TOML config:
+   ```toml
+   [experiment]
+   model = "ollama:gemma4:latest"
+   
+   [better_agent]
+   model = "ollama:gemma4:latest"
+   ```
+
+**Using Cloud APIs:**
+
+Set your API keys in the environment and use cloud model names like `claude-sonnet-4-6`, `gpt-4o`, etc.
+
 Then run:
 
 ```bash

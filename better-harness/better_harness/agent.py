@@ -49,12 +49,12 @@ class ProposerWorkspace:
 
 
 def build_proposer_workspace(
-    *,
-    experiment: Experiment,
-    current: Variant,
-    train_result: SplitResult,
-    layout: RunLayout,
-    iteration: int,
+        *,
+        experiment: Experiment,
+        current: Variant,
+        train_result: SplitResult,
+        layout: RunLayout,
+        iteration: int,
 ) -> ProposerWorkspace:
     """Create one proposer workspace for the current iteration."""
     root = layout.proposer_workspace_dir(iteration)
@@ -121,12 +121,12 @@ def read_proposal_summary(workspace: ProposerWorkspace) -> str:
 
 
 def propose_variant(
-    *,
-    experiment: Experiment,
-    current: Variant,
-    train_result: SplitResult,
-    layout: RunLayout,
-    iteration: int,
+        *,
+        experiment: Experiment,
+        current: Variant,
+        train_result: SplitResult,
+        layout: RunLayout,
+        iteration: int,
 ) -> tuple[Proposal, Variant]:
     """Run the outer Deep Agent once and return its candidate variant."""
     workspace = build_proposer_workspace(
@@ -174,9 +174,9 @@ def propose_variant(
 
 
 def invoke_deepagents_proposer(
-    *,
-    experiment: Experiment,
-    workspace: ProposerWorkspace,
+        *,
+        experiment: Experiment,
+        workspace: ProposerWorkspace,
 ) -> str | None:
     """Run the outer Deep Agent against one proposer workspace."""
     deepagents_root = _resolve_deepagents_root(experiment.better_agent_deepagents_root)
@@ -203,8 +203,19 @@ def invoke_deepagents_proposer(
         create_deep_agent = graph_module.create_deep_agent
         human_message_cls = messages_module.HumanMessage
         backend = filesystem_backend_cls(root_dir=str(workspace.root), virtual_mode=True)
+
+        # Initialize model - handle Ollama specially
+        model_str = experiment.better_agent_model
+        if model_str.startswith("ollama:"):
+            from langchain.chat_models import init_chat_model
+            import os
+            ollama_base_url = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
+            model = init_chat_model(model=model_str, base_url=ollama_base_url)
+        else:
+            model = model_str
+
         agent = create_deep_agent(
-            model=experiment.better_agent_model,
+            model=model,
             system_prompt=_compose_system_prompt(experiment),
             backend=backend,
         )
@@ -242,10 +253,10 @@ def invoke_deepagents_proposer(
 
 
 def _write_train_artifacts(
-    *,
-    experiment: Experiment,
-    train_result: SplitResult,
-    root: Path,
+        *,
+        experiment: Experiment,
+        train_result: SplitResult,
+        root: Path,
 ) -> None:
     failures_payload = [
         {
@@ -323,13 +334,13 @@ def _copy_prior_visible_artifacts(*, layout: RunLayout, root: Path, iteration: i
             proposer_target = target_dir / "proposer_workspace"
             proposer_target.mkdir(parents=True, exist_ok=True)
             for name in (
-                "outer_agent_request.json",
-                "outer_agent_result.json",
-                "outer_agent_stdout.log",
-                "outer_agent_stderr.log",
-                "proposal.md",
-                "result.json",
-                "task.md",
+                    "outer_agent_request.json",
+                    "outer_agent_result.json",
+                    "outer_agent_stdout.log",
+                    "outer_agent_stderr.log",
+                    "proposal.md",
+                    "result.json",
+                    "task.md",
             ):
                 source = proposer_workspace / name
                 if source.exists():
@@ -337,11 +348,11 @@ def _copy_prior_visible_artifacts(*, layout: RunLayout, root: Path, iteration: i
 
 
 def _write_task_file(
-    *,
-    experiment: Experiment,
-    current: Variant,
-    train_result: SplitResult,
-    root: Path,
+        *,
+        experiment: Experiment,
+        current: Variant,
+        train_result: SplitResult,
+        root: Path,
 ) -> None:
     surface_lines = [
         f"- `{name}` -> `current/{surface.filename}` ({surface.kind}, target `{surface.target}`)"
@@ -408,10 +419,10 @@ def _final_ai_message_text(result: dict[str, Any]) -> str | None:
 
 
 def _write_outer_agent_result(
-    *,
-    workspace_root: Path,
-    result: dict[str, Any],
-    final_message: str | None,
+        *,
+        workspace_root: Path,
+        result: dict[str, Any],
+        final_message: str | None,
 ) -> None:
     payload = {
         "final_message": final_message,
@@ -443,15 +454,15 @@ def _jsonify(value: Any) -> Any:  # noqa: PLR0911
     if hasattr(value, "type"):
         payload: dict[str, Any] = {"type": value.type}
         for name in (
-            "id",
-            "name",
-            "content",
-            "content_blocks",
-            "tool_calls",
-            "invalid_tool_calls",
-            "additional_kwargs",
-            "response_metadata",
-            "usage_metadata",
+                "id",
+                "name",
+                "content",
+                "content_blocks",
+                "tool_calls",
+                "invalid_tool_calls",
+                "additional_kwargs",
+                "response_metadata",
+                "usage_metadata",
         ):
             if hasattr(value, name):
                 payload[name] = _jsonify(getattr(value, name))
@@ -466,10 +477,10 @@ def _jsonify(value: Any) -> Any:  # noqa: PLR0911
 
 
 def _invoke_via_uv_project_with_retries(
-    *,
-    experiment: Experiment,
-    workspace: ProposerWorkspace,
-    deepagents_root: Path,
+        *,
+        experiment: Experiment,
+        workspace: ProposerWorkspace,
+        deepagents_root: Path,
 ) -> str | None:
     last_error: str | None = None
     for attempt in range(3):
@@ -490,10 +501,10 @@ def _invoke_via_uv_project_with_retries(
 
 
 def _invoke_via_uv_project_once(
-    *,
-    experiment: Experiment,
-    workspace: ProposerWorkspace,
-    deepagents_root: Path,
+        *,
+        experiment: Experiment,
+        workspace: ProposerWorkspace,
+        deepagents_root: Path,
 ) -> str | None:
     repo_root = Path(__file__).resolve().parents[1]
     project_root = deepagents_root / "libs" / "deepagents"
@@ -608,8 +619,19 @@ def main(argv: list[str] | None = None) -> int:
     human_message_cls = messages_module.HumanMessage
 
     backend = filesystem_backend_cls(root_dir=str(payload["workspace_root"]), virtual_mode=True)
+
+    # Initialize model - handle Ollama specially
+    model_str = str(payload["model"])
+    if model_str.startswith("ollama:"):
+        from langchain.chat_models import init_chat_model
+        import os
+        ollama_base_url = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
+        model = init_chat_model(model=model_str, base_url=ollama_base_url)
+    else:
+        model = model_str
+
     agent = create_deep_agent(
-        model=str(payload["model"]),
+        model=model,
         system_prompt=str(payload["system_prompt"]),
         backend=backend,
     )

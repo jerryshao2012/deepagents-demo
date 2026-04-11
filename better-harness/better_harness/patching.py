@@ -26,10 +26,10 @@ def build_baseline_variant(experiment: Experiment) -> Variant:
 
 
 def build_variant(
-    *,
-    experiment: Experiment,
-    label: str,
-    values: dict[str, str],
+        *,
+        experiment: Experiment,
+        label: str,
+        values: dict[str, str],
 ) -> Variant:
     """Build one variant from raw surface values."""
     changed_surfaces = tuple(
@@ -70,8 +70,8 @@ def patch_module_attrs(overrides: dict[str, str]) -> None:
 
 @contextlib.contextmanager
 def workspace_override_context(
-    workspace_root: Path,
-    overrides: dict[str, str],
+        workspace_root: Path,
+        overrides: dict[str, str],
 ) -> Iterator[None]:
     """Temporarily replace files in the target workspace."""
     backups: dict[Path, str | None] = {}

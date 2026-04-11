@@ -64,13 +64,13 @@ class PytestRunner:
         ]
 
     def run_split(
-        self,
-        *,
-        experiment: Experiment,
-        variant: Variant,
-        split: str,
-        layout: RunLayout,
-        reuse_existing: bool = False,
+            self,
+            *,
+            experiment: Experiment,
+            variant: Variant,
+            split: str,
+            layout: RunLayout,
+            reuse_existing: bool = False,
     ) -> SplitResult:
         """Run one split and capture artifacts."""
         split_dir = layout.split_dir(variant_key=variant.key, split=split)
@@ -241,13 +241,13 @@ class HarborRunner:
         return sorted(inventory)
 
     def run_split(
-        self,
-        *,
-        experiment: Experiment,
-        variant: Variant,
-        split: str,
-        layout: RunLayout,
-        reuse_existing: bool = False,
+            self,
+            *,
+            experiment: Experiment,
+            variant: Variant,
+            split: str,
+            layout: RunLayout,
+            reuse_existing: bool = False,
     ) -> SplitResult:
         """Run one Harbor split."""
         split_dir = layout.split_dir(variant_key=variant.key, split=split)
@@ -360,12 +360,12 @@ class HarborRunner:
         return result
 
     def _build_command(
-        self,
-        *,
-        experiment: Experiment,
-        task_name: str,
-        jobs_dir: Path,
-        job_name: str,
+            self,
+            *,
+            experiment: Experiment,
+            task_name: str,
+            jobs_dir: Path,
+            job_name: str,
     ) -> list[str]:
         config = experiment.runner_config
         command = [str(item) for item in config["command"]]
@@ -400,11 +400,11 @@ def build_runner(experiment: Experiment):
 
 
 def parse_pytest_outcomes(
-    *,
-    junit_path: Path,
-    cases: list[EvalCase],
-    model: str,
-    artifacts_dir: Path,
+        *,
+        junit_path: Path,
+        cases: list[EvalCase],
+        model: str,
+        artifacts_dir: Path,
 ) -> list[CaseOutcome]:
     """Parse JUnit results for configured cases."""
     root = ET.fromstring(junit_path.read_text())

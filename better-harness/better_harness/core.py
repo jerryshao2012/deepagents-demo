@@ -449,12 +449,12 @@ class RunLayout:
         write_split_manifest(experiment, self.root)
 
     def write_iteration_decision(
-        self,
-        *,
-        iteration: int,
-        starting_variant: str,
-        proposal: Proposal,
-        candidate: CandidateEvaluation,
+            self,
+            *,
+            iteration: int,
+            starting_variant: str,
+            proposal: Proposal,
+            candidate: CandidateEvaluation,
     ) -> None:
         """Persist one iteration summary."""
         iteration_dir = self.iteration_dir(iteration)
@@ -497,7 +497,7 @@ class RunLayout:
 
 def expand_env(value: str) -> str:
     """Expand ${ENV_VAR} references."""
-    return ENV_PATTERN.sub(lambda match: os.environ[match.group(1)], value)
+    return ENV_PATTERN.sub(lambda match: os.environ.get(match.group(1), match.group(0)), value)
 
 
 def normalize_split(value: str) -> str:
@@ -525,12 +525,12 @@ def _resolve_command_tokens(config_path: Path, tokens: list[str]) -> list[str]:
 
 
 def _surface_filename(
-    *,
-    name: str,
-    target: str,
-    base_suffix: str | None,
-    kind: str,
-    payload: dict,
+        *,
+        name: str,
+        target: str,
+        base_suffix: str | None,
+        kind: str,
+        payload: dict,
 ) -> str:
     if "filename" in payload:
         return str(payload["filename"])
@@ -775,9 +775,9 @@ def write_trace_payloads(split_dir: Path, refs: list[str]) -> None:
         return
 
     endpoint = (
-        os.environ.get("LANGSMITH_ENDPOINT")
-        or os.environ.get("LANGCHAIN_ENDPOINT")
-        or "https://api.smith.langchain.com"
+            os.environ.get("LANGSMITH_ENDPOINT")
+            or os.environ.get("LANGCHAIN_ENDPOINT")
+            or "https://api.smith.langchain.com"
     ).rstrip("/")
     traces_dir = split_dir / "traces" / "langsmith"
     payloads: list[dict[str, Any]] = []
@@ -862,11 +862,11 @@ def collect_trace_refs(run_dir: Path) -> list[dict[str, Any]]:
 
 
 def run_experiment(
-    experiment: Experiment,
-    *,
-    output_dir: Path,
-    max_iterations: int | None = None,
-    reuse_existing: bool = False,
+        experiment: Experiment,
+        *,
+        output_dir: Path,
+        max_iterations: int | None = None,
+        reuse_existing: bool = False,
 ) -> RunReport:
     """Run the better-harness optimization loop."""
     from better_harness.agent import propose_variant
@@ -1001,12 +1001,12 @@ def run_experiment(
 
 
 def _run_optional_scorecard(
-    *,
-    experiment: Experiment,
-    runner,
-    variant,
-    layout: RunLayout,
-    reuse_existing: bool,
+        *,
+        experiment: Experiment,
+        runner,
+        variant,
+        layout: RunLayout,
+        reuse_existing: bool,
 ) -> SplitResult | None:
     if not experiment.has_split("scorecard"):
         return None

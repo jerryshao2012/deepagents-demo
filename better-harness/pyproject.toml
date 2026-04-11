@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Small eval-driven harness optimizer for agent systems"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "langchain>=1.2.15",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -13,7 +15,7 @@ dev = [
 ]
 
 [project.scripts]
-better-harness = "better_harness:main"
+better-harness = "better_harness.cli:main"
 
 [build-system]
 requires = ["setuptools>=75.0"]
