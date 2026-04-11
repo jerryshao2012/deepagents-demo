@@ -148,6 +148,12 @@ For detailed setup instructions and usage examples, see each demo's README:
 
 ---
 
+## Resources
+
+- **[Harness Engineering: Building Production-Grade AI Systems Beyond Prompts and Context](https://medium.com/@jerry.shao/harness-engineering-building-production-grade-ai-systems-beyond-prompts-and-context-5fcdffdd6b4c)** - A comprehensive guide on architecting robust AI systems with proper harness patterns
+
+---
+
 ## Contributing an Example
 
 See the [Contributing Guide](https://docs.langchain.com/oss/python/contributing/overview) for general contribution guidelines.
