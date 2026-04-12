@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "langchain>=1.2.15",
+    "pytest>=9.0.3",
 ]
 
 [project.optional-dependencies]
