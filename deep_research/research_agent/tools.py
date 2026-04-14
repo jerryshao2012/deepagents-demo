@@ -55,6 +55,18 @@ def think_tool(reflection: str) -> str:
     Returns:
         Confirmation that reflection was recorded for decision-making
     """
+    # Ensure output directory exists for logging reflections
+    output_dir = Path(os.environ.get("OUTPUT_FOLDER", "./output"))
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Log the reflection to a dedicated research log file
+    log_file = output_dir / "research_reflection.log"
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(f"[{timestamp}] REFLECTION:\n{reflection}\n")
+        f.write("-" * 80 + "\n")
+
     return f"Reflection recorded: {reflection}"
 
 
