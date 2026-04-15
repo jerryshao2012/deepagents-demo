@@ -168,15 +168,18 @@ Generate a golden dataset:
 uv run python research_agent_cli.py "Generate 20 question-answer pairs for the documents provided" --doc-folder ./docs/policy/ --target golden-dataset
 ```
 
-<img width="774" alt="Deep Research Graph" src="./resources/Deep_Research_Agent_with_Golden_Dataset_Generation_Skill.png" />
+<img width="937" alt="Deep Research Agent Architecture" src="./resources/Deep_Research_Agent_with_Golden_Dataset_Generation_Skill.png" />
 
-1. **Context Injection**: A curated set of "Source-of-Truth" documents (PDFs, Markdown, or technical specs) is provided to the agent's filesystem.
-2. **Synthesis-First Approach**: The agent is instructed to use the Knowledge Retrieval tool (searching the local filesystem) as its primary source.
-3. **Golden Dataset Skill (The Auditor)**:
-   - **Question Generation**: It analyzes the provided documents to identify key technical facts, contradictions, or complex logic. 
-   - **Context Pinpointing**: It maps the generated question directly to the specific paragraph or page in the local document. 
-   - **Answer Extraction**: It generates the "Ideal Answer" based strictly on that local context.
-4. **Tavily as a Fallback (Optional)**: Global search is treated as an exception—only triggered if the provided documents are explicitly incomplete, and usually flagged as "out-of-distribution" for the golden set.
+1.  **Context Injection**: A curated set of "Source-of-Truth" documents (PDFs, Markdown, or technical specs) is provided to the agent's filesystem, populating the 'Local Context (doc folder)'.
+
+2.  **Synthesis-First, Prioritized Context Strategy**: The agent is instructed to prioritize the `[read_doc_folder]` tool for Knowledge Retrieval from the local filesystem as its primary source. The research logic, orchestrated by the harness and monitored by the `think_tool`, follows a clear priority strategy to always exhaust internal knowledge first.
+
+3.  **Golden Dataset Skill (The Auditor)**:
+    * **Question Generation**: It analyzes the provided (and potentially augmented) documents to identify key technical facts, contradictions, or complex logic.
+    * **Context Pinpointing**: It maps the generated question directly to the specific localized context (e.g., paragraph or page in the local document).
+    * **Answer Extraction**: It generates the "Ideal Answer" based strictly on that pinpointed source context.
+
+4.  **Tavily as a Prioritized Fallback (Not Direct Tool Call)**: The system possesses a distinct, parallel `[tavily_search]` tool for external web search. Within the Context Strategy, it is treated as a prioritized fallback, meaning it is only triggered conceptually as a second priority if the provided local documents are explicitly incomplete. It is executed independently by the sub-agents and is generally flagged as "out-of-distribution" for the golden set, which is intended to be grounded in the internal dataset.
 
 Generate code using code-generator skill:
 ```bash
