@@ -7,7 +7,6 @@ from research_agent_cli import (
     configure_output_folder,
     derive_output_folder,
     select_output_content,
-    should_retry_with_invoke,
 )
 
 
@@ -60,50 +59,3 @@ def test_select_output_content_ignores_failed_render_and_uses_task_output_for_st
     }
 
     assert select_output_content(result, "study-slides").startswith("# Presentation:")
-
-
-def test_should_retry_with_invoke_when_result_is_only_delegation_placeholder() -> None:
-    result = {
-        "messages": [
-            AIMessage(
-                content=(
-                    'I have delegated the research on "Claude Code Memory Management" '
-                    "to a specialized research agent. Once the agent returns its findings, "
-                    "I will synthesize the information into a quick-learning presentation format."
-                )
-            )
-        ]
-    }
-
-    assert should_retry_with_invoke(result, "study-slides") is True
-
-
-def test_should_not_retry_with_invoke_when_structured_output_is_present() -> None:
-    result = {
-        "messages": [
-            ToolMessage(
-                content="# Presentation: Claude Code Memory\n\n## Slide 1: Basics\n",
-                tool_call_id="tool-1",
-                name="render_target_output",
-            )
-        ]
-    }
-
-    assert should_retry_with_invoke(result, "study-slides") is False
-
-
-def test_should_retry_with_invoke_when_todos_are_not_completed() -> None:
-    result = {
-        "todos": [
-            {"content": "Save the request to /research_request.md", "status": "in_progress"},
-            {"content": "Research an overview of LLM wiki", "status": "pending"},
-        ],
-        "messages": [
-            ToolMessage(
-                content="Updated todo list",
-                tool_call_id="tool-1",
-                name="write_todos",
-            )
-        ],
-    }
-    assert should_retry_with_invoke(result, None) is True
