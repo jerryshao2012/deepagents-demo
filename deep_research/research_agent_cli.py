@@ -321,7 +321,7 @@ def main():
         with open(args.subject_file, "r", encoding="utf-8") as handle:
             subject = handle.read().strip()
 
-    instruction = f"Research the following subject: {subject}"
+    instruction = subject
     title = None
 
     if args.title:

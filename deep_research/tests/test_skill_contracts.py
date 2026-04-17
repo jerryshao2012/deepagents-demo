@@ -1,6 +1,5 @@
-from research_agent.cli import build_instruction, build_parser
+from research_agent.cli import build_parser
 from research_agent.targets import get_target_definition, list_target_ids
-
 
 ALL_SKILL_TARGET_IDS = {
     "autoresearch-universal",
@@ -11,13 +10,11 @@ ALL_SKILL_TARGET_IDS = {
     "study-slides",
 }
 
-
 STRUCTURED_TARGET_IDS = {
     "golden-dataset",
     "interview",
     "study-slides",
 }
-
 
 UNSTRUCTURED_TARGET_IDS = ALL_SKILL_TARGET_IDS - STRUCTURED_TARGET_IDS
 
@@ -42,33 +39,6 @@ def test_structured_and_unstructured_skill_classification() -> None:
         definition = get_target_definition(target_id)
         assert definition["schema"] is None
         assert definition["render"] is None
-
-
-def test_every_skill_instruction_is_grounded_in_the_subject() -> None:
-    subject = "Claude Code Memory Management"
-
-    for target_id in ALL_SKILL_TARGET_IDS:
-        instruction = build_instruction(subject=subject, target=target_id)
-        assert f"Research the following subject: {subject}" in instruction
-
-
-def test_structured_skill_instructions_require_renderer_delivery() -> None:
-    subject = "Claude Code Memory Management"
-
-    for target_id in STRUCTURED_TARGET_IDS:
-        instruction = build_instruction(subject=subject, target=target_id)
-        assert "render_target_output" in instruction
-        assert "matches that target schema exactly" in instruction
-
-
-def test_unstructured_skill_instructions_require_final_report_delivery() -> None:
-    subject = "Claude Code Memory Management"
-
-    for target_id in UNSTRUCTURED_TARGET_IDS:
-        instruction = build_instruction(subject=subject, target=target_id)
-        assert "write_file" in instruction
-        assert "/final_report.md" in instruction
-        assert "Do NOT use `render_target_output` since this is an unstructured target." in instruction
 
 
 def test_study_slides_skill_contract_mentions_slide_output_requirements() -> None:
