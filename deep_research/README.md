@@ -30,6 +30,7 @@ uv sync
 # In Windows if PATH is not setup properly
 python -m uv sync
 ```
+Note: use `uv sync --reinstall` to reinstall all packages if you see some errors.
 
 Set your API keys in your environment:
 
