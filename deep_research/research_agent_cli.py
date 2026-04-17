@@ -241,18 +241,6 @@ def select_output_content(result: dict, target: str | None = None) -> str:
     return extract_message_content(last_message)
 
 
-def should_retry_with_invoke(result: dict, target: str | None = None) -> bool:
-    """Detect partial streamed states that should be retried via synchronous invoke."""
-    # If stream stopped while workflow todos are still open, force one final invoke pass.
-    if _has_incomplete_todos(result):
-        return True
-
-    content = select_output_content(result, target)
-    if target:
-        return _looks_like_incomplete_delegation(content)
-    return _looks_like_incomplete_delegation(content)
-
-
 def save_research_to_file(research_content, filename=None, output_folder=None):
     # Get current date and time
     current_date = datetime.now().strftime("%Y-%m-%d_%I_%M_%S_%p")
@@ -461,18 +449,6 @@ def main():
         )
         total_time = time.time() - start_time
         print(f"\n✨ Research completed in {total_time:.1f}s!\n")
-
-    if should_retry_with_invoke(result, args.target):
-        spinner = Spinner("Stream ended with incomplete output; running final synchronous pass...")
-        spinner.start()
-        start_invoke = time.time()
-        result = agent.invoke(
-            messages,
-            verify_ssl=verify_ssl
-        )
-        spinner.stop()
-        invoke_time = time.time() - start_invoke
-        print(f"\n🔁 Finalization pass completed in {invoke_time:.1f}s!\n")
 
     # Display messages from the result if verbose
     if result and "messages" in result:
