@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import re
 from typing import Annotated
 
@@ -9,6 +8,7 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
 from research_agent.targets import get_target_definition
+from research_agent.utils.json_utils import robust_json_loads
 
 
 def _coerce_integers(value: object, schema: dict) -> object:
@@ -226,14 +226,14 @@ def _prepare_validated_payload(
         payload = payload_json
     else:
         try:
-            payload = json.loads(payload_json)
-        except json.JSONDecodeError as exc:
+            payload = robust_json_loads(payload_json)
+        except ValueError as exc:
             return None, None, f"Invalid JSON payload: {exc}"
 
     payload = _normalize_legacy_target_payload(target_id, payload)
     payload = _fill_defaults(target_id, payload)
     payload = _coerce_integers(payload, definition["schema"])
-    
+
     # Ensure payload is a dict after coercion
     if not isinstance(payload, dict):
         return None, None, "Error: Payload coercion resulted in non-dict type"

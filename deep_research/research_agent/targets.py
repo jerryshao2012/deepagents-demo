@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from research_agent.utils.json_utils import robust_json_loads
 
 SKILLS_DIR = Path(__file__).resolve().parent / "skills"
 _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
@@ -29,7 +30,7 @@ def _extract_schema_block(body: str, path: Path) -> tuple[str, dict[str, Any] | 
     if not json_match:
         raise ValueError(f"Skill file {path} is missing a JSON schema block in `## Schema`.")
 
-    schema = json.loads(json_match.group(1))
+    schema = robust_json_loads(json_match.group(1))
     instructions = body[:schema_heading.start()].strip()
     return instructions, schema
 
@@ -46,7 +47,7 @@ def _extract_render_spec(body: str, path: Path) -> list[dict[str, Any]] | None:
             f"Skill file {path} is missing a JSON render spec block in `## Render Spec`."
         )
 
-    render_spec = json.loads(json_match.group(1))
+    render_spec = robust_json_loads(json_match.group(1))
     if not isinstance(render_spec, list):
         raise ValueError(f"Skill file {path} render spec must be a JSON array.")
     return render_spec
