@@ -1,4 +1,4 @@
-<h3 align="center">Examples</h3>
+<h3 align="center">Harness Engineering Examples</h3>
 
 <p align="center">
   Agents, patterns, and applications you can build with Deep Agents.
@@ -9,6 +9,24 @@
 **Deep Agent = Reasoning Model + Orchestration Harness**
 
 While the model provides raw intelligence, the **Harness** is what makes that intelligence dependable for complex, long-running tasks. Deep Agents shift from simple "Chat" patterns to "Deep" patterns by baking structured planning, stateful memory, and resource management directly into the architecture.
+
+### The Gap Between Demo and Production
+
+Your agent just billed a user $38 on a single query. Not because it did something complex. Because it summarized the same document 47 times in a row. No crash. No alert. Just a spinning loop and a growing invoice.
+
+You check the model logs. The model was working exactly as trained.
+
+**The problem was that everything wrapped around it had no memory of what it already did, no state file, no stop condition.**
+
+That is the gap between a demo and a production agent.
+
+Building an agent that works once is genuinely easy. Call an LLM, give it tools, let it loop. Twenty lines of Python. You record a demo. It looks clean.
+
+Then you ship it. Real users send unexpected inputs. A tool call returns empty. Context fills up after forty minutes. Two subagents contradict each other. The model decides to retry something indefinitely.
+
+Everything invisible in the demo becomes a failure in production.
+
+**The gap is not model quality. It is harness quality.**
 
 ```mermaid
 flowchart TB
@@ -21,44 +39,170 @@ flowchart TB
 
     L["A model alone is not enough"] --> C["The harness supplies 'Deep' capabilities"]
 
-    C --> H1["01. Virtual Filesystem<br/>Offloads large tool results (20k+ tokens) to disk; uses ls, read, write, grep"]
-    C --> H2["02. Structured Planning<br/>Built-in 'write_todos' tool for persistent goal tracking and adaptation"]
-    C --> H3["03. Subagent Tasking<br/>'task' tool for spawning specialized agents with clean, parallel contexts"]
-    C --> H4["04. Durable Memory<br/>LangGraph Store for project-wide history and cross-thread persistence"]
-    C --> H5["05. Context Engineering<br/>Automatic summarization and history offloading at 85% token usage"]
-    C --> H6["06. Secure Execution<br/>Bash + Sandboxes for isolated, multi-turn write-run-fix loops"]
+    C --> H1["01. Control Loop<br/>Step limits, termination conditions, loop detection"]
+    C --> H2["02. State Management<br/>Session state + persistent JSON files for progress tracking"]
+    C --> H3["03. Memory Systems<br/>Short-term (conversation) + Long-term (AGENTS.md, vector DB)"]
+    C --> H4["04. Tools & Skills<br/>Well-designed interfaces, bash escape hatch, MCP servers"]
+    C --> H5["05. Context Management<br/>Compaction, truncation, progressive disclosure at 85% usage"]
+    C --> H6["06. Planning<br/>Plan files with step tracking, self-verification, Ralph Loop"]
+    C --> H7["07. Error Handling<br/>Retry logic, escalation paths, human-in-the-loop oversight"]
 ```
 
-### The Six Harness Pillars
+### Agent = Model + Harness
 
-1. **Virtual Filesystem (Scalable Context)**
-   - Prevents context window rot by offloading large data (logs, docs, artifacts) to a workspace.
-   - Agents see truncated previews and use `read_file` or `grep` to fetch specific details on-demand.
-   - Makes progress durable across turns and runs.
+This framing changes how you build:
 
-2. **Structured Planning (`write_todos`)**
-   - Moves planning from "hidden reasoning" to "explicit state".
-   - Agents maintain a persistent To-Do list to track multi-stage objectives.
-   - Allows the agent to resume, pivot, and report progress reliably over long sessions.
+```
+Model    → reasoning, language, decisions
+Harness  → everything the model needs to act reliably
+```
 
-3. **Specialized Subagents (Task Tool)**
-   - The `task` tool spawns ephemeral subagents for isolated context-heavy work.
-   - Enables **Parallelism**: Multiple subtasks can run concurrently without cluttering the main agent's history.
-   - Prevents the "main thread" from becoming overloaded with irrelevant sub-task details.
+A model without a harness is a brain without a nervous system. The thinking happens. Nothing else does.
 
-4. **Durable Memory (`AGENTS.md` & Store)**
-   - Combines file-based memory (Git-friendly) with a structured **LangGraph Store**.
-   - Persists project-specific quirks, user preferences, and learned workflows across different conversational threads.
+If you're not the model, you're the harness. A harness is every line of code, every config, every execution hook that wraps the model and turns a text generator into something that actually does work.
 
-5. **Context Engineering (Automatic Compression)**
-   - Actively manages the model's focus.
-   - When context hits 85%, the system automatically summarizes the history and archives old messages to the filesystem.
-   - Ensures agents can run indefinitely without hitting hard token limits or losing critical context.
+Most engineers spend 90% of their time on the model: better prompts, newer models, more examples. **Production failures almost always live in the 10% they skipped.**
 
-6. **Secure Orchestration + Hooks**
-   - Coordinates tools, routing, and approvals via middleware and runtime hooks.
-   - Provides isolation through Bash sandboxes (Modal, Daytona, Runloop) for safe code execution.
-   - Enforces business logic and safety policies at the execution layer, not just through prompting.
+### The Seven Harness Pillars
+
+#### 1. Control Loop
+The heartbeat of the agent. Without it, you get one model call and one response. That's not an agent, it's a chatbot.
+
+The loop runs the model, reads what it returned, executes any tool calls, feeds the results back in, and repeats until either the model stops calling tools or a step limit fires.
+
+```python
+while agent_is_running:
+    response = call_model(context)
+    
+    if response.has_tool_calls:
+        results = execute_tools(response.tool_calls)
+        append_to_context(results)
+        continue
+    
+    if response.is_final_answer:
+        return response.content
+    
+    if step_count > MAX_STEPS:
+        return "Task incomplete. Max steps reached."
+```
+
+The `MAX_STEPS` line is not optional. It is the difference between a well-behaved agent and the $38 incident. Build it in before you write a single tool.
+
+#### 2. State Management
+A model is stateless by default. Every API call starts fresh. Without the harness explicitly tracking what happened, the agent has no memory of what it already did, what succeeded, or where it left off.
+
+You need two kinds of state:
+- **Session state**: conversation history, tool results, current step number
+- **Persistent state**: survives when the session ends (progress on long tasks, completed subtasks, files already processed)
+
+The simplest production state store is a JSON file:
+
+```json
+{
+  "task_id": "refactor-auth-module",
+  "completed_files": ["auth.py", "middleware.py"],
+  "pending_files": ["routes.py", "tests/test_auth.py"],
+  "current_step": 3
+}
+```
+
+For a coding agent working across a large codebase, this file is what separates an agent that makes progress from one that re-edits the same file every loop. Git adds versioning on top: agents can track work, roll back mistakes, and branch experiments.
+
+#### 3. Memory
+State tracks what the agent did this session. Memory is what it knows across sessions.
+
+- **Short-term memory**: conversation history (every message, tool call, result appended to a list passed to the model)
+- **Long-term memory**: survives across sessions (user preferences, project conventions, customer history)
+
+A good production pattern:
+
+```python
+Session start:
+  1. Load AGENTS.md or project memory file → inject into system prompt
+  2. Retrieve relevant memories based on current task → add as context
+During session:
+  3. Maintain rolling conversation history
+Session end:
+  4. Summarize key learnings → write to memory store
+```
+
+An agent without long-term memory re-learns context on every run. Users notice. They start to feel like the agent is forgetting them even though the model is perfectly capable. That erosion of trust is a harness problem, not a model problem.
+
+#### 4. Tools and the Bash Escape Hatch
+Tools are what convert language into action. Without them, the model produces text about doing things. With them, it does them.
+
+Tool design matters more than tool count. Every tool you add costs context (its description lives in the prompt) and increases the chance the model picks the wrong one. Three tools with excellent descriptions will outperform fifteen with vague ones.
+
+A good tool description answers three questions:
+- What does this tool actually do?
+- When should I use it (not just when I can)?
+- What does the output look like so I know it worked?
+
+The bash escape hatch is the architectural move that changes what agents can do. Instead of pre-designing every possible tool, you give the agent access to bash and it writes its own tools on the fly. This is how Claude Code handles open-ended tasks.
+
+The tradeoff is security, which is why sandbox isolation becomes non-negotiable the moment bash is in play.
+
+#### 5. Context Management
+Context rot is one of the sneakiest production failures there is.
+
+The agent was running well for forty minutes. Now it is ignoring its own system prompt. Nothing crashed. No error fired. The context window filled up, the important instructions got buried in the middle, and the model gradually stopped attending to them.
+
+Three patterns that actually work in production:
+
+- **Compaction**: summarizes older conversation history rather than dropping it cold. Never compress the original task definition or system prompt.
+- **Tool output truncation**: prevents large tool results from flooding context. Keep the first and last N tokens, store the full output to the filesystem, give the model a pointer if it needs more.
+- **Skills via progressive disclosure**: loads tool descriptions on demand when the model decides it needs that capability. An agent with 50 skills loaded lazily often outperforms one with 10 tools loaded upfront.
+
+The production rule: your system prompt and task definition stay visible always. Compress history before you touch those.
+
+#### 6. Planning
+A model without planning takes the most obvious next step, whether or not it is part of a coherent path to the goal.
+
+The plan file pattern is the simplest fix that actually works in production:
+
+```yaml
+task: Migrate database schema from v1 to v2
+steps:
+  - Backup current schema         [ ]
+  - Generate migration script     [ ]
+  - Run migration on staging      [x]
+  - Verify data integrity         [ ]
+  - Run migration on production   [ ]
+  - Update documentation          [ ]
+current_step: 4
+```
+
+The harness injects this into context at the start of every loop. The agent checks off steps as it completes them. If the session ends, the plan persists. When the agent resumes, it knows exactly where it is.
+
+Self-verification closes the loop. After completing each step, the agent verifies the result before moving on. The harness can enforce this by running a test suite and feeding back failures.
+
+The Ralph Loop is worth knowing by name. When an agent finishes its context window on a long task without completing the goal, the Ralph Loop intercepts that exit via a hook, injects the original goal into a fresh context window, and forces continuation. The filesystem makes this possible: each fresh context reads state from the previous iteration. This is how true long-horizon autonomy works across multiple context windows.
+
+#### 7. Error Handling
+The real world does not cooperate. Tools fail. APIs rate-limit. Files are missing. Models occasionally return output that does not parse.
+
+Without explicit error handling, an agent that hits any of these situations has two bad options: crash, or silently hallucinate around the error as if it did not happen. Both are production failures.
+
+```python
+Tool fails:
+   Retryable? (timeout, rate limit) → exponential backoff
+   Data error? → try alternative approach
+   Permissions error? → escalate to human
+
+Model output malformed:
+   Retry with explicit format reminder
+   Three failures → fall back to structured output enforcement
+
+Agent looping:
+   Step counter fires → force stop
+   Repeated identical tool calls detected → interrupt and redirect
+
+Confidence low:
+   Flag for async human review
+   Do not block the user while waiting
+```
+
+The escalation path is the most important part. Humans on the loop, not in the loop.
 
 ### How This Maps to the Examples Here
 
