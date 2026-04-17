@@ -220,7 +220,8 @@ def _prepare_validated_payload(
         return None, None, str(exc)
 
     if not definition.get("schema"):
-        return None, None, f"ERROR: Target '{target_id}' is an unstructured target. Do NOT use `render_target_output`! You must formulate your response directly as markdown and write it to the final report file or output it."
+        return None, None, f"ERROR: Target '{target_id}' is an unstructured target. Do NOT use `render_target_output`! Use the `write_file` tool to save your final output directly "
+                "to `/final_report.md` as Markdown text. Do NOT just say you will write it; you must actually call the `write_file` tool with the text."
 
     if isinstance(payload_json, dict):
         payload = payload_json

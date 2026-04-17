@@ -263,6 +263,14 @@ def finalize_golden_dataset_output(
         export_golden_dataset_csv,
     )
 
+    if state is not None:
+        requested_target = state.get("target")
+        if requested_target != GOLDEN_DATASET_TARGET_ID:
+            return (
+                "ERROR: `finalize_golden_dataset_output` is only available when the active "
+                "target is `golden-dataset`. Use the standard research flow when no target is selected."
+            )
+
     _, payload, err = _prepare_validated_payload(GOLDEN_DATASET_TARGET_ID, payload_json)
     if err: return err
     if payload is None:
@@ -300,7 +308,10 @@ def finalize_golden_dataset_output(
 
 
 @tool(parse_docstring=True)
-def trigger_dataset_evaluation(file_path: str) -> str:
+def trigger_dataset_evaluation(
+    file_path: str,
+    state: Annotated[dict, InjectedState] = None,
+) -> str:
     """Evaluate a generated golden dataset CSV to compute quality metrics.
 
     Run this tool only after you have successfully generated a golden dataset
@@ -312,9 +323,22 @@ def trigger_dataset_evaluation(file_path: str) -> str:
 
     Args:
         file_path: The path to the CSV file to evaluate (e.g., "./output/golden_dataset.csv").
+        state: LangGraph state
 
     Returns:
         The result of the quality metric evaluation, including the path to the scored dataset.
     """
-    from research_agent.skills.golden_dataset.pipeline import evaluate_golden_dataset_csv_file
+    from research_agent.skills.golden_dataset.pipeline import (
+        GOLDEN_DATASET_TARGET_ID,
+        evaluate_golden_dataset_csv_file,
+    )
+
+    if state is not None:
+        requested_target = state.get("target")
+        if requested_target != GOLDEN_DATASET_TARGET_ID:
+            return (
+                "ERROR: `trigger_dataset_evaluation` is only available when the active target is `golden-dataset`."
+                "Use the standard research flow when no target is selected."
+            )
+
     return evaluate_golden_dataset_csv_file(file_path)

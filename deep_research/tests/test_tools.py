@@ -419,7 +419,7 @@ def test_finalize_golden_dataset_output_updates_state_with_text_file_data(tmp_pa
         fake_evaluate_and_report,
     )
 
-    state = {"files": {}}
+    state = {"files": {}, "target": "golden-dataset"}
 
     result = finalize_golden_dataset_output.func(
         payload_json="""
@@ -551,3 +551,28 @@ def test_glob_finds_files_matching_pattern(tmp_path: Path) -> None:
 def test_glob_handles_nonexistent_base_path() -> None:
     result = tools.glob.invoke({"pattern": "/nonexistent/path/*.md"})
     assert "Error: Base path" in result
+
+
+def test_finalize_golden_dataset_output_rejects_non_golden_target_state() -> None:
+    result = finalize_golden_dataset_output.func(
+        payload_json='{"items": [{"id": "Q1", "coverage_area": "General", "question": "Q?", "answer": "A"}]}',
+        state={"target": "study-slides"},
+    )
+
+    assert "only available when the active target is `golden-dataset`" in result
+
+
+def test_trigger_dataset_evaluation_rejects_non_golden_target_state(tmp_path) -> None:
+    dataset_csv = tmp_path / "starter.csv"
+    dataset_csv.write_text(
+        "ID,Coverage Area,Question,Answer,Content\n"
+        "Q1,Leave,How do I request parental leave?,Review the leave policy first.,Leave section.\n",
+        encoding="utf-8",
+    )
+
+    result = tools.trigger_dataset_evaluation.func(
+        file_path=str(dataset_csv),
+        state={"target": "study-slides"},
+    )
+
+    assert "only available when the active target is `golden-dataset`" in result

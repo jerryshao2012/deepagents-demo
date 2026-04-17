@@ -169,6 +169,21 @@ def _looks_like_incomplete_delegation(content: str) -> bool:
     return any(marker in text for marker in markers)
 
 
+def _has_incomplete_todos(result: dict) -> bool:
+    """Return True when state todos exist and at least one is not completed."""
+    todos = result.get("todos")
+    if not isinstance(todos, list) or not todos:
+        return False
+
+    for todo in todos:
+        if not isinstance(todo, dict):
+            continue
+        status = str(todo.get("status", "")).strip().lower()
+        if status != "completed":
+            return True
+    return False
+
+
 def _truncate_for_log(content: str, max_chars: int = MAX_STREAM_DIAGNOSTIC_CHARS) -> str:
     text = content.strip().replace("\n", " ")
     if len(text) <= max_chars:
@@ -228,6 +243,10 @@ def select_output_content(result: dict, target: str | None = None) -> str:
 
 def should_retry_with_invoke(result: dict, target: str | None = None) -> bool:
     """Detect partial streamed states that should be retried via synchronous invoke."""
+    # If stream stopped while workflow todos are still open, force one final invoke pass.
+    if _has_incomplete_todos(result):
+        return True
+
     content = select_output_content(result, target)
     if target:
         return _looks_like_incomplete_delegation(content)

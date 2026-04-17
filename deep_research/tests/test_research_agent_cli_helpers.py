@@ -90,3 +90,20 @@ def test_should_not_retry_with_invoke_when_structured_output_is_present() -> Non
     }
 
     assert should_retry_with_invoke(result, "study-slides") is False
+
+
+def test_should_retry_with_invoke_when_todos_are_not_completed() -> None:
+    result = {
+        "todos": [
+            {"content": "Save the request to /research_request.md", "status": "in_progress"},
+            {"content": "Research an overview of LLM wiki", "status": "pending"},
+        ],
+        "messages": [
+            ToolMessage(
+                content="Updated todo list",
+                tool_call_id="tool-1",
+                name="write_todos",
+            )
+        ],
+    }
+    assert should_retry_with_invoke(result, None) is True

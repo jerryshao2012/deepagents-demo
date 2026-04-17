@@ -9,9 +9,7 @@ keywords:
   - "golden.*dataset"
   - "create.*ga.*pair"
   - "question.*answer"
-  - "qa.*dataset"
-  - "qa.*pair"
-  - "q&a"
+  - "golden_dataset"
 defaults:
   - field: domain
     if_null: true
