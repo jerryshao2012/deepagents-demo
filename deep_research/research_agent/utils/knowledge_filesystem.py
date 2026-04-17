@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Annotated
 
+from deepagents.backends.utils import file_data_to_string
 from dotenv import load_dotenv
 from langchain_core.tools import tool
+from langgraph.prebuilt import InjectedState
 
 # Load environment variables
 load_dotenv()
@@ -175,15 +178,23 @@ def glob(pattern: str) -> str:
 
 
 @tool(parse_docstring=True)
-def read_file(file_path: str) -> str:
-    """Read the content of a file.
+def read_file(file_path: str,
+              state: Annotated[dict, InjectedState] = None) -> str:
+    """Read the content of a file. Check files in the state first before check local file system.
 
     Args:
         file_path: The path to the file to read.
+        state: LangGraph state
 
     Returns:
         The content of the file or an error message if the file not found.
     """
+
+    # Check state["files"] if the file_path is available
+    if state and "files" in state and file_path in state["files"]:
+        file_content = file_data_to_string(state["files"][file_path])
+        return file_content
+
     normalized_path = _normalize_path_for_filesystem_tools(file_path)
     path = Path(normalized_path)
     if not path.exists():
