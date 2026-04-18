@@ -99,8 +99,7 @@ class SkillRegistry:
                 print(f"Warning: Failed to load skill from {skill_file}: {e}")
                 continue
 
-    @staticmethod
-    def _parse_skill_file(file_path: Path) -> dict[str, Any] | None:
+    def _parse_skill_file(self, file_path: Path) -> dict[str, Any] | None:
         """Parse a SKILL.md file, extracting frontmatter and body.
 
         Args:
@@ -139,11 +138,6 @@ class SkillRegistry:
 
         # Extract optional fields
         keywords = frontmatter.get("keywords", [])
-
-        # If no keywords defined, use the skill name as a default keyword
-        if not keywords:
-            keywords = [name.lower().replace("-", ".*").replace("_", ".*")]
-
         metadata = {k: v for k, v in frontmatter.items() if k not in ["name", "description", "keywords"]}
 
         # Get the body (instructions) after frontmatter

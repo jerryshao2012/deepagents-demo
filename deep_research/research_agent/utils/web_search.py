@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 import httpx
 import requests
-from langchain_core.tools import InjectedToolArg, tool
+from langchain_core.tools import tool, InjectedToolArg
 from langgraph.prebuilt import InjectedState
 from markdownify import markdownify
 from tavily import TavilyClient

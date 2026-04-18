@@ -7,8 +7,9 @@ from typing import Any
 import yaml
 from deepagents import create_deep_agent, SubAgent
 from dotenv import load_dotenv
+from langchain.agents import AgentState
+from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import SystemMessage
-from typing_extensions import TypedDict
 
 from model_factory import get_configured_model
 from research_agent import (
@@ -20,12 +21,7 @@ from research_agent.cli import (
     build_instruction,
 )
 from research_agent.skill_registry import SkillRegistry
-from research_agent.skills.frontend_slides.pipeline import (
-    frontend_slides,
-    frontend_slides_export_pdf,
-    frontend_slides_deploy,
-    frontend_slides_extract_pptx,
-)
+
 from research_agent.tools import (
     _normalize_path_for_filesystem_tools,
     glob,
@@ -34,11 +30,12 @@ from research_agent.tools import (
     read_doc_folder,
     read_file,
     read_skill_supporting_file,
-    render_target_output,
     tavily_search,
     think_tool,
-)
-from research_agent.tools import (
+    frontend_slides,
+    frontend_slides_export_pdf,
+    frontend_slides_deploy,
+    frontend_slides_extract_pptx,
     finalize_golden_dataset_output,
     trigger_dataset_evaluation,
 )
@@ -138,21 +135,20 @@ def load_skill_keywords(skills_dir: str | None = None) -> dict[str, list[str]]:
 SKILL_KEYWORDS = load_skill_keywords()
 
 
-class ResearchState(TypedDict, total=False):
+class ResearchState(AgentState):
     """Runtime state for the research agent."""
     doc_folder: str | None
     target: str | None
     no_web: bool | None
     agent_start_time: float | None
-    messages: list[Any] | None
 
 
-class ResearchStateMiddleware:
+class ResearchStateMiddleware(AgentMiddleware):
     """Middleware to configure state variables like DOC_FOLDER before the agent runs."""
 
     def before_agent(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
         import time
-        messages = state.get("messages") or []
+        messages = state.get("messages", [])
 
         # Capture agent start time if not already set
         updates: dict[str, Any] = {}
@@ -389,7 +385,6 @@ research_sub_agent: SubAgent = {
         frontend_slides_export_pdf,
         frontend_slides_deploy,
         frontend_slides_extract_pptx,
-        render_target_output,
         finalize_golden_dataset_output,
         trigger_dataset_evaluation,
         list_available_skills,
@@ -413,7 +408,6 @@ agent = create_deep_agent(
         frontend_slides_export_pdf,
         frontend_slides_deploy,
         frontend_slides_extract_pptx,
-        render_target_output,
         finalize_golden_dataset_output,
         trigger_dataset_evaluation,
         list_available_skills,
