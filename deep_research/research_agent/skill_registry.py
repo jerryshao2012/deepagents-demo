@@ -90,7 +90,8 @@ class SkillRegistry:
             try:
                 parsed_skill = self._parse_skill_file(skill_file)
                 if parsed_skill:
-                    skill_id = skill_path.name
+                    # Use the 'name' field from frontmatter as skill_id (not directory name)
+                    skill_id = parsed_skill.get("name", skill_path.name)
                     parsed_skill["skill_id"] = skill_id
                     parsed_skill["path"] = skill_path
                     self._skills[skill_id] = SkillInfo(**parsed_skill)
