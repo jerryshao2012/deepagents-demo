@@ -45,6 +45,7 @@ env/
 # Temporary files
 *.tmp
 *.bak
+.langgraph_api
 
 # Projet data
 docs/
