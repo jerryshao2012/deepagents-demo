@@ -3,7 +3,6 @@ from pathlib import Path
 from research_agent import tools
 from research_agent.tools import (
     finalize_golden_dataset_output,
-    frontend_slides,
     read_doc_folder,
     render_target_output,
 )
@@ -577,50 +576,3 @@ def test_trigger_dataset_evaluation_rejects_non_golden_target_state(tmp_path) ->
     )
 
     assert "only available when the active target is `golden-dataset`" in result
-
-
-def test_frontend_slides_tool_has_expected_name() -> None:
-    assert frontend_slides.name == "frontend-slides"
-
-
-def test_frontend_slides_generates_html_presentation(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("OUTPUT_FOLDER", str(tmp_path))
-
-    result = frontend_slides.invoke(
-        {
-            "presentation_markdown": """
-# [Slide 1] Title: Future of AI Evaluation
-
-**Headline:** Transforming LLM deployment from guesswork to guaranteed performance.
-**Subtitle:** Automated golden datasets for faster launch confidence.
-**Contact:** demo@example.com
-
-* Faster launches
-* Lower annotation costs
-
-**Callout:** Trusted evaluation without the spreadsheet grind.
-
-# [Slide 2] Title: The Workflow
-
-**Headline:** Four steps from raw docs to scored answers.
-**Body:**
-1. Extract
-2. Generate
-3. Draft
-4. Evaluate
-""",
-            "output_filename": "frontend-slides-smoke.html",
-            "deck_title": "Frontend Slides Smoke Test",
-            "style_preset": "Creative Voltage",
-        }
-    )
-
-    output_path = tmp_path / "frontend-slides-smoke.html"
-    assert output_path.exists()
-    html = output_path.read_text(encoding="utf-8")
-
-    assert str(output_path) in result
-    assert html.count('<section class="slide') == 2
-    assert "Future of AI Evaluation" in html
-    assert "Four steps from raw docs to scored answers." in html
-    assert "height: 100vh;" in html

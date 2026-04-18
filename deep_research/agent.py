@@ -1,8 +1,3 @@
-"""Research Agent - Standalone script for LangGraph deployment.
-
-This module creates a deep research agent with custom tools and prompts
-for conducting web research with strategic thinking and context management.
-"""
 import os
 import re
 from datetime import datetime
@@ -12,39 +7,55 @@ from typing import Any
 import yaml
 from deepagents import create_deep_agent, SubAgent
 from dotenv import load_dotenv
-from langchain.agents import AgentState
-from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import SystemMessage
+from typing_extensions import TypedDict
 
-from model_factory import get_configured_model
-from research_agent.cli import build_instruction
-from research_agent.deepagents_compat import patch_deepagents_task_tool_result_extraction
-from research_agent.prompts import (
-    RESEARCHER_INSTRUCTIONS,
+from deep_research.model_factory import get_configured_model
+from deep_research.research_agent import (
     RESEARCH_WORKFLOW_INSTRUCTIONS,
+    RESEARCHER_INSTRUCTIONS,
     SUBAGENT_DELEGATION_INSTRUCTIONS,
 )
-from research_agent.tools import (
-    finalize_golden_dataset_output,
+from deep_research.research_agent.cli import (
+    build_instruction,
+)
+from deep_research.research_agent.skill_registry import SkillRegistry
+from deep_research.research_agent.skills.frontend_slides.pipeline import (
     frontend_slides,
+    frontend_slides_export_pdf,
+    frontend_slides_deploy,
+    frontend_slides_extract_pptx,
+)
+from deep_research.research_agent.tools import (
+    _normalize_path_for_filesystem_tools,
+    glob,
+    list_available_skills,
+    ls,
     read_doc_folder,
     read_file,
-    ls,
-    glob,
+    read_skill_supporting_file,
     render_target_output,
     tavily_search,
     think_tool,
-    trigger_dataset_evaluation,
-    _normalize_path_for_filesystem_tools,
-    REPORTS_OUTPUT_FOLDER,
 )
-from utils import get_ssl_verify_config, str2bool
+from deep_research.research_agent.tools import (
+    finalize_golden_dataset_output,
+    trigger_dataset_evaluation,
+)
+from deep_research.utils import get_ssl_verify_config, str2bool
 
 # Load environment variables
 load_dotenv()
 
 # Ensure task() returns the subagent's final content even when it is not stored in `.text`.
+from deep_research.research_agent.deepagents_compat import (
+    patch_deepagents_task_tool_result_extraction,
+)
+
 patch_deepagents_task_tool_result_extraction()
+
+# Constants
+REPORTS_OUTPUT_FOLDER = "reports"
 
 # Create SSL verification setting - CLI flag takes precedence over env var
 verify_ssl = get_ssl_verify_config()
@@ -55,6 +66,9 @@ MAX_RESEARCHER_ITERATIONS = int(os.environ.get("MAX_RESEARCHER_ITERATIONS", "3")
 
 # Get current date
 current_date = datetime.now().strftime("%Y-%m-%d")
+
+# Initialize dynamic skill registry
+skill_registry = SkillRegistry()
 
 
 def load_skill_keywords(skills_dir: str | None = None) -> dict[str, list[str]]:
@@ -124,24 +138,21 @@ def load_skill_keywords(skills_dir: str | None = None) -> dict[str, list[str]]:
 SKILL_KEYWORDS = load_skill_keywords()
 
 
-class ResearchState(AgentState):
+class ResearchState(TypedDict, total=False):
+    """Runtime state for the research agent."""
     doc_folder: str | None
-    no_web: bool | None
     target: str | None
+    no_web: bool | None
     agent_start_time: float | None
+    messages: list[Any] | None
 
 
-class ResearchStateMiddleware(AgentMiddleware):
-    """
-    Unified middleware that handles both parsing user input and building system instructions.
-    1. Parses natural language user input to extract doc_folder, target, and no_web
-    2. Builds system instructions based on the full ResearchState
-    """
-    state_schema = ResearchState
+class ResearchStateMiddleware:
+    """Middleware to configure state variables like DOC_FOLDER before the agent runs."""
 
     def before_agent(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
         import time
-        messages = state.get("messages", [])
+        messages = state.get("messages") or []
 
         # Capture agent start time if not already set
         updates: dict[str, Any] = {}
@@ -264,7 +275,7 @@ class ResearchStateMiddleware(AgentMiddleware):
         if not potential_path:
             # Look for unquoted paths that contain common document folder names
             # Matches ./path/to/dir, /path/to/dir, or path/to/dir
-            unquoted_match = re.search(r"((?:\.?/)?[\w/\\.-]+(?:[/\\][\w/\\.-]+)+)", user_message)
+            unquoted_match = re.search(r"((?:\.?/)?[\\w/.-]+(?:[/\\][\\w/.-]+)+)", user_message)
             if unquoted_match:
                 p = unquoted_match.group(1).replace('\\', '/')
                 if any(keyword in p.lower() for keyword in ["doc", "policy", "data", "input", "file"]):
@@ -286,18 +297,18 @@ class ResearchStateMiddleware(AgentMiddleware):
 
     @staticmethod
     def _extract_target(user_message: str) -> str | None:
-        """Extract target from user message patterns."""
+        """Extract target from user message patterns using dynamic skill registry."""
         # Look for --target pattern
         target_match = re.search(r"--target\s+([^\s]+)", user_message)
         if target_match:
             return target_match.group(1)
 
-        # Look for skill names mentioned in the message using global SKILL_KEYWORDS
+        # Use skill registry to find matching skills by keyword
         message_lower = user_message.lower()
-        for skill_name, keywords in SKILL_KEYWORDS.items():
-            for keyword in keywords:
-                if re.search(keyword, message_lower):
-                    return skill_name
+        matches = skill_registry.find_skills_by_keyword(message_lower)
+        if matches:
+            # Return the first match (most relevant based on keyword priority)
+            return matches[0].skill_id
 
         return None
 
@@ -375,9 +386,14 @@ research_sub_agent: SubAgent = {
         glob,
         read_doc_folder,
         frontend_slides,
+        frontend_slides_export_pdf,
+        frontend_slides_deploy,
+        frontend_slides_extract_pptx,
         render_target_output,
         finalize_golden_dataset_output,
         trigger_dataset_evaluation,
+        list_available_skills,
+        read_skill_supporting_file,
     ],
 }
 
@@ -394,9 +410,14 @@ agent = create_deep_agent(
         glob,
         read_doc_folder,
         frontend_slides,
+        frontend_slides_export_pdf,
+        frontend_slides_deploy,
+        frontend_slides_extract_pptx,
         render_target_output,
         finalize_golden_dataset_output,
         trigger_dataset_evaluation,
+        list_available_skills,
+        read_skill_supporting_file,
     ],
     system_prompt=INSTRUCTIONS,
     subagents=[research_sub_agent],
