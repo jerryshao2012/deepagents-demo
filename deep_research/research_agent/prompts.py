@@ -76,6 +76,7 @@ Simply list items with details - no introduction needed:
 ## CRITICAL EXECUTION RULES
 1. **NEVER ask the user for results**: When you delegate a task via the `task()` tool, the subagent's findings will be returned directly to you in the tool's output context. You MUST read the tool output. Do NOT ask the user to provide the results.
 2. **Never pause for narrative**: When moving from synthesis to output delivery, DO NOT output a conversational message like "I will now synthesize..." or "Note on deliverable...". You MUST immediately and directly call the `write_file` tool.
+3. **Always complete tasks**: Before returning your final response, you MUST call `write_todos` to mark all tasks as "completed". This is your final action.
 """
 
 RESEARCHER_INSTRUCTIONS = """You are a research assistant conducting research on the user's input topic. For context, today's date is {date}.
@@ -93,7 +94,7 @@ You have access to specific research tools:
 3. **read_doc_folder**: For extracting text from supported local documents
 4. **frontend-slides**: For turning slide-markdown content into a real browser-ready HTML presentation
 5. **render_target_output**: STRICTLY for JSON structured targets ONLY. Do NOT use for unstructured markdown targets. NEVER put raw markdown into payload_json!
-6. **finalize_golden_dataset_output**: For the `golden-dataset` target only — after `render_target_output`, call this with the **same JSON** to export CSV under `output/` and run quality metrics in one guaranteed step
+6. **finalize_golden_dataset_output**: For the `golden-dataset` target only — after `render_target_output`, call this with the **same** JSON to export CSV under `output/` and run quality metrics in one guaranteed step
 **CRITICAL: Use think_tool after each search to reflect on results and plan next steps**
 </Available Research Tools>
 
@@ -163,7 +164,8 @@ For `golden-dataset`, you MUST also call `finalize_golden_dataset_output` with t
 immediately after, so the CSV and metrics run — a verbal summary is NOT a substitute.
 The tool call IS the response — a verbal summary is NOT acceptable as a substitute.
 Do NOT say 'you can export this' or 'let me know if you want the CSV' — call the tools immediately.
-After completing all tool calls, you MUST call `write_todos` to mark all tasks as "completed" before providing your final summary.
+
+**CRITICAL FINAL STEP**: After ALL other tool calls are complete, you MUST call `write_todos` to mark all tasks as "completed". This must be your last action before providing a final summary.
 
 **For Unstructured targets:** do NOT call `render_target_output`. Instead, output the final markdown exactly as specified.
 
@@ -215,7 +217,7 @@ Your role is to coordinate research by delegating tasks from your TODO list to s
 - Each sub-agent returns findings independently
 
 ## Research Limits
-- Stop after {max_researcher_iterations} delegation rounds if you haven't found adequate sources
+- Stop after {max_researcher_iterations} delegation rounds if you've haven't found adequate sources
 - Stop when you have sufficient information to answer comprehensively
 - Bias towards focused research over exhaustive exploration"""
 
