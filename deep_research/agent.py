@@ -52,7 +52,7 @@ from research_agent.deepagents_compat import (
 patch_deepagents_task_tool_result_extraction()
 
 # Constants
-REPORTS_OUTPUT_FOLDER = "reports"
+REPORTS_OUTPUT_FOLDER = os.environ.get("REPORTS_OUTPUT_FOLDER", "./output")
 
 # Create SSL verification setting - CLI flag takes precedence over env var
 verify_ssl = get_ssl_verify_config()

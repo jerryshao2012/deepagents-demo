@@ -5,17 +5,9 @@ from markdown-style content with dynamic styling and animations.
 """
 
 import html
-import os
 import re
-import subprocess
 from pathlib import Path
-from typing import Annotated, Any
-
-from deepagents.backends.utils import (
-    create_file_data,
-)
-from langchain_core.tools import tool
-from langgraph.prebuilt import InjectedState
+from typing import Any
 
 from research_agent.tools import _get_skill_registry
 
@@ -313,7 +305,15 @@ def _parse_bullets(value: str) -> list[str]:
 
 
 def _parse_sections(presentation_markdown: str) -> list[dict[str, Any]]:
-    pattern = re.compile(r"^#\s*\[Slide\s+\d+]\s*Title:\s*(.+?)\s*$", re.MULTILINE)
+    # Support multiple slide heading formats:
+    # Format 1: # [Slide 1] Title: My Slide
+    # Format 2: ## Slide 1: My Slide
+    # Format 3: # Slide 1 - My Slide
+    # Format 4: # Plain Title (auto-numbered)
+    pattern = re.compile(
+        r"^#{1,2}\s*(?:\[Slide\s+\d+]\s*Title:\s*|Slide\s+\d+[:\-]\s*)?(.+?)\s*$",
+        re.MULTILINE
+    )
     matches = list(pattern.finditer(presentation_markdown))
     if not matches:
         return []

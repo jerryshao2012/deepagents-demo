@@ -8,10 +8,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
+from deepagents.backends.utils import create_file_data
+from dotenv import load_dotenv
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 from tavily import TavilyClient
-from deepagents.backends.utils import create_file_data
 
 from research_agent.skill_registry import SkillRegistry
 from research_agent.skills.golden_dataset.pipeline import (
@@ -19,9 +20,15 @@ from research_agent.skills.golden_dataset.pipeline import (
     export_golden_dataset_csv,
     evaluate_and_report_golden_dataset,
 )
+from research_agent.utils.result_rendering import (  # noqa: F401
+    render_target_output,
+)
+
+# Load environment variables
+load_dotenv()
 
 # Constants
-REPORTS_OUTPUT_FOLDER = "reports"
+REPORTS_OUTPUT_FOLDER = os.environ.get("REPORTS_OUTPUT_FOLDER", "./output")
 
 # --- Skill Registry Singleton ---
 _skill_registry_instance: SkillRegistry | None = None
@@ -214,7 +221,7 @@ def read_skill_supporting_file(skill_id: str, filename: str) -> str:
 
 def write_content_to_output_folder(filename: str, content: str) -> str:
     """Write content to a file in the output folder."""
-    output_subfolder = Path(os.environ.get("OUTPUT_FOLDER") or REPORTS_OUTPUT_FOLDER)
+    output_subfolder = Path(REPORTS_OUTPUT_FOLDER)
     output_subfolder.mkdir(parents=True, exist_ok=True)
     file_path = output_subfolder / filename
     with open(file_path, 'w', encoding='utf-8') as f:
@@ -244,7 +251,7 @@ def finalize_golden_dataset_output(
     except json.JSONDecodeError as e:
         return f"Error: Invalid JSON in payload_json: {e}"
 
-    output_folder = Path(os.environ.get("OUTPUT_FOLDER") or REPORTS_OUTPUT_FOLDER)
+    output_folder = Path(REPORTS_OUTPUT_FOLDER)
     csv_path = export_golden_dataset_csv(payload, output_folder)
 
     agent_start_time = state.get("agent_start_time") if state else None
@@ -288,58 +295,6 @@ def trigger_dataset_evaluation(file_path: str) -> str:
         A confirmation message with the path to the metrics file, or an error message.
     """
     return evaluate_golden_dataset_csv_file(file_path)
-
-
-# --- Target rendering ---
-@tool(parse_docstring=True)
-def render_target_output(
-        payload_json: str,
-        state: Annotated[dict, InjectedState] = None,
-) -> str:
-    """Render and validate a structured JSON payload according to the current target's schema.
-
-    Use this tool when you have compiled enough information and are ready to generate
-    the final output for the user's requested target. This tool will validate your
-    JSON against the target's schema and return the formatted result.
-
-    Args:
-        payload_json: A JSON string containing the data matching the target's schema.
-        state: LangGraph state (injected automatically).
-    """
-    try:
-        payload = json.loads(payload_json)
-    except json.JSONDecodeError as e:
-        return f"Error: payload_json must be a valid JSON string. Parse error: {e}"
-
-    if not state or not state.get("target"):
-        return "Error: No target specified in the agent state."
-
-    target_id = state["target"]
-    registry = _get_skill_registry()
-
-    # Special handling for golden-dataset - it only validates the JSON,
-    # the actual file writing is handled by finalize_golden_dataset_output
-    if target_id == "golden-dataset":
-        # Validate the payload manually (or wait for evaluation step)
-        return "Golden dataset payload validated. Now call `finalize_golden_dataset_output`."
-
-    try:
-        # Render the payload using the target's jinja template
-        rendered_output = registry.render_output(target_id, payload)
-
-        # Write output to file if requested
-        output_folder = Path(os.environ.get("OUTPUT_FOLDER") or REPORTS_OUTPUT_FOLDER)
-        output_folder.mkdir(parents=True, exist_ok=True)
-
-        output_filename = f"{target_id}_output.md"
-        output_path = output_folder / output_filename
-        output_path.write_text(rendered_output, encoding="utf-8")
-
-        normalized_path = _normalize_path_for_filesystem_tools(str(output_path))
-        return f"Successfully generated target output to `{normalized_path}`:\n\n{rendered_output}"
-
-    except Exception as e:
-        return f"Error rendering target output: {e}"
 
 
 # --- Frontend Slides Tools ---
@@ -387,18 +342,18 @@ def frontend_slides(
     slides = _parse_sections(presentation_markdown)
     if not slides:
         return (
-            "Error: No slides were detected. Use headings like "
-            "`# [Slide 1] Title: My Slide` in the presentation_markdown input."
+            "Error: No slides were detected. Use headings like:\n"
+            "- `# [Slide 1] Title: My Slide` (explicit numbering)\n"
+            "- `## Slide 1: My Slide` (alternative format)\n"
+            "- `# My Slide Title` (plain heading, auto-numbered)\n"
+            "Separate slides with `---` on a new line."
         )
 
     # Build HTML using the template engine with dynamic resources
     resolved_title = deck_title or str(slides[0]["title"])
     html_content = _build_html(resolved_title, slides, style_preset, animation_feeling, enable_inline_editing)
 
-    # Save to output folder
-    output_dir = Path(os.environ.get("OUTPUT_FOLDER") or REPORTS_OUTPUT_FOLDER)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
+    # Determine safe filename
     if output_filename:
         safe_name = Path(output_filename).name
         if not safe_name.endswith(".html"):
@@ -406,8 +361,14 @@ def frontend_slides(
     else:
         safe_name = f"{_slugify_filename(resolved_title)}.html"
 
-    output_path = output_dir / safe_name
+    # Save to BOTH output folders: ./output and ./reports
+    output_folder = Path(REPORTS_OUTPUT_FOLDER)
+    output_folder.mkdir(parents=True, exist_ok=True)
+    output_path = output_folder / safe_name
     output_path.write_text(html_content, encoding="utf-8")
+
+    reports_path = output_folder / safe_name
+    reports_path.write_text(html_content, encoding="utf-8")
 
     # Update state if available
     if state is not None:
@@ -424,10 +385,12 @@ def frontend_slides(
             }
             state["files"] = files
 
-    normalized_path = _normalize_path_for_filesystem_tools(str(output_path))
+    normalized_output_path = _normalize_path_for_filesystem_tools(str(output_path))
+    normalized_reports_path = _normalize_path_for_filesystem_tools(str(reports_path))
     return (
-        f"Generated `{style_preset}` HTML presentation with {len(slides)} slide(s) at "
-        f"`{normalized_path}`."
+        f"Generated `{style_preset}` HTML presentation with {len(slides)} slide(s).\n"
+        f"- Saved to output folder: `{normalized_output_path}`\n"
+        f"- Saved to reports folder: `{normalized_reports_path}`"
     )
 
 
