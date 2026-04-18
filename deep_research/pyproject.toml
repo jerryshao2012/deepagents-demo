@@ -32,6 +32,8 @@ dependencies = [
     "pytest>=9.0.2",
     "pandas>=2.0.0",
     "json-repair>=0.59.4",
+    "langgraph-api>=0.8.0",
+    "langgraph>=1.1.8",
 ]
 
 [tool.uv]

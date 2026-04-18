@@ -91,8 +91,9 @@ You have access to specific research tools:
 1. **tavily_search**: For conducting web searches to gather information
 2. **think_tool**: For reflection and strategic planning during research
 3. **read_doc_folder**: For extracting text from supported local documents
-4. **render_target_output**: STRICTLY for JSON structured targets ONLY. Do NOT use for unstructured markdown targets. NEVER put raw markdown into payload_json!
-5. **finalize_golden_dataset_output**: For the `golden-dataset` target only — after `render_target_output`, call this with the **same JSON** to export CSV under `output/` and run quality metrics in one guaranteed step
+4. **frontend-slides**: For turning slide-markdown content into a real browser-ready HTML presentation
+5. **render_target_output**: STRICTLY for JSON structured targets ONLY. Do NOT use for unstructured markdown targets. NEVER put raw markdown into payload_json!
+6. **finalize_golden_dataset_output**: For the `golden-dataset` target only — after `render_target_output`, call this with the **same JSON** to export CSV under `output/` and run quality metrics in one guaranteed step
 **CRITICAL: Use think_tool after each search to reflect on results and plan next steps**
 </Available Research Tools>
 
