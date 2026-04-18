@@ -10,23 +10,23 @@ from dotenv import load_dotenv
 from langchain_core.messages import SystemMessage
 from typing_extensions import TypedDict
 
-from deep_research.model_factory import get_configured_model
-from deep_research.research_agent import (
+from model_factory import get_configured_model
+from research_agent import (
     RESEARCH_WORKFLOW_INSTRUCTIONS,
     RESEARCHER_INSTRUCTIONS,
     SUBAGENT_DELEGATION_INSTRUCTIONS,
 )
-from deep_research.research_agent.cli import (
+from research_agent.cli import (
     build_instruction,
 )
-from deep_research.research_agent.skill_registry import SkillRegistry
-from deep_research.research_agent.skills.frontend_slides.pipeline import (
+from research_agent.skill_registry import SkillRegistry
+from research_agent.skills.frontend_slides.pipeline import (
     frontend_slides,
     frontend_slides_export_pdf,
     frontend_slides_deploy,
     frontend_slides_extract_pptx,
 )
-from deep_research.research_agent.tools import (
+from research_agent.tools import (
     _normalize_path_for_filesystem_tools,
     glob,
     list_available_skills,
@@ -38,17 +38,17 @@ from deep_research.research_agent.tools import (
     tavily_search,
     think_tool,
 )
-from deep_research.research_agent.tools import (
+from research_agent.tools import (
     finalize_golden_dataset_output,
     trigger_dataset_evaluation,
 )
-from deep_research.utils import get_ssl_verify_config, str2bool
+from utils import get_ssl_verify_config, str2bool
 
 # Load environment variables
 load_dotenv()
 
 # Ensure task() returns the subagent's final content even when it is not stored in `.text`.
-from deep_research.research_agent.deepagents_compat import (
+from research_agent.deepagents_compat import (
     patch_deepagents_task_tool_result_extraction,
 )
 

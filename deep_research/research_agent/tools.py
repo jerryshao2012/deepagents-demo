@@ -10,11 +10,11 @@ from typing import Annotated
 from langchain_core.tools import InjectedState, tool
 from tavily import TavilyClient
 
-from deep_research.research_agent.skill_registry import SkillRegistry
-from deep_research.research_agent.skills.frontend_slides.pipeline import (
+from research_agent.skill_registry import SkillRegistry
+from research_agent.skills.frontend_slides.pipeline import (
     frontend_slides,
 )
-from deep_research.research_agent.skills.golden_dataset.pipeline import (
+from research_agent.skills.golden_dataset.pipeline import (
     evaluate_golden_dataset_csv_file,
     export_golden_dataset_csv,
     evaluate_and_report_golden_dataset,

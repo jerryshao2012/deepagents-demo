@@ -13,7 +13,7 @@ from typing import Annotated, Any
 
 from langchain_core.tools import InjectedState, tool
 
-from deep_research.research_agent.tools import _get_skill_registry
+from research_agent.tools import _get_skill_registry
 
 # Constants
 REPORTS_OUTPUT_FOLDER = "reports"
@@ -1182,8 +1182,10 @@ def frontend_slides(
     # Update state if available
     if state is not None:
         try:
-            from deep_research.utils import create_file_data
-                
+            from deepagents.backends.utils import (
+                create_file_data,
+            )
+
             files = state.get("files", {})
             files[f"/{safe_name}"] = create_file_data(html_content)
             state["files"] = files
