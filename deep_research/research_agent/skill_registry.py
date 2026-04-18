@@ -91,7 +91,7 @@ class SkillRegistry:
                 parsed_skill = self._parse_skill_file(skill_file)
                 if parsed_skill:
                     skill_id = skill_path.name
-                    parsed_skill["id"] = skill_id
+                    parsed_skill["skill_id"] = skill_id
                     parsed_skill["path"] = skill_path
                     self._skills[skill_id] = SkillInfo(**parsed_skill)
                     self._load_timestamps[skill_id] = skill_file.stat().st_mtime
@@ -187,7 +187,7 @@ class SkillRegistry:
                 print(f"Hot-reloading skill: {skill_id}")
                 parsed_skill = self._parse_skill_file(skill_file)
                 if parsed_skill:
-                    parsed_skill["id"] = skill_id
+                    parsed_skill["skill_id"] = skill_id
                     parsed_skill["path"] = skill_info.path
                     self._skills[skill_id] = SkillInfo(**parsed_skill)
                     self._load_timestamps[skill_id] = current_mtime
