@@ -57,7 +57,7 @@ def _run_cli(monkeypatch, tmp_path: Path, argv: list[str], fake_agent: FakeAgent
                                     "Explain how persistent memory differs from working context."
                             ),
                             tool_call_id="tool-1",
-                            name="render_target_output",
+                            name="render_skill_output",
                         ),
                         AIMessage(content="I will synthesize later."),
                     ]
@@ -76,7 +76,7 @@ def _run_cli(monkeypatch, tmp_path: Path, argv: list[str], fake_agent: FakeAgent
                                     "Potential Answer: A strong answer would distinguish memory and context."
                             ),
                             tool_call_id="tool-2",
-                            name="render_target_output",
+                            name="render_skill_output",
                         ),
                         AIMessage(content="I will synthesize later."),
                     ]
@@ -95,7 +95,7 @@ def _run_cli(monkeypatch, tmp_path: Path, argv: list[str], fake_agent: FakeAgent
                                     "Content: Repository guidance belongs in project-scoped memory."
                             ),
                             tool_call_id="tool-3",
-                            name="render_target_output",
+                            name="render_skill_output",
                         ),
                         AIMessage(content="I will synthesize later."),
                     ]
@@ -216,7 +216,7 @@ def test_cli_main_retries_with_invoke_when_stream_ends_with_placeholder(
                     "- Project memory stores repository-specific guidance."
                 ),
                 tool_call_id="tool-10",
-                name="render_target_output",
+                name="render_skill_output",
             )
         ]
     }

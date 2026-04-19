@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 
-from research_agent.targets import format_target_catalog, get_target_definition, list_target_ids
+from research_agent.skill_registry import get_skill_registry
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -65,26 +65,26 @@ def build_parser() -> argparse.ArgumentParser:
         help="Disable web search (Tavily) during research",
     )
     parser.add_argument(
-        "--target",
-        choices=["list", *list_target_ids()],
-        help="Optional structured output target. Use '--target list' to see all options.",
+        "--skill",
+        choices=["list", *(get_skill_registry().list_skill_ids())],
+        help="Optional structured output skill. Use '--skill list' to see all options.",
     )
     parser.add_argument("--title", type=str, help="Optional research title for output file")
     return parser
 
 
-def list_targets() -> None:
-    """Print available research targets to console."""
-    catalog = format_target_catalog()
-    print("\nAvailable research targets:")
+def list_skills() -> None:
+    """Print available research skills to console."""
+    catalog = get_skill_registry().format_skill_catalog()
+    print("\nAvailable research skills:")
     print(catalog)
-    print("\nUse --target <id> to select one.")
+    print("\nUse --skill <id> to select one.")
 
 
 def build_instruction(
         subject: str,
         doc_folder: str | None = None,
-        target: str | None = None,
+        skill: str | None = None,
         subject_file: str | None = None,
         no_web: bool = False,
 ) -> str:
@@ -108,31 +108,31 @@ def build_instruction(
             "Use only provided documentation or your internal knowledge."
         )
 
-    if target:
-        definition = get_target_definition(target)
+    if skill:
+        definition = get_skill_registry().get_skill_definition(skill)
         instruction += (
-            f"\n\nThe requested output target is `{target}`."
+            f"\n\nThe requested output skill is `{skill}`."
             f"\nDescription: {definition['description']}"
             f"\nInstructions:\n{definition['instructions']}"
         )
         if definition.get("schema"):
             instruction += (
-                "\nAfter researching, please call `render_target_output` with the selected "
-                "target id and a JSON payload that matches that target schema exactly."
+                "\nAfter researching, please call `render_skill_output` with the selected "
+                "skill id and a JSON payload that matches that skill schema exactly."
             )
         else:
             instruction += (
                 "\nAfter researching, use the `write_file` tool to save your final output directly "
-                "to `/final_report.md` as Markdown text. Do NOT use `render_target_output` since this is an unstructured target. "
+                "to `/final_report.md` as Markdown text. Do NOT use `render_skill_output` since this is an unstructured skill. "
                 "Do NOT just say you will write it; you must actually call the `write_file` tool with the text."
             )
-        if target == "golden-dataset":
+        if skill == "golden-dataset":
             instruction += (
                 "\n\n**Golden dataset delivery — MANDATORY tool-call sequence (zero exceptions):**\n"
                 "After you have read the documents and drafted all items, you MUST execute these "
                 "tool calls in this exact order — do NOT write any description of your plan, do NOT "
                 "ask for confirmation, and do NOT stop after a verbal summary:\n"
-                "  1. Call `render_target_output` with target_id='golden-dataset' and the full JSON payload.\n"
+                "  1. Call `render_skill_output` with skill_id='golden-dataset' and the full JSON payload.\n"
                 "  2. Immediately call `finalize_golden_dataset_output` with the IDENTICAL JSON string. "
                 "This is what writes the CSV to disk — skipping it means no file is saved.\n"
                 "  3. Only after both tool calls succeed, write a short confirmation summary.\n"

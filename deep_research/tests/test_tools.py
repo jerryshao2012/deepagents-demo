@@ -1,20 +1,18 @@
 from pathlib import Path
 
 from research_agent import tools
+from research_agent.skill_registry import get_skill_registry
+from research_agent.tools import (
+    fetch_webpage_content,
+)
 from research_agent.tools import (
     finalize_golden_dataset_output,
     read_doc_folder,
 )
-from research_agent.utils.result_rendering import (
-    render_target_output,
-)
-from research_agent.utils.web_search import (
-    fetch_webpage_content,
-)
 
 
-def test_render_target_output_renders_slides_from_definition() -> None:
-    result = render_target_output.invoke(
+def test_get_skill_definition_renders_slides_from_definition() -> None:
+    result = get_skill_registry().get_skill_definition.invoke(
         {
             "target_id": "study-slides",
             "payload_json": """
@@ -42,8 +40,8 @@ def test_render_target_output_renders_slides_from_definition() -> None:
     assert "### Speaking Notes" in result
 
 
-def test_render_target_output_formats_45_minute_interview_kit() -> None:
-    result = render_target_output.invoke(
+def test_get_skill_definition_formats_45_minute_interview_kit() -> None:
+    result = get_skill_registry().get_skill_definition.invoke(
         {
             "target_id": "interview",
             "payload_json": """
@@ -71,8 +69,8 @@ def test_render_target_output_formats_45_minute_interview_kit() -> None:
     assert "Total planned time: 10 minutes" in result
 
 
-def test_render_target_output_reports_schema_validation_errors() -> None:
-    result = render_target_output.invoke(
+def test_get_skill_definition_reports_schema_validation_errors() -> None:
+    result = get_skill_registry().get_skill_definition.invoke(
         {
             "target_id": "study-slides",
             "payload_json": "{\"topic\": \"AI Agents\", \"slides\": [{\"title\": \"Missing fields\"}]}",
@@ -82,8 +80,8 @@ def test_render_target_output_reports_schema_validation_errors() -> None:
     assert "Schema validation failed" in result
 
 
-def test_render_target_output_accepts_dict_payload_for_study_slides() -> None:
-    result = render_target_output.invoke(
+def test_get_skill_definition_accepts_dict_payload_for_study_slides() -> None:
+    result = get_skill_registry().get_skill_definition.invoke(
         {
             "target_id": "study-slides",
             "payload_json": {
@@ -103,8 +101,8 @@ def test_render_target_output_accepts_dict_payload_for_study_slides() -> None:
     assert "## Slide 1: What Matters" in result
 
 
-def test_render_target_output_normalizes_legacy_study_slides_fields() -> None:
-    result = render_target_output.invoke(
+def test_get_skill_definition_normalizes_legacy_study_slides_fields() -> None:
+    result = get_skill_registry().get_skill_definition.invoke(
         {
             "target_id": "study-slides",
             "payload_json": {
@@ -126,8 +124,8 @@ def test_render_target_output_normalizes_legacy_study_slides_fields() -> None:
     assert "slide_number" not in result
 
 
-def test_render_target_output_rejects_missing_required_fields() -> None:
-    result = render_target_output.invoke(
+def test_get_skill_definition_rejects_missing_required_fields() -> None:
+    result = get_skill_registry().get_skill_definition.invoke(
         {
             "target_id": "interview",
             "payload_json": """
@@ -150,8 +148,8 @@ def test_render_target_output_rejects_missing_required_fields() -> None:
     assert "potential_answer" in result
 
 
-def test_render_target_output_coerces_integer_like_floats() -> None:
-    result = render_target_output.invoke(
+def test_get_skill_definition_coerces_integer_like_floats() -> None:
+    result = get_skill_registry().get_skill_definition.invoke(
         {
             "target_id": "interview",
             "payload_json": """
@@ -175,8 +173,8 @@ def test_render_target_output_coerces_integer_like_floats() -> None:
     assert "Timebox: 10 minutes" in result
 
 
-def test_render_target_output_uses_declarative_render_spec(tmp_path, monkeypatch) -> None:
-    from research_agent import targets
+def test_get_skill_definition_uses_declarative_render_spec(tmp_path, monkeypatch) -> None:
+    from research_agent import skill_registry
 
     skill_dir = tmp_path / "skills" / "demo"
     skill_dir.mkdir(parents=True)
@@ -191,7 +189,7 @@ render_template: markdown_blocks
 
 ## Instructions
 
-Return the final result by calling `render_target_output`.
+Return the final result by calling `render_skill_output`.
 
 ## Schema
 
@@ -232,25 +230,23 @@ Return the final result by calling `render_target_output`.
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(targets, "SKILLS_DIR", tmp_path / "skills")
-    targets._load_all_targets.cache_clear()
-    try:
-        result = render_target_output.invoke(
+    registry = skill_registry.SkillRegistry(tmp_path / "skills")
+    monkeypatch.setattr(skill_registry, "_get_global_registry", lambda: registry)
+
+    result = get_skill_registry().get_skill_definition.invoke(
+        {
+            "target_id": "demo",
+            "payload_json": """
             {
-                "target_id": "demo",
-                "payload_json": """
-                {
-                  "topic": "Agenda",
-                  "items": [
-                    {"name": "Intro", "minutes": 5},
-                    {"name": "Deep Dive", "minutes": 15}
-                  ]
-                }
-                """
+              "topic": "Agenda",
+              "items": [
+                {"name": "Intro", "minutes": 5},
+                {"name": "Deep Dive", "minutes": 15}
+              ]
             }
-        )
-    finally:
-        targets._load_all_targets.cache_clear()
+            """
+        }
+    )
 
     assert "# Demo: Agenda" in result
     assert "## Item 1: Intro" in result
@@ -258,8 +254,8 @@ Return the final result by calling `render_target_output`.
     assert "Total: 20" in result
 
 
-def test_render_target_output_reports_unknown_target() -> None:
-    result = render_target_output.invoke(
+def test_get_skill_definition_reports_unknown_target() -> None:
+    result = get_skill_registry().get_skill_definition.invoke(
         {
             "target_id": "does-not-exist",
             "payload_json": "{}",
@@ -269,8 +265,8 @@ def test_render_target_output_reports_unknown_target() -> None:
     assert "Unknown target" in result
 
 
-def test_render_target_output_renders_golden_dataset_without_metric_fields() -> None:
-    result = render_target_output.invoke(
+def test_get_skill_definition_renders_golden_dataset_without_metric_fields() -> None:
+    result = get_skill_registry().get_skill_definition.invoke(
         {
             "target_id": "golden-dataset",
             "payload_json": """

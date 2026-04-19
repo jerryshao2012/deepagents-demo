@@ -1,6 +1,6 @@
-from research_agent import targets
+from research_agent import skill_registry
 from research_agent.cli import build_parser
-from research_agent.targets import get_target_definition
+from research_agent.skill_registry import get_skill_registry
 
 
 def test_parser_accepts_doc_folder_and_target() -> None:
@@ -15,8 +15,8 @@ def test_parser_accepts_doc_folder_and_target() -> None:
     assert args.target == "study-slides"
 
 
-def test_target_definition_is_loaded_from_skill() -> None:
-    definition = get_target_definition("study-slides")
+def test_skill_definition_is_loaded_from_skill() -> None:
+    definition = get_skill_registry().get_skill_definition("study-slides")
 
     assert definition["id"] == "study-slides"
     assert "schema" in definition
@@ -68,12 +68,11 @@ Here is an example payload:
         encoding="utf-8",
     )
 
-    monkeypatch.setattr(targets, "SKILLS_DIR", tmp_path / "skills")
-    targets._load_all_targets.cache_clear()
-    try:
-        definition = targets.get_target_definition("demo")
-    finally:
-        targets._load_all_targets.cache_clear()
+    # We need to re-initialize the registry to read the new skill
+    registry = skill_registry.SkillRegistry(tmp_path / "skills")
+    monkeypatch.setattr(skill_registry, "get_skill_registry", lambda: registry)
+
+    definition = skill_registry.get_skill_definition("demo")
 
     assert definition["schema"]["required"] == ["topic"]
     assert definition["render"]["spec"][0]["type"] == "heading"

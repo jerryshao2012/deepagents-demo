@@ -30,7 +30,7 @@ def test_select_output_content_prefers_rendered_structured_output_over_last_ai_m
             ToolMessage(
                 content="# Presentation: Claude Code Memory\n\n## Slide 1: Basics\n",
                 tool_call_id="tool-1",
-                name="render_target_output",
+                name="render_skill_output",
             ),
             AIMessage(
                 content="The research task has been delegated and I am awaiting the results."
@@ -47,7 +47,7 @@ def test_select_output_content_ignores_failed_render_and_uses_task_output_for_st
             ToolMessage(
                 content="Invalid JSON payload: Expecting ',' delimiter",
                 tool_call_id="tool-1",
-                name="render_target_output",
+                name="render_skill_output",
             ),
             ToolMessage(
                 content="# Presentation: Claude Code Memory\n\n## Slide 1: Basics\n",

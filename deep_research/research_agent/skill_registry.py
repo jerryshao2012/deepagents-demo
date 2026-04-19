@@ -18,6 +18,8 @@ from typing import Any
 
 import yaml
 
+from research_agent.utils.json_utils import robust_json_loads
+
 
 class SkillInfo:
     """Information about a single skill."""
@@ -56,6 +58,13 @@ class SkillRegistry:
     Supports hot-reloading by checking file modification times on access.
     """
 
+    _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
+    _JSON_BLOCK_RE = re.compile(r"```json\n(.*?)\n```", re.DOTALL)
+    _SCHEMA_SECTION_RE = re.compile(r"^## Schema\s*$", re.MULTILINE)
+    _RENDER_SPEC_SECTION_RE = re.compile(r"^## Render Spec\s*$", re.MULTILINE)
+    _QUALITY_GUIDELINES_SECTION_RE = re.compile(r"^## Quality Guidelines\s*$", re.MULTILINE)
+    SUPPORTED_RENDER_TEMPLATES = {"markdown_blocks"}
+
     def __init__(self, skills_dir: str | Path | None = None):
         """Initialize the skill registry.
 
@@ -70,6 +79,7 @@ class SkillRegistry:
 
         self._skills: dict[str, SkillInfo] = {}
         self._load_timestamps: dict[str, float] = {}
+        self._skill_definitions: dict[str, dict[str, Any]] = {}
         self._load_all_skills()
 
     def _load_all_skills(self) -> None:
@@ -94,7 +104,10 @@ class SkillRegistry:
                     skill_id = parsed_skill.get("name", skill_path.name)
                     parsed_skill["skill_id"] = skill_id
                     parsed_skill["path"] = skill_path
-                    self._skills[skill_id] = SkillInfo(**parsed_skill)
+                    self._skills[skill_id] = SkillInfo(
+                        **{k: v for k, v in parsed_skill.items() if k not in ["skill_definition"]})
+                    if "skill_definition" in parsed_skill:
+                        self._skill_definitions.update(parsed_skill["skill_definition"])
                     self._load_timestamps[skill_id] = skill_file.stat().st_mtime
             except Exception as e:
                 print(f"Warning: Failed to load skill from {skill_file}: {e}")
@@ -111,23 +124,18 @@ class SkillRegistry:
         """
         content = file_path.read_text(encoding="utf-8")
 
-        # Check for YAML frontmatter (between --- boundaries)
-        if not content.startswith("---"):
-            print(f"Warning: {file_path} does not start with YAML frontmatter")
+        match = self._FRONTMATTER_RE.match(content)
+        if not match:
+            print(f"Warning: {file_path} is missing YAML frontmatter.")
             return None
 
-        # Find the end of frontmatter
-        end_marker = content.find("\n---", 3)
-        if end_marker == -1:
-            print(f"Warning: {file_path} has unclosed YAML frontmatter")
-            return None
-
-        frontmatter_text = content[3:end_marker]
         try:
-            frontmatter = yaml.safe_load(frontmatter_text)
+            frontmatter = yaml.safe_load(match.group(1)) or {}
         except yaml.YAMLError as e:
             print(f"Warning: Failed to parse YAML in {file_path}: {e}")
             return None
+
+        body = match.group(2)
 
         # Extract required fields
         name = frontmatter.get("name")
@@ -141,15 +149,38 @@ class SkillRegistry:
         keywords = frontmatter.get("keywords", [])
         metadata = {k: v for k, v in frontmatter.items() if k not in ["name", "description", "keywords"]}
 
-        # Get the body (instructions) after frontmatter
-        body = content[end_marker + 4:].strip()
+        instructions, schema = self._extract_schema_block(body, file_path)
+        render_spec = self._extract_render_spec(body, file_path)
+        render_template = frontmatter.get("render_template")
+        if render_template and render_template not in self.SUPPORTED_RENDER_TEMPLATES:
+            supported = ", ".join(sorted(self.SUPPORTED_RENDER_TEMPLATES))
+            raise ValueError(
+                f"Skill file {file_path} uses unsupported render_template '{render_template}'. "
+                f"Supported templates: {supported}."
+            )
+
+        skill_id = name or file_path.parent.name
+        skill_definition = {
+            skill_id: {
+                "id": skill_id,
+                "title": frontmatter.get("title", skill_id.replace("-", " ").title()),
+                "description": description.strip(),
+                "instructions": instructions,
+                "quality_guidelines": self._extract_quality_guidelines(body),
+                "schema": schema,
+                "render": {"template": render_template, "spec": render_spec} if render_spec else None,
+                "defaults": frontmatter.get("defaults", {}),
+                "skill_path": str(file_path),
+            }
+        }
 
         return {
             "name": name,
             "description": description,
-            "instructions": body,
+            "instructions": body.strip(),
             "keywords": keywords,
             "metadata": metadata,
+            "skill_definition": skill_definition
         }
 
     def get_all_summaries(self) -> list[dict[str, Any]]:
@@ -190,7 +221,10 @@ class SkillRegistry:
                 if parsed_skill:
                     parsed_skill["skill_id"] = skill_id
                     parsed_skill["path"] = skill_info.path
-                    self._skills[skill_id] = SkillInfo(**parsed_skill)
+                    self._skills[skill_id] = SkillInfo(
+                        **{k: v for k, v in parsed_skill.items() if k not in ["skill_definition"]})
+                    if "skill_definition" in parsed_skill:
+                        self._skill_definitions.update(parsed_skill["skill_definition"])
                     self._load_timestamps[skill_id] = current_mtime
                     return self._skills[skill_id].instructions
                 else:
@@ -281,6 +315,7 @@ class SkillRegistry:
         """Force reload all skills from disk."""
         self._skills.clear()
         self._load_timestamps.clear()
+        self._skill_definitions.clear()
         self._load_all_skills()
         print(f"Reloaded {len(self._skills)} skills from {self.skills_dir}")
 
@@ -296,3 +331,100 @@ class SkillRegistry:
 
     def __repr__(self) -> str:
         return f"SkillRegistry(num_skills={self.num_skills}, dir={self.skills_dir})"
+
+    def _extract_schema_block(self, body: str, path: Path) -> tuple[str, dict[str, Any] | None]:
+        schema_heading = self._SCHEMA_SECTION_RE.search(body)
+        if not schema_heading:
+            return body.strip(), None
+
+        schema_body = body[schema_heading.end():]
+        json_match = self._JSON_BLOCK_RE.search(schema_body)
+        if not json_match:
+            raise ValueError(f"Skill file {path} is missing a JSON schema block in `## Schema`.")
+
+        schema = robust_json_loads(json_match.group(1))
+        instructions = body[:schema_heading.start()].strip()
+        return instructions, schema
+
+    def _extract_render_spec(self, body: str, path: Path) -> list[dict[str, Any]] | None:
+        render_heading = self._RENDER_SPEC_SECTION_RE.search(body)
+        if not render_heading:
+            return None
+
+        render_body = body[render_heading.end():]
+        json_match = self._JSON_BLOCK_RE.search(render_body)
+        if not json_match:
+            raise ValueError(
+                f"Skill file {path} is missing a JSON render spec block in `## Render Spec`."
+            )
+
+        render_spec = robust_json_loads(json_match.group(1))
+        if not isinstance(render_spec, list):
+            raise ValueError(f"Skill file {path} render spec must be a JSON array.")
+        return render_spec
+
+    def _extract_quality_guidelines(self, body: str) -> str:
+        """Extract the raw Markdown text of the ## Quality Guidelines section, or empty string."""
+        guidelines_heading = self._QUALITY_GUIDELINES_SECTION_RE.search(body)
+        if not guidelines_heading:
+            return ""
+        # Grab everything from after the heading to the next ## section (or end of file)
+        start = guidelines_heading.end()
+        next_section = re.search(r"^## ", body[start:], re.MULTILINE)
+        end = (start + next_section.start()) if next_section else len(body)
+        return body[start:end].strip()
+
+    def list_skill_ids(self) -> list[str]:
+        """List available skill definition ids for structured output."""
+        return sorted(self._skill_definitions.keys())
+
+    def get_skill_definition(self, skill_id: str) -> dict[str, Any]:
+        """Get one skill definition by id."""
+        registry = get_skill_registry()
+        try:
+            return registry._skill_definitions[skill_id]
+        except KeyError as exc:
+            available = ", ".join(self.list_skill_ids()) or "(none)"
+            raise ValueError(
+                f"Unknown skill '{skill_id}'. Available skills: {available}."
+            ) from exc
+
+    def format_skill_catalog(self) -> str:
+        """Format a short skill catalog for prompt text."""
+        lines = []
+        for skill_id in self.list_skill_ids():
+            definition = self.get_skill_definition(skill_id)
+            has_schema = bool(definition.get("schema"))
+            skill_type = "Structured JSON (Requires render_skill_output tool)" if has_schema else "Unstructured Markdown Document"
+            lines.append(
+                f"- `{skill_id}` [{skill_type}]: {definition['title']} — {definition['description']}"
+            )
+        return "\n".join(lines)
+
+    def format_skill_quality_guidelines(self) -> str:
+        """Aggregate Quality Guidelines from all skill SKILL.md files into a prompt block.
+
+        Only includes skills that have a ## Quality Guidelines section. Each skill's
+        guidelines are prefaced with the skill name so the LLM knows which skill they apply to.
+        """
+        blocks: list[str] = []
+        for skill_id in self.list_skill_ids():
+            definition = self.get_skill_definition(skill_id)
+            guidelines = definition.get("quality_guidelines", "").strip()
+            if guidelines:
+                blocks.append(f"### `{skill_id}` Quality Guidelines\n\n{guidelines}")
+        if not blocks:
+            return ""
+        return "\n\n".join(blocks)
+
+
+# --- Skill Registry Singleton ---
+_skill_registry_instance: SkillRegistry | None = None
+
+
+def get_skill_registry() -> SkillRegistry:
+    """Get or create the skill registry instance."""
+    global _skill_registry_instance
+    if _skill_registry_instance is None:
+        _skill_registry_instance: SkillRegistry = SkillRegistry()
+    return _skill_registry_instance

@@ -40,7 +40,7 @@ Requirements:
 - For the six interview questions, follow_up must probe depth (reasoning, tradeoffs, evidence, and practical application).
 - Keep every question grounded in the provided materials; do not invent unsupported claims.
 - If grounding is weak for a question, re-scope the question to match available evidence.
-- Return the final result by calling `render_target_output` with JSON that strictly matches the schema below. 
+- Return the final result by calling `render_skill_output` with JSON that strictly matches the schema below. 
 
 ## Schema
 

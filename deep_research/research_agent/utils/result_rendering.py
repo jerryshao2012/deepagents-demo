@@ -4,7 +4,7 @@ import re
 
 import jsonschema
 
-from research_agent.targets import get_target_definition
+from research_agent.skill_registry import get_skill_registry
 from research_agent.utils.json_utils import robust_json_loads
 
 
@@ -109,9 +109,9 @@ def _render_blocks(spec: list[dict[str, object]], context: dict[str, object]) ->
     return output
 
 
-def _fill_defaults(target_id: str, payload: dict) -> dict:
+def _fill_defaults(skill_id: str, payload: dict) -> dict:
     """Supply sensible default values for optional metadata fields before schema validation."""
-    definition = get_target_definition(target_id)
+    definition = get_skill_registry().get_skill_definition(skill_id)
     defaults = definition.get("defaults", [])
     if not isinstance(defaults, list):
         return payload
@@ -182,8 +182,8 @@ def _render_payload(template: str, payload, render_spec: list[dict[str, object]]
     raise ValueError(f"Unsupported render template: {template}")
 
 
-def _normalize_legacy_target_payload(target_id: str, payload: dict) -> dict:
-    if target_id != "study-slides":
+def _normalize_legacy_skill_payload(skill_id: str, payload: dict) -> dict:
+    if skill_id != "study-slides":
         return payload
     slides = payload.get("slides")
     if not isinstance(slides, list):
@@ -209,16 +209,16 @@ def _normalize_legacy_target_payload(target_id: str, payload: dict) -> dict:
 
 
 def _prepare_validated_payload(
-        target_id: str, payload_json: str | dict
+        skill_id: str, payload_json: str | dict
 ) -> tuple[dict | None, dict | None, str | None]:
     try:
-        definition = get_target_definition(target_id)
+        definition = get_skill_registry().get_skill_definition(skill_id)
     except ValueError as exc:
         return None, None, str(exc)
 
     if not definition.get("schema"):
         return None, None, (
-            f"ERROR: Target '{target_id}' is an unstructured target. Do NOT use `render_target_output`! Use the `write_file` tool to save your final output directly "
+            f"ERROR: Skill '{skill_id}' is an unstructured skill. Do NOT use `render_skill_output`! Use the `write_file` tool to save your final output directly "
             f"to `/final_report.md` as Markdown text. Do NOT just say you will write it; you must actually call the `write_file` tool with both the file_path and the text.")
 
     if isinstance(payload_json, dict):
@@ -229,8 +229,8 @@ def _prepare_validated_payload(
         except ValueError as exc:
             return None, None, f"Invalid JSON payload: {exc}"
 
-    payload = _normalize_legacy_target_payload(target_id, payload)
-    payload = _fill_defaults(target_id, payload)
+    payload = _normalize_legacy_skill_payload(skill_id, payload)
+    payload = _fill_defaults(skill_id, payload)
     payload = _coerce_integers(payload, definition["schema"])
 
     # Ensure payload is a dict after coercion
@@ -240,30 +240,30 @@ def _prepare_validated_payload(
     try:
         jsonschema.validate(instance=payload, schema=definition["schema"])
     except jsonschema.ValidationError as exc:
-        return None, None, f"Schema validation failed for target '{target_id}': {exc.message}"
+        return None, None, f"Schema validation failed for skill '{skill_id}': {exc.message}"
 
     return definition, payload, None
 
 
-def render_target_output_impl(
-        target_id: str,
+def render_skill_output_impl(
+        skill_id: str,
         payload_json: str | dict,
 ) -> str:
-    """Render structured target output using a reusable target definition.
+    """Render structured skill output using a reusable skill definition.
 
-    Use this tool ONLY for structured output targets (targets with a JSON schema).
-    DO NOT use this tool for 'Unstructured Markdown Document' targets.
-    Provide the target id and a JSON payload that matches the selected target schema exactly.
+    Use this tool ONLY for structured output skills (skills with a JSON schema).
+    DO NOT use this tool for 'Unstructured Markdown Document' skills.
+    Provide the skill id and a JSON payload that matches the selected skill schema exactly.
     The payload may be either a JSON object string or a dict-like JSON object.
     NEVER put raw markdown into payload_json.
 
     Args:
-        target_id: The target definition id to use for validation and rendering.
-        payload_json: A JSON object string or dict matching the target schema.
+        skill_id: The skill definition id to use for validation and rendering.
+        payload_json: A JSON object string or dict matching the skill schema.
 
     Returns:
         Rendered markdown output or a validation error message.
     """
-    definition, payload, err = _prepare_validated_payload(target_id, payload_json)
+    definition, payload, err = _prepare_validated_payload(skill_id, payload_json)
     if err: return err
     return _render_payload(definition["render"]["template"], payload, definition["render"]["spec"])

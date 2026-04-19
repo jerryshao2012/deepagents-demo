@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from research_agent.tools import _get_skill_registry
+from research_agent.skill_registry import get_skill_registry
 
 # Constants
 REPORTS_OUTPUT_FOLDER = "reports"
@@ -29,7 +29,7 @@ def _load_style_presets() -> dict[str, dict[str, str]]:
     This dynamically reads and parses the STYLE_PRESETS.md file to extract
     font and color configurations, allowing easy customization without code changes.
     """
-    registry = _get_skill_registry()
+    registry = get_skill_registry()
     presets_md = registry.read_supporting_file("frontend_slides", "STYLE_PRESETS.md")
 
     if not presets_md:
@@ -264,7 +264,7 @@ _STYLE_PRESETS = _load_style_presets()
 
 def _load_viewport_css() -> str:
     """Load viewport CSS using the skill registry for dynamic access."""
-    registry = _get_skill_registry()
+    registry = get_skill_registry()
     content = registry.read_supporting_file("frontend_slides", "viewport-base.css")
     if content:
         return content

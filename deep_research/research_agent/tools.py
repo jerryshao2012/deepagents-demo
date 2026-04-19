@@ -13,7 +13,7 @@ from langchain_core.tools import InjectedToolArg
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
-from research_agent.skill_registry import SkillRegistry
+from research_agent.skill_registry import get_skill_registry
 from research_agent.skills.golden_dataset.pipeline import (
     evaluate_golden_dataset_csv_file,
     export_golden_dataset_csv,
@@ -26,7 +26,7 @@ from research_agent.utils.knowledge_filesystem import (
     read_file_impl,
     read_doc_folder_impl,
 )
-from research_agent.utils.result_rendering import render_target_output_impl
+from research_agent.utils.result_rendering import render_skill_output_impl
 from research_agent.utils.web_search import (
     fetch_webpage_content_impl,
     tavily_search_impl
@@ -37,18 +37,6 @@ load_dotenv()
 
 # Constants
 REPORTS_OUTPUT_FOLDER = os.environ.get("REPORTS_OUTPUT_FOLDER", "./output")
-
-# --- Skill Registry Singleton ---
-_skill_registry_instance: SkillRegistry | None = None
-
-
-def _get_skill_registry() -> SkillRegistry:
-    """Get or create the skill registry instance."""
-    global _skill_registry_instance
-    if _skill_registry_instance is None:
-        skills_dir = Path(__file__).parent / "skills"
-        _skill_registry_instance: SkillRegistry = SkillRegistry(skills_dir)
-    return _skill_registry_instance
 
 
 # --- Web Search Tools ---
@@ -210,7 +198,7 @@ def think_tool(reflection: str) -> str:
 @tool
 def list_available_skills() -> str:
     """List all available skills with their descriptions."""
-    registry = _get_skill_registry()
+    registry = get_skill_registry()
     summaries = registry.get_all_summaries()
 
     if not summaries:
@@ -234,7 +222,7 @@ def read_skill_supporting_file(skill_id: str, filename: str) -> str:
         skill_id: The skill identifier (e.g., 'frontend-slides', 'golden-dataset')
         filename: The name of the supporting file to read.
     """
-    registry = _get_skill_registry()
+    registry = get_skill_registry()
     content = registry.read_supporting_file(skill_id, filename)
 
     if content is None:
@@ -253,26 +241,26 @@ def read_skill_supporting_file(skill_id: str, filename: str) -> str:
 # --- Result Rendering Tools ---
 
 @tool(parse_docstring=True)
-def render_target_output(
-        target_id: str,
+def render_skill_output(
+        skill_id: str,
         payload_json: str | dict,
 ) -> str:
-    """Render structured target output using a reusable target definition.
+    """Render structured skill output using a reusable skill definition.
 
-    Use this tool ONLY for structured output targets (targets with a JSON schema).
-    DO NOT use this tool for 'Unstructured Markdown Document' targets.
-    Provide the target id and a JSON payload that matches the selected target schema exactly.
+    Use this tool ONLY for structured output skills (skills with a JSON schema).
+    DO NOT use this tool for 'Unstructured Markdown Document' skills.
+    Provide the skill id and a JSON payload that matches the selected skill schema exactly.
     The payload may be either a JSON object string or a dict-like JSON object.
     NEVER put raw markdown into payload_json.
 
     Args:
-        target_id: The target definition id to use for validation and rendering.
-        payload_json: A JSON object string or dict matching the target schema.
+        skill_id: The skill definition id to use for validation and rendering.
+        payload_json: A JSON object string or dict matching the skill schema.
 
     Returns:
         Rendered markdown output or a validation error message.
     """
-    return render_target_output_impl(target_id, payload_json)
+    return render_skill_output_impl(skill_id, payload_json)
 
 
 # --- Golden Dataset Tools ---
@@ -294,7 +282,7 @@ def finalize_golden_dataset_output(
 ) -> str:
     """Export a validated golden-dataset JSON payload to CSV and run quality metrics.
 
-    For the ``golden-dataset`` target, call this after ``render_target_output`` with the
+    For the ``golden-dataset`` skill, call this after ``render_skill_output`` with the
     same ``payload_json`` to get the final CSV and quality report.
 
     Args:

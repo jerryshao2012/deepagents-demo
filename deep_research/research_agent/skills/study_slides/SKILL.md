@@ -25,7 +25,7 @@ Create concise Markdown presentation content for quick learning.
 - Use concise bullets.
 - Include speaking notes for each slide.
 - Ground the content in the available documents and research findings.
-- Return the final result by calling `render_target_output` with JSON matching the schema below.
+- Return the final result by calling `render_skill_output` with JSON matching the schema below.
 
 ## Schema
 

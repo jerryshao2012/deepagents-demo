@@ -1,5 +1,5 @@
 from research_agent.cli import build_parser
-from research_agent.targets import get_target_definition, list_target_ids
+from research_agent.skill_registry import get_skill_registry
 
 ALL_SKILL_TARGET_IDS = {
     "autoresearch-universal",
@@ -20,7 +20,7 @@ UNSTRUCTURED_TARGET_IDS = ALL_SKILL_TARGET_IDS - STRUCTURED_TARGET_IDS
 
 
 def test_all_skill_targets_are_discoverable() -> None:
-    assert set(list_target_ids()) == ALL_SKILL_TARGET_IDS
+    assert set(get_skill_registry().list_skill_ids()) == ALL_SKILL_TARGET_IDS
 
 
 def test_parser_exposes_all_skill_targets() -> None:
@@ -31,18 +31,18 @@ def test_parser_exposes_all_skill_targets() -> None:
 
 def test_structured_and_unstructured_skill_classification() -> None:
     for target_id in STRUCTURED_TARGET_IDS:
-        definition = get_target_definition(target_id)
+        definition = get_skill_registry().get_skill_definition(target_id)
         assert definition["schema"] is not None
         assert definition["render"] is not None
 
     for target_id in UNSTRUCTURED_TARGET_IDS:
-        definition = get_target_definition(target_id)
+        definition = get_skill_registry().get_skill_definition(target_id)
         assert definition["schema"] is None
         assert definition["render"] is None
 
 
 def test_study_slides_skill_contract_mentions_slide_output_requirements() -> None:
-    definition = get_target_definition("study-slides")
+    definition = get_skill_registry().get_skill_definition("study-slides")
     instructions = definition["instructions"]
     guidelines = definition["quality_guidelines"]
 
@@ -53,7 +53,7 @@ def test_study_slides_skill_contract_mentions_slide_output_requirements() -> Non
 
 
 def test_interview_skill_contract_mentions_45_minute_structure() -> None:
-    definition = get_target_definition("interview")
+    definition = get_skill_registry().get_skill_definition("interview")
     instructions = definition["instructions"]
     guidelines = definition["quality_guidelines"]
 
@@ -64,19 +64,19 @@ def test_interview_skill_contract_mentions_45_minute_structure() -> None:
 
 
 def test_golden_dataset_skill_contract_mentions_required_export_sequence() -> None:
-    definition = get_target_definition("golden-dataset")
+    definition = get_skill_registry().get_skill_definition("golden-dataset")
     instructions = definition["instructions"]
     guidelines = definition["quality_guidelines"]
 
     assert "COMPLETION SEQUENCE" in instructions
-    assert "Call `render_target_output`" in instructions
+    assert "Call `get_skill_definition`" in instructions
     assert "Call `finalize_golden_dataset_output`" in instructions
     assert "Item count" in guidelines
     assert "Metric readiness" in guidelines
 
 
 def test_code_generator_skill_contract_mentions_code_block_output() -> None:
-    definition = get_target_definition("code-generator")
+    definition = get_skill_registry().get_skill_definition("code-generator")
     body = definition["instructions"] + "\n" + definition["quality_guidelines"]
 
     assert "markdown code block" in body.lower() or "fenced code blocks" in body.lower()
@@ -85,7 +85,7 @@ def test_code_generator_skill_contract_mentions_code_block_output() -> None:
 
 
 def test_interview_coach_pro_skill_contract_mentions_star_answers_and_markdown_table() -> None:
-    definition = get_target_definition("interview-coach-pro")
+    definition = get_skill_registry().get_skill_definition("interview-coach-pro")
     instructions = definition["instructions"]
 
     assert "markdown table" in instructions.lower()
@@ -95,7 +95,7 @@ def test_interview_coach_pro_skill_contract_mentions_star_answers_and_markdown_t
 
 
 def test_autoresearch_universal_skill_contract_mentions_plan_mode_and_phases() -> None:
-    definition = get_target_definition("autoresearch-universal")
+    definition = get_skill_registry().get_skill_definition("autoresearch-universal")
     instructions = definition["instructions"]
 
     assert "switch to Plan mode" in instructions

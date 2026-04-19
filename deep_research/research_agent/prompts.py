@@ -1,6 +1,6 @@
 """Prompt templates and tool descriptions for the research deepagent."""
 
-from research_agent.targets import format_target_catalog, format_target_quality_guidelines
+from research_agent.skill_registry import get_skill_registry
 
 RESEARCH_WORKFLOW_INSTRUCTIONS = """# Research Workflow
 
@@ -12,13 +12,13 @@ Follow this workflow for all research requests:
 4. **Synthesize**: Review all sub-agent findings and consolidate citations (each unique URL gets one number across all findings)
 5. **Deliver Output** — choose based on the request type:
    - **Standard research** → Use the `write_file` tool to write a comprehensive final report to `/final_report.md` (see Report Writing Guidelines below)
-   - **Structured output target (e.g. `golden-dataset`)** → You MUST call the required tools **right now** in this order:
-      1. Call `render_target_output` with the target id and the full JSON payload.
+   - **Structured output skill (e.g. `golden-dataset`)** → You MUST call the required tools **right now** in this order:
+      1. Call `render_skill_output` with the skill id and the full JSON payload.
       2. For `golden-dataset` only: immediately call `finalize_golden_dataset_output` with the **same** JSON. This exports the CSV and runs metrics.
       3. Call `write_todos` to mark ALL todos as "completed".
       4. Only after all three steps succeed, write a brief confirmation summary.
-      **Do NOT write to `/final_report.md` for structured targets. The tool calls ARE the deliverable — a verbal summary or a promise to call the tools later is completely unacceptable.**
-   - **Unstructured target (e.g. `interview-coach-pro`)** → Use the `write_file` tool to write the specialized markdown content directly to `/final_report.md`. Do NOT call `render_target_output`.
+      **Do NOT write to `/final_report.md` for structured skills. The tool calls ARE the deliverable — a verbal summary or a promise to call the tools later is completely unacceptable.**
+   - **Unstructured skill (e.g. `interview-coach-pro`)** → Use the `write_file` tool to write the specialized markdown content directly to `/final_report.md`. Do NOT call `render_skill_output`.
 6. **Verify**: Read `/research_request.md` and confirm you've addressed all aspects with proper citations and structure
 
 ## Research Planning Guidelines
@@ -93,19 +93,19 @@ You have access to specific research tools:
 2. **think_tool**: For reflection and strategic planning during research
 3. **read_doc_folder**: For extracting text from supported local documents
 4. **frontend-slides**: For turning slide-markdown content into a real browser-ready HTML presentation
-5. **render_target_output**: STRICTLY for JSON structured targets ONLY. Do NOT use for unstructured markdown targets. NEVER put raw markdown into payload_json!
-6. **finalize_golden_dataset_output**: For the `golden-dataset` target only — after `render_target_output`, call this with the **same** JSON to export CSV under `output/` and run quality metrics in one guaranteed step
+5. **render_skill_output**: STRICTLY for JSON structured skills ONLY. Do NOT use for unstructured markdown skills. NEVER put raw markdown into payload_json!
+6. **finalize_golden_dataset_output**: For the `golden-dataset` skill only — after `render_skill_output`, call this with the **same** JSON to export CSV under `output/` and run quality metrics in one guaranteed step
 **CRITICAL: Use think_tool after each search to reflect on results and plan next steps**
 </Available Research Tools>
 
-<Structured Output Targets>
-Available target ids:
-{target_catalog}
-</Structured Output Targets>
+<Structured Output Skills>
+Available skill ids:
+{skill_catalog}
+</Structured Output Skills>
 
-<Target Quality Guidelines>
-{target_quality_guidelines}
-</Target Quality Guidelines>
+<Skill Quality Guidelines>
+{skill_quality_guidelines}
+</Skill Quality Guidelines>
 
 <Instructions>
 Think like a human researcher with limited time. Follow these steps:
@@ -129,7 +129,7 @@ Think like a human researcher with limited time. Follow these steps:
 - Your last 2 searches returned similar information
 
 **NEVER announce — always act immediately**:
-If you intend to call `render_target_output` or `finalize_golden_dataset_output`, call them **right now** as your next tool use — do NOT write any message like "I will now synthesize...", "Next, I will...", or "Please stand by...". Those phrases without an accompanying tool call are a failure. The only acceptable completion for a `golden-dataset` task is: `render_target_output` tool call → `finalize_golden_dataset_output` tool call → `write_todos` (all completed) → brief confirmation text.
+If you intend to call `render_skill_output` or `finalize_golden_dataset_output`, call them **right now** as your next tool use — do NOT write any message like "I will now synthesize...", "Next, I will...", or "Please stand by...". Those phrases without an accompanying tool call are a failure. The only acceptable completion for a `golden-dataset` task is: `render_skill_output` tool call → `finalize_golden_dataset_output` tool call → `write_todos` (all completed) → brief confirmation text.
 </Hard Limits>
 
 <Show Your Thinking>
@@ -158,8 +158,8 @@ Context engineering is a critical technique for AI agents [1]. Studies show that
 [2] AI Performance Study: https://example.com/study
 ```
 
-**MANDATORY for structured targets: you MUST call `render_target_output`** with the chosen
-target id and a JSON payload that matches that target schema exactly.
+**MANDATORY for structured skills: you MUST call `render_skill_output`** with the chosen
+skill id and a JSON payload that matches that skill schema exactly.
 For `golden-dataset`, you MUST also call `finalize_golden_dataset_output` with the same JSON
 immediately after, so the CSV and metrics run — a verbal summary is NOT a substitute.
 The tool call IS the response — a verbal summary is NOT acceptable as a substitute.
@@ -167,14 +167,14 @@ Do NOT say 'you can export this' or 'let me know if you want the CSV' — call t
 
 **CRITICAL FINAL STEP**: After ALL other tool calls are complete, you MUST call `write_todos` to mark all tasks as "completed". This must be your last action before providing a final summary.
 
-**For Unstructured targets:** do NOT call `render_target_output`. Instead, output the final markdown exactly as specified.
+**For Unstructured Skills:** do NOT call `render_skill_output`. Instead, output the final markdown exactly as specified.
 
-**CRITICAL — Structured Targets: complete fully in one pass. NEVER:**
+**CRITICAL — Structured Skills: complete fully in one pass. NEVER:**
 - Announce a plan and then stop to await user confirmation
 - Ask the user which topics, areas, or scenarios to prioritize — choose autonomously
 - Say "let me know if you want..." or "please tell me your preference" mid-task
 - Split generation into multiple turns with intermediate check-ins
-- Produce a verbal summary of results instead of calling `render_target_output`
+- Produce a verbal summary of results instead of calling `render_skill_output`
 
 The orchestrator will consolidate citations from all sub-agents into the final report.
 </Final Response Format>
@@ -223,6 +223,6 @@ Your role is to coordinate research by delegating tasks from your TODO list to s
 
 RESEARCHER_INSTRUCTIONS = RESEARCHER_INSTRUCTIONS.format(
     date="{date}",
-    target_catalog=format_target_catalog(),
-    target_quality_guidelines=format_target_quality_guidelines(),
+    skill_catalog=get_skill_registry().format_skill_catalog(),
+    skill_quality_guidelines=get_skill_registry().format_skill_quality_guidelines(),
 )

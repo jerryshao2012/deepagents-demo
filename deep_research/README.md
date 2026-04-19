@@ -137,8 +137,8 @@ optional arguments:
   --doc-folder DOC_FOLDER
                         Optional folder containing supported documents to use as research material
   --no-web              Disable web search (Tavily) during research
-  --target {list,slides,interview,golden-dataset}
-                        Optional structured output target. Use '--target list' to see all options.
+  --skill {list,slides,interview,golden-dataset}
+                        Optional structured output skill. Use '--skill list' to see all options.
   --title TITLE         Optional research title for output file
 ```
 
@@ -151,22 +151,22 @@ uv run python research_agent_cli.py "Research AI Agents"
 
 With document folder and structured output:
 ```bash
-uv run python research_agent_cli.py "Research AI Agents" --doc-folder ./docs --target study-slides
+uv run python research_agent_cli.py "Research AI Agents" --doc-folder ./docs --skill study-slides
 ```
 
 Generate an interview question kit:
 ```bash
-uv run python research_agent_cli.py "Research AI Agents" --doc-folder ./docs --target interview
+uv run python research_agent_cli.py "Research AI Agents" --doc-folder ./docs --skill interview
 ```
 
 Prepare a comprehensive interview with questions and answers:
 ```bash
-uv run python research_agent_cli.py "Preparing a 60 minutes interview with list of question and answer" --doc-folder ./docs/interview_prep --target interview-coach-pro
+uv run python research_agent_cli.py "Preparing a 60 minutes interview with list of question and answer" --doc-folder ./docs/interview_prep --skill interview-coach-pro
 ```
 
 Generate a golden dataset:
 ```bash
-uv run python research_agent_cli.py "Generate 20 question-answer pairs for the documents provided" --doc-folder ./docs/policy/ --target golden-dataset
+uv run python research_agent_cli.py "Generate 20 question-answer pairs for the documents provided" --doc-folder ./docs/policy/ --skill golden-dataset
 ```
 
 <img width="937" alt="Deep Research Agent Architecture" src="./resources/Deep_Research_Agent_with_Golden_Dataset_Generation_Skill.png" />
@@ -184,7 +184,7 @@ uv run python research_agent_cli.py "Generate 20 question-answer pairs for the d
 
 Generate code using code-generator skill:
 ```bash
-uv run python research_agent_cli.py --subject-file ./input/coding-create-a-image.txt --target code-generator
+uv run python research_agent_cli.py --subject-file ./input/coding-create-a-image.txt --skill code-generator
 ```
 
 Without web search (using only local documents):
@@ -197,14 +197,14 @@ Read subject from a file:
 uv run python research_agent_cli.py --subject-file ./input/interview-subject.txt --doc-folder ./docs
 ```
 
-Show available structured output targets:
+Show available structured output skills:
 ```bash
-uv run python research_agent_cli.py --target list
+uv run python research_agent_cli.py --skill list
 ```
 
-Structured targets are skill-driven. Add a new `research_agent/skills/<target>/SKILL.md`
+Structured skills are skill-driven. Add a new `research_agent/skills/<skill>/SKILL.md`
 with frontmatter, instructions, a JSON Schema block, and a render template to make a new
-target available through `--target` without changing core CLI or tool wiring.
+skill available through `--skill` without changing core CLI or tool wiring.
 
 If you prefer an interactive notebook, you can still run it via:
 ```bash
@@ -303,9 +303,9 @@ What is used in the deep research agent?
   - Report writing patterns (Comparisons, Lists, Summaries)
   - Tool usage rules (e.g., must use `think_tool` after each search)
 
-### 6. Structured Output Targets
-- **Target Skills**: The agent can generate structured data using skills like `golden-dataset`.
-- **Validation and Finalization**: Tools like `render_target_output`, `finalize_golden_dataset_output`, and `trigger_dataset_evaluation` are used to validate schemas, export CSVs, and run or re-run quality metrics.
+### 6. Structured Output Skills
+- **Structured Skills**: The agent can generate structured data using skills like `golden-dataset`.
+- **Validation and Finalization**: Tools like `render_skill_output`, `finalize_golden_dataset_output`, and `trigger_dataset_evaluation` are used to validate schemas, export CSVs, and run or re-run quality metrics.
 
 ### 7. Context Management
 - **Reflection**: The `think_tool` is used for "inner monologue" and strategic planning, helping the agent reflect on findings before deciding the next step.
@@ -398,13 +398,13 @@ The deep research agent adds the following custom tools beyond the built-in deep
 
 | Tool Name | Description |
 |-----------|-------------|
-| `render_target_output` | Generic target renderer that loads a target skill from `research_agent/skills/*/SKILL.md`, validates the provided JSON payload against that target's schema, applies default values for optional fields, coerces data types, and renders the final Markdown output using template specifications. Use ONLY for structured targets with JSON schemas—do NOT use for unstructured markdown documents. |
+| `render_skill_output` | Generic skill renderer that loads a skill skill from `research_agent/skills/*/SKILL.md`, validates the provided JSON payload against that skill's schema, applies default values for optional fields, coerces data types, and renders the final Markdown output using template specifications. Use ONLY for structured skills with JSON schemas—do NOT use for unstructured markdown documents. |
 
 #### Golden Dataset Generation & Evaluation
 
 | Tool Name | Description |
 |-----------|-------------|
-| `finalize_golden_dataset_output` | Golden-dataset only: validates the same JSON as `render_target_output`, exports a CSV under `output/` via `skills/golden_dataset/pipeline.py`, then runs quality metrics so export and evaluation always happen in order. Generates human-readable quality reports alongside raw metrics. |
+| `finalize_golden_dataset_output` | Golden-dataset only: validates the same JSON as `render_skill_output`, exports a CSV under `output/` via `skills/golden_dataset/pipeline.py`, then runs quality metrics so export and evaluation always happen in order. Generates human-readable quality reports alongside raw metrics. |
 | `trigger_dataset_evaluation` | Evaluates an existing golden dataset CSV file by computing quality metrics using the bundled pipeline script. Prefer `finalize_golden_dataset_output` for new datasets; use this for re-evaluating previously exported datasets. |
 
 #### Frontend Slides Presentation Generation

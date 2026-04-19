@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
 
 from agent import agent, model
-from research_agent.cli import build_parser, list_targets
+from research_agent.cli import build_parser, list_skills
 from research_agent.tools import REPORTS_OUTPUT_FOLDER, normalize_path_for_filesystem_tools
 from utils import str2bool, get_ssl_verify_config, show_prompt, format_messages
 
@@ -37,7 +37,7 @@ class Spinner:
         if message:
             self.message = message
         self.stop_running.clear()
-        self.thread = threading.Thread(target=self.spin)
+        self.thread = threading.Thread(skill=self.spin)
         self.thread.daemon = True
         self.thread.start()
 
@@ -142,7 +142,7 @@ def _is_unsuccessful_tool_output(content: str) -> bool:
     failure_prefixes = (
         "Invalid JSON payload:",
         "Schema validation failed",
-        "Unknown target",
+        "Unknown skill",
         "Error invoking tool",
         "ERROR:",
     )
@@ -163,8 +163,8 @@ def _looks_like_incomplete_delegation(content: str) -> bool:
         "once the findings are returned",
         "i will synthesize",
         "will synthesize the information",
-        "use the render_target_output tool to deliver the final result",
-        "use the render_target_output tool to generate the final deliverable",
+        "use the render_skill_output tool to deliver the final result",
+        "use the render_skill_output tool to generate the final deliverable",
     )
     return any(marker in text for marker in markers)
 
@@ -214,7 +214,7 @@ def _last_stream_message_diagnostics(state: dict | None) -> tuple[str, str, str]
     return role, name, _truncate_for_log(content)
 
 
-def select_output_content(result: dict, target: str | None = None) -> str:
+def select_output_content(result: dict, skill: str | None = None) -> str:
     """Choose the best final content from files/messages for saving to disk."""
     files = result.get("files", {})
     if "/final_report.md" in files:
@@ -224,13 +224,13 @@ def select_output_content(result: dict, target: str | None = None) -> str:
     if not messages:
         return ""
 
-    if target:
+    if skill:
         for message in reversed(messages):
             role, name, content = _message_role_name_content(message)
-            if role == "tool" and name == "render_target_output" and not _is_unsuccessful_tool_output(content):
+            if role == "tool" and name == "render_skill_output" and not _is_unsuccessful_tool_output(content):
                 return content
 
-        # Structured targets may be rendered successfully inside a subagent and then
+        # Structured skills may be rendered successfully inside a subagent and then
         # returned through the parent `task` tool as plain tool output.
         for message in reversed(messages):
             role, name, content = _message_role_name_content(message)
@@ -300,8 +300,8 @@ def main():
         parser.print_help()
         sys.exit(0)
 
-    if args.target == "list":
-        list_targets()
+    if args.skill == "list":
+        list_skills()
         sys.exit(0)
 
     subject = args.subject
@@ -341,7 +341,7 @@ def main():
         ],
         "doc_folder": args.doc_folder,
         "no_web": args.no_web,
-        "target": args.target,
+        "skill": args.skill,
     }
     if args.verbose:
         # Show progress with spinner
@@ -454,7 +454,7 @@ def main():
     if result and "messages" in result:
         format_messages([wrap_as_message(m) for m in result["messages"]])
 
-    file_content = select_output_content(result, args.target)
+    file_content = select_output_content(result, args.skill)
     filename = save_research_to_file(file_content, title, output_folder=output_folder)
 
     print("\n" + "=" * 80)
