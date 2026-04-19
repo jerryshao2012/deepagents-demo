@@ -38,9 +38,8 @@ def _get_skill_registry() -> SkillRegistry:
     """Get or create the skill registry instance."""
     global _skill_registry_instance
     if _skill_registry_instance is None:
-        from pathlib import Path
         skills_dir = Path(__file__).parent / "skills"
-        _skill_registry_instance = SkillRegistry(skills_dir)
+        _skill_registry_instance: SkillRegistry = SkillRegistry(skills_dir)
     return _skill_registry_instance
 
 
