@@ -422,9 +422,9 @@ class SkillRegistry:
 _skill_registry_instance: SkillRegistry | None = None
 
 
-def get_skill_registry() -> SkillRegistry:
+def get_skill_registry() -> SkillRegistry | None:
     """Get or create the skill registry instance."""
     global _skill_registry_instance
     if _skill_registry_instance is None:
-        _skill_registry_instance: SkillRegistry = SkillRegistry()
+        _skill_registry_instance = SkillRegistry()
     return _skill_registry_instance
