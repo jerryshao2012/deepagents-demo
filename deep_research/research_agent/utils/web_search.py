@@ -47,8 +47,20 @@ def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float 
     return response_dict
 
 
+@tool(parse_docstring=True)
 def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
-    """Fetch and convert webpage content to markdown."""
+    """Fetch and convert webpage content to markdown.
+
+    Use this tool to retrieve the full content of a specific webpage URL and convert it to readable markdown format.
+    This is useful when you have a specific URL and need to extract its content for analysis or summarization.
+
+    Args:
+        url: The URL of the webpage to fetch.
+        timeout: Request timeout in seconds (default: 10.0).
+
+    Returns:
+        The webpage content converted to markdown format, or an error message if the fetch fails.
+    """
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

@@ -21,16 +21,10 @@ from research_agent.cli import (
     build_instruction,
 )
 from research_agent.skill_registry import SkillRegistry
-
 from research_agent.tools import (
     _normalize_path_for_filesystem_tools,
-    glob,
     list_available_skills,
-    ls,
-    read_doc_folder,
-    read_file,
     read_skill_supporting_file,
-    tavily_search,
     think_tool,
     frontend_slides,
     frontend_slides_export_pdf,
@@ -38,6 +32,16 @@ from research_agent.tools import (
     frontend_slides_extract_pptx,
     finalize_golden_dataset_output,
     trigger_dataset_evaluation,
+    read_doc_folder,
+)
+from research_agent.utils.knowledge_filesystem import (
+    ls,
+    glob,
+    read_file,
+)
+from research_agent.utils.web_search import (
+    tavily_search,
+    fetch_webpage_content
 )
 from utils import get_ssl_verify_config, str2bool
 
@@ -376,6 +380,7 @@ research_sub_agent: SubAgent = {
     "system_prompt": RESEARCHER_INSTRUCTIONS.format(date=current_date),
     "tools": [
         tavily_search,
+        fetch_webpage_content,
         think_tool,
         read_file,
         ls,
@@ -399,6 +404,7 @@ agent = create_deep_agent(
     model=model,
     tools=[
         tavily_search,
+        fetch_webpage_content,
         think_tool,
         read_file,
         ls,

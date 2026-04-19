@@ -26,7 +26,7 @@ from src.prompts import (
     ORCHESTRATOR_INSTRUCTIONS,
     RESEARCHER_INSTRUCTIONS,
 )
-from src.tools import tavily_search
+from src.tools import fetch_webpage_content, tavily_search
 
 
 class Context(TypedDict, total=False):
@@ -55,7 +55,7 @@ nemotron_super = ChatNVIDIA(
 )
 
 # --- Tools ---
-tools = [tavily_search]
+tools = [tavily_search, fetch_webpage_content]
 
 # --- Subagents ---
 

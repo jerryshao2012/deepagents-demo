@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import re
-from typing import Annotated
 
 import jsonschema
 from langchain_core.tools import tool
-from langgraph.prebuilt import InjectedState
 
 from research_agent.targets import get_target_definition
 from research_agent.utils.json_utils import robust_json_loads
@@ -252,7 +250,6 @@ def _prepare_validated_payload(
 def render_target_output(
         target_id: str,
         payload_json: str | dict,
-        state: Annotated[dict, InjectedState] = None,
 ) -> str:
     """Render structured target output using a reusable target definition.
 
@@ -265,7 +262,6 @@ def render_target_output(
     Args:
         target_id: The target definition id to use for validation and rendering.
         payload_json: A JSON object string or dict matching the target schema.
-        state: LangGraph state
 
     Returns:
         Rendered markdown output or a validation error message.

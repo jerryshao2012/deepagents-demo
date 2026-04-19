@@ -79,6 +79,19 @@ def _resolve_doc_output_subfolder(folder: Path) -> Path:
     return configured_output
 
 
+def _save_extracted_content(original_file_path: Path, content: str, output_folder: Path | None = None) -> str:
+    if output_folder:
+        output_dir = output_folder
+    else:
+        output_dir = Path(REPORTS_OUTPUT_FOLDER)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    file_path = _get_extracted_path(original_file_path, output_dir)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return _normalize_path_for_filesystem_tools(str(file_path))
+
+
 @tool(parse_docstring=True)
 def ls(path: str, state: Annotated[dict, InjectedState] = None) -> str:
     """List files in a directory with fallback support.
@@ -142,9 +155,8 @@ def ls(path: str, state: Annotated[dict, InjectedState] = None) -> str:
         return f"Error listing directory '{path}': {e}"
 
 
-@tool(parse_docstring=True)
-def glob(pattern: str, state: Annotated[dict, InjectedState] = None) -> str:
-    """Find files matching a glob pattern with fallback support.
+def _glob_impl(pattern: str, state: Annotated[dict, InjectedState] = None) -> str:
+    """Implementation of glob pattern matching with fallback support.
     
     Tries to match against the virtual filesystem in state first, then falls back
     to the local filesystem if not available.
@@ -248,9 +260,25 @@ def glob(pattern: str, state: Annotated[dict, InjectedState] = None) -> str:
 
 
 @tool(parse_docstring=True)
-def read_file(file_path: str,
-              state: Annotated[dict, InjectedState] = None) -> str:
-    """Read the content of a file with fallback support.
+def glob(pattern: str, state: Annotated[dict, InjectedState] = None) -> str:
+    """Find files matching a glob pattern with fallback support.
+    
+    Tries to match against the virtual filesystem in state first, then falls back
+    to the local filesystem if not available.
+
+    Args:
+        pattern: The glob pattern to match (e.g., "**/*.md").
+        state: LangGraph state containing virtual filesystem (injected automatically).
+
+    Returns:
+        A list of matching file paths or an error message.
+    """
+    return _glob_impl(pattern, state)
+
+
+def _read_file_impl(file_path: str,
+                    state: Annotated[dict, InjectedState] = None) -> str:
+    """Implementation of file reading with fallback support.
     
     Tries to read from the virtual filesystem in state first (DeepAgents backend),
     then falls back to the local filesystem if not available.
@@ -307,3 +335,21 @@ def read_file(file_path: str,
         return path.read_text(encoding="utf-8")
     except Exception as e:
         return f"Error reading file '{file_path}': {e}"
+
+
+@tool(parse_docstring=True)
+def read_file(file_path: str,
+              state: Annotated[dict, InjectedState] = None) -> str:
+    """Read the content of a file with fallback support.
+    
+    Tries to read from the virtual filesystem in state first (DeepAgents backend),
+    then falls back to the local filesystem if not available.
+
+    Args:
+        file_path: The path to the file to read.
+        state: LangGraph state containing virtual filesystem (injected automatically).
+
+    Returns:
+        The content of the file or an error message if the file not found.
+    """
+    return _read_file_impl(file_path, state)

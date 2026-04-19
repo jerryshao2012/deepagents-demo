@@ -4,7 +4,12 @@ from research_agent import tools
 from research_agent.tools import (
     finalize_golden_dataset_output,
     read_doc_folder,
+)
+from research_agent.utils.result_rendering import (
     render_target_output,
+)
+from research_agent.utils.web_search import (
+    fetch_webpage_content,
 )
 
 
@@ -576,3 +581,29 @@ def test_trigger_dataset_evaluation_rejects_non_golden_target_state(tmp_path) ->
     )
 
     assert "only available when the active target is `golden-dataset`" in result
+
+
+def test_fetch_webpage_content_returns_markdown_for_valid_url() -> None:
+    """Test that fetch_webpage_content can fetch and convert a webpage to markdown."""
+    # Using a simple, reliable URL for testing
+    result = fetch_webpage_content.invoke({"url": "https://example.com", "timeout": 5.0})
+
+    # Should return markdown content, not an error
+    assert not result.startswith("Error fetching content")
+    assert len(result) > 0
+
+
+def test_fetch_webpage_content_handles_invalid_url() -> None:
+    """Test that fetch_webpage_content handles invalid URLs gracefully."""
+    result = fetch_webpage_content.invoke({"url": "https://this-domain-does-not-exist-12345.com", "timeout": 2.0})
+
+    # Should return an error message
+    assert result.startswith("Error fetching content")
+
+
+def test_fetch_webpage_content_has_proper_tool_metadata() -> None:
+    """Test that fetch_webpage_content has proper tool metadata."""
+    assert hasattr(fetch_webpage_content, "name")
+    assert fetch_webpage_content.name == "fetch_webpage_content"
+    assert hasattr(fetch_webpage_content, "description")
+    assert "markdown" in fetch_webpage_content.description.lower()
