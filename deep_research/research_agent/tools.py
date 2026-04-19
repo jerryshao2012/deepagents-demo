@@ -201,19 +201,32 @@ def read_doc_folder(
 # --- Thinking Tool ---
 
 @tool(parse_docstring=True)
-def think_tool(thought: str) -> str:
-    """
-    Use this tool to write down your thoughts, reflections, and plans.
-    This helps you keep track of your reasoning and debug your thought process.
-    For example:
-    - "I need to find out the capital of France. I will use the search tool for that."
-    - "The user wants a summary of the document. I will first read the file and then summarize it."
-    - "I have received an error. I should analyze the error and try a different approach."
+def think_tool(reflection: str) -> str:
+    """Tool for strategic reflection on research progress and decision-making.
+
+    Use this tool after each search to analyze results and plan next steps systematically.
+    This creates a deliberate pause in the research workflow for quality decision-making.
 
     Args:
-        thought: The thought, reflection, or plan to record.
+        reflection: Detailed reflection on research progress, findings, gaps, and next steps
+
+    Returns:
+        Confirmation that reflection was recorded for decision-making
     """
-    return f"Your thought has been recorded: '{thought}'"
+    # Ensure output directory exists for logging reflections
+    output_dir = Path(os.environ.get("OUTPUT_FOLDER", "./output"))
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Log the reflection to a dedicated research log file
+    now = datetime.now()
+    log_file = output_dir / f"research_reflection_{now.strftime("%Y-%m-%d %H_%M_%S")}.log"
+    timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(f"[{timestamp}] REFLECTION:\n{reflection}\n")
+        f.write("-" * 80 + "\n")
+
+    return f"Reflection recorded: {reflection}"
 
 
 # --- Skill-related Tools ---
