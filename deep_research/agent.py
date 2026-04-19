@@ -22,7 +22,7 @@ from research_agent.cli import (
 )
 from research_agent.skill_registry import SkillRegistry
 from research_agent.tools import (
-    _normalize_path_for_filesystem_tools,
+    normalize_path_for_filesystem_tools,
     list_available_skills,
     read_skill_supporting_file,
     think_tool,
@@ -32,14 +32,10 @@ from research_agent.tools import (
     frontend_slides_extract_pptx,
     finalize_golden_dataset_output,
     trigger_dataset_evaluation,
-    read_doc_folder,
-)
-from research_agent.utils.knowledge_filesystem import (
     ls,
     glob,
     read_file,
-)
-from research_agent.utils.web_search import (
+    read_doc_folder,
     tavily_search,
     fetch_webpage_content
 )
@@ -243,7 +239,7 @@ class ResearchStateMiddleware(AgentMiddleware):
             output_folder = str(Path(REPORTS_OUTPUT_FOLDER) / Path(doc_folder).name)
 
         # Normalize path for deepagents filesystem tools compatibility (cross-platform)
-        normalized_path = _normalize_path_for_filesystem_tools(output_folder)
+        normalized_path = normalize_path_for_filesystem_tools(output_folder)
         os.environ["OUTPUT_FOLDER"] = normalized_path
 
         # Persist doc_folder so read_doc_folder can fall back to it inside

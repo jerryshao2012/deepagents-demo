@@ -107,7 +107,7 @@ def _extract_xlsx_text(file_path: Path) -> str:
     return "\n\n".join(sections)
 
 
-def _extract_supported_document(file_path: Path) -> str:
+def extract_supported_document(file_path: Path) -> str:
     suffix = file_path.suffix.lower()
     if suffix == ".pdf":
         return _extract_pdf_text(file_path)

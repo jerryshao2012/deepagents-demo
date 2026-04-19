@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 
 import jsonschema
-from langchain_core.tools import tool
 
 from research_agent.targets import get_target_definition
 from research_agent.utils.json_utils import robust_json_loads
@@ -246,8 +245,7 @@ def _prepare_validated_payload(
     return definition, payload, None
 
 
-@tool(parse_docstring=True)
-def render_target_output(
+def render_target_output_impl(
         target_id: str,
         payload_json: str | dict,
 ) -> str:

@@ -10,24 +10,18 @@ from research_agent.prompts import (
     SUBAGENT_DELEGATION_INSTRUCTIONS,
 )
 from research_agent.tools import (
+    think_tool,
     frontend_slides,
     frontend_slides_export_pdf,
     frontend_slides_deploy,
     frontend_slides_extract_pptx,
+    render_target_output,
     finalize_golden_dataset_output,
-    think_tool,
     trigger_dataset_evaluation,
-    read_doc_folder,
-)
-from research_agent.utils.knowledge_filesystem import (
     ls,
     glob,
     read_file,
-)
-from research_agent.utils.result_rendering import (
-    render_target_output,
-)
-from research_agent.utils.web_search import (
+    read_doc_folder,
     tavily_search,
     fetch_webpage_content,
 )

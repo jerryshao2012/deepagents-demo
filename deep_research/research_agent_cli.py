@@ -13,7 +13,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMe
 
 from agent import agent, model
 from research_agent.cli import build_parser, list_targets
-from research_agent.tools import REPORTS_OUTPUT_FOLDER, _normalize_path_for_filesystem_tools
+from research_agent.tools import REPORTS_OUTPUT_FOLDER, normalize_path_for_filesystem_tools
 from utils import str2bool, get_ssl_verify_config, show_prompt, format_messages
 
 # Load environment variables
@@ -279,7 +279,7 @@ def derive_output_folder(doc_folder: str | None) -> Path:
 def configure_output_folder(doc_folder: str | None) -> Path:
     output_folder = derive_output_folder(doc_folder)
     # Normalize path for deepagents filesystem tools compatibility (cross-platform)
-    normalized_path = _normalize_path_for_filesystem_tools(str(output_folder))
+    normalized_path = normalize_path_for_filesystem_tools(str(output_folder))
     os.environ["OUTPUT_FOLDER"] = normalized_path
     # Persist doc_folder so read_doc_folder can access it inside subagents
     # whose state schema doesn't carry the key.

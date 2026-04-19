@@ -2,14 +2,14 @@
 
 import json
 import os
-import random
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from deepagents.backends.utils import create_file_data
 from dotenv import load_dotenv
+from langchain_core.tools import InjectedToolArg
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
@@ -19,16 +19,17 @@ from research_agent.skills.golden_dataset.pipeline import (
     export_golden_dataset_csv,
     evaluate_and_report_golden_dataset,
 )
-from research_agent.utils.content_extractors import _extract_supported_document
 from research_agent.utils.knowledge_filesystem import (
-    MAX_GLOB_DEPTH,
-    MAX_FILES_TO_READ,
-    MAX_TOTAL_SIZE_MB,
-    SUPPORTED_DOC_SUFFIXES,
-    _folder_listing_cache,
-    _normalize_path_for_filesystem_tools,
-    _resolve_doc_output_subfolder,
-    _get_extracted_path, _save_extracted_content,
+    normalize_path_for_filesystem_tools,
+    ls_impl,
+    glob_impl,
+    read_file_impl,
+    read_doc_folder_impl,
+)
+from research_agent.utils.result_rendering import render_target_output_impl
+from research_agent.utils.web_search import (
+    fetch_webpage_content_impl,
+    tavily_search_impl
 )
 
 # Load environment variables
@@ -50,7 +51,101 @@ def _get_skill_registry() -> SkillRegistry:
     return _skill_registry_instance
 
 
+# --- Web Search Tools ---
+
+@tool(parse_docstring=True)
+def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
+    """Fetch and convert webpage content to markdown.
+
+    Use this tool to retrieve the full content of a specific webpage URL and convert it to readable markdown format.
+    This is useful when you have a specific URL and need to extract its content for analysis or summarization.
+
+    Args:
+        url: The URL of the webpage to fetch.
+        timeout: Request timeout in seconds (default: 10.0).
+
+    Returns:
+        The webpage content converted to markdown format, or an error message if the fetch fails.
+    """
+    return fetch_webpage_content_impl(url, timeout)
+
+
+@tool(parse_docstring=True)
+def tavily_search(
+        query: str,
+        max_results: Annotated[int, InjectedToolArg] = 1,
+        topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
+        state: Annotated[dict, InjectedState] = None,
+) -> str:
+    """Search the web for information on a given query.
+
+    Uses Tavily to discover relevant URLs, then fetches and returns full webpage content as markdown.
+
+    Args:
+        query: Search query to execute
+        max_results: Maximum number of results to return (default: 1)
+        topic: Topic filter - 'general', 'news', or 'finance' (default: 'general')
+        state: LangGraph state
+
+    Returns:
+        Formatted search results with full webpage content
+    """
+    return tavily_search_impl(query, max_results, topic, state)
+
+
 # --- Filesystem Tools ---
+
+@tool(parse_docstring=True)
+def ls(path: str, state: Annotated[dict, InjectedState] = None) -> str:
+    """List files in a directory with fallback support.
+
+    Tries to list from the virtual filesystem in state first (DeepAgents backend),
+    then falls back to the local filesystem if not available.
+
+    Args:
+        path: The path to the directory to list.
+        state: LangGraph state containing virtual filesystem (injected automatically).
+
+    Returns:
+        A list of files in the directory or an error message.
+    """
+    return ls_impl(path, state)
+
+
+@tool(parse_docstring=True)
+def glob(pattern: str, state: Annotated[dict, InjectedState] = None) -> str:
+    """Find files matching a glob pattern with fallback support.
+
+    Tries to match against the virtual filesystem in state first, then falls back
+    to the local filesystem if not available.
+
+    Args:
+        pattern: The glob pattern to match (e.g., "**/*.md").
+        state: LangGraph state containing virtual filesystem (injected automatically).
+
+    Returns:
+        A list of matching file paths or an error message.
+    """
+    return glob_impl(pattern, state)
+
+
+@tool(parse_docstring=True)
+def read_file(file_path: str,
+              state: Annotated[dict, InjectedState] = None) -> str:
+    """Read the content of a file with fallback support.
+
+    Tries to read from the virtual filesystem in state first (DeepAgents backend),
+    then falls back to the local filesystem if not available.
+
+    Args:
+        file_path: The path to the file to read.
+        state: LangGraph state containing virtual filesystem (injected automatically).
+
+    Returns:
+        The content of the file or an error message if the file not found.
+    """
+    return read_file_impl(file_path, state)
+
 
 @tool(parse_docstring=True)
 def read_doc_folder(
@@ -76,126 +171,7 @@ def read_doc_folder(
     Returns:
         Extracted text from supported documents, a summary for large folders, or an error message.
     """
-    configured_doc_folder: str | None = None
-    if state and isinstance(state, dict):
-        configured_doc_folder = state.get("doc_folder")
-
-    # Fallback: subagent state schemas may not include doc_folder, so the
-    # orchestrator also persists it as an environment variable.
-    if not configured_doc_folder:
-        configured_doc_folder = os.environ.get("DOC_FOLDER")
-
-    if not configured_doc_folder:
-        return (
-            "Error: No document folder has been configured for this research task. "
-            "Pass --doc-folder <path> when invoking the CLI, or include the folder path "
-            "(e.g. '--doc-folder ./docs/policy/') in your message when using the API. "
-            "Do NOT attempt to read from any other filesystem path."
-        )
-
-    allowed_root = Path(configured_doc_folder).resolve()
-    folder = Path(folder_path).resolve()
-    try:
-        folder.relative_to(allowed_root)
-    except ValueError:
-        print(
-            f"[read_doc_folder] Redirecting '{folder_path}' → '{allowed_root}' (only the configured doc_folder is permitted).")
-        folder = allowed_root
-
-    if not folder.exists(): return f"Error: Folder '{folder}' does not exist."
-    if not folder.is_dir(): return f"Error: '{folder}' is not a directory."
-
-    specific_set = set(specific_files) if specific_files else None
-
-    # Cached folder listing
-    cache_key = str(folder.resolve())
-    if cache_key in _folder_listing_cache:
-        supported_files = _folder_listing_cache[cache_key]
-    else:
-        all_candidates: list[Path] = []
-        for file_path in folder.rglob("*"):
-            if len(file_path.relative_to(folder).parts) > MAX_GLOB_DEPTH:
-                continue
-            if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_DOC_SUFFIXES:
-                all_candidates.append(file_path)
-        supported_files = sorted(all_candidates)
-        _folder_listing_cache[cache_key] = supported_files
-
-    if not supported_files:
-        return f"No supported document files found in {folder_path}. Supported types: .pdf, .txt, .md, .docx, .pptx, .xlsx."
-
-    if specific_set:
-        files_to_process = [f for f in supported_files if f.name in specific_set]
-        if not files_to_process:
-            return f"None of the requested files were found in {folder_path}. Available: {', '.join(f.name for f in supported_files[:10])}..."
-    else:
-        total_files = len(supported_files)
-        total_size_mb = sum(f.lstat().st_size for f in supported_files) / (1024 * 1024)
-
-        if total_files > MAX_FILES_TO_READ or total_size_mb > MAX_TOTAL_SIZE_MB:
-            avg_size_mb = total_size_mb / total_files if total_files > 0 else 0
-            max_files_by_size = max(1, int(MAX_TOTAL_SIZE_MB / avg_size_mb)) if avg_size_mb > 0 else MAX_FILES_TO_READ
-            sample_size = min(MAX_FILES_TO_READ, total_files, max_files_by_size)
-            auto_sample = [f.name for f in random.sample(supported_files, sample_size)]
-            preview_list = "\n".join(f"- {f.name} ({f.lstat().st_size / 1024:.1f} KB)" for f in supported_files[:60])
-            if total_files > 60: preview_list += f"\n... and {total_files - 60} more files (not shown)."
-            auto_sample_str = ", ".join(f'"{n}"' for n in auto_sample)
-            return (
-                f"TOOL RESULT — folder too large to read all at once: {total_files} files, {total_size_mb:.1f} MB (limits: {MAX_FILES_TO_READ} files / {MAX_TOTAL_SIZE_MB} MB).\n\n"
-                "ACTION REQUIRED — do NOT ask the user for confirmation. You MUST immediately:\n"
-                f"1. Call read_doc_folder again on '{folder_path}' with specific_files set to the auto-sample below.\n"
-                "2. Continue research using those documents.\n\n"
-                f"Pre-built diverse auto-sample ({len(auto_sample)} files, evenly spread across the directory):\n"
-                f"[{auto_sample_str}]\n\n"
-                f"Full file listing (first 60 of {total_files}):\n{preview_list}"
-            )
-        files_to_process = supported_files
-
-    extracted_text: list[str] = []
-    processed_files: list[str] = []
-    failed_files: list[str] = []
-    output_subfolder = _resolve_doc_output_subfolder(folder)
-
-    for file_path in files_to_process:
-        target_path = _get_extracted_path(file_path, output_subfolder)
-        if target_path.exists():
-            print(f"Skipping {file_path.name}, already extracted to {target_path}")
-            try:
-                content = target_path.read_text(encoding="utf-8")
-                processed_files.append(f"{file_path.name} (skipped, loaded from {target_path})")
-                extracted_text.append(f"--- Content of {file_path.name} (from cache) ---\n{content}\n")
-                continue
-            except Exception as exc:
-                print(f"Failed to read existing extract {target_path}: {exc}. Re-extracting...")
-
-        print(f"Processing document: {file_path.name}...")
-        try:
-            content = _extract_supported_document(file_path)
-            saved_path = _save_extracted_content(file_path, content, output_folder=output_subfolder)
-            processed_files.append(f"{file_path.name} (saved to {saved_path})")
-            extracted_text.append(f"--- Content of {file_path.name} ---\n{content}\n")
-        except Exception as exc:
-            failed_files.append(file_path.name)
-            extracted_text.append(f"--- Error reading {file_path.name}: {exc} ---\n")
-
-    summary_lines = [f"Processed {len(processed_files)}/{len(files_to_process)} supported file(s) from {folder}."]
-    if processed_files: summary_lines.append(f"Files processed: {', '.join(processed_files)}")
-    if failed_files: summary_lines.append(f"Files failed: {', '.join(failed_files)}")
-    summary_lines.append(
-        "\nIMPORTANT: Use ONLY the file paths listed above. Do NOT reference "
-        "filenames from the user's prompt if they differ from the actual files "
-        "discovered here. If you need to read individual files, use the exact "
-        "paths shown in 'Files processed' above with the `read_file` tool."
-    )
-
-    total_text = "\n".join(extracted_text)
-    if len(total_text) > 40000:
-        print("\n".join(summary_lines))
-        return "\n".join(summary_lines + ["",
-                                          f"Text omitted because total size is {len(total_text)} chars (too large to display inline). Please use the `read_file` tool on the specific file paths listed above to read them."])
-    else:
-        print("\n".join(summary_lines))
-        return "\n".join(summary_lines + ["", "--- EXTRACTED DOCUMENTS ---", ""] + extracted_text)
+    return read_doc_folder_impl(folder_path, specific_files, state)
 
 
 # --- Thinking Tool ---
@@ -274,6 +250,31 @@ def read_skill_supporting_file(skill_id: str, filename: str) -> str:
     return content
 
 
+# --- Result Rendering Tools ---
+
+@tool(parse_docstring=True)
+def render_target_output(
+        target_id: str,
+        payload_json: str | dict,
+) -> str:
+    """Render structured target output using a reusable target definition.
+
+    Use this tool ONLY for structured output targets (targets with a JSON schema).
+    DO NOT use this tool for 'Unstructured Markdown Document' targets.
+    Provide the target id and a JSON payload that matches the selected target schema exactly.
+    The payload may be either a JSON object string or a dict-like JSON object.
+    NEVER put raw markdown into payload_json.
+
+    Args:
+        target_id: The target definition id to use for validation and rendering.
+        payload_json: A JSON object string or dict matching the target schema.
+
+    Returns:
+        Rendered markdown output or a validation error message.
+    """
+    return render_target_output_impl(target_id, payload_json)
+
+
 # --- Golden Dataset Tools ---
 
 def write_content_to_output_folder(filename: str, content: str) -> str:
@@ -283,7 +284,7 @@ def write_content_to_output_folder(filename: str, content: str) -> str:
     file_path = output_subfolder / filename
     with open(file_path, 'w', encoding='utf-8') as f:
         f.write(content)
-    return _normalize_path_for_filesystem_tools(str(file_path))
+    return normalize_path_for_filesystem_tools(str(file_path))
 
 
 @tool(parse_docstring=True)
@@ -331,8 +332,8 @@ def finalize_golden_dataset_output(
 
     return (
         f"Successfully exported and evaluated the golden dataset.\n"
-        f"- Raw data saved to: {_normalize_path_for_filesystem_tools(str(csv_path))}\n"
-        f"- Metrics saved to: {_normalize_path_for_filesystem_tools(str(metrics_csv_path))}\n"
+        f"- Raw data saved to: {normalize_path_for_filesystem_tools(str(csv_path))}\n"
+        f"- Metrics saved to: {normalize_path_for_filesystem_tools(str(metrics_csv_path))}\n"
         f"- Final report saved to: {report_filepath}\n\n"
         f"## Golden Dataset Quality Metrics\n\n{markdown_content}"
     )
@@ -442,8 +443,8 @@ def frontend_slides(
             }
             state["files"] = files
 
-    normalized_output_path = _normalize_path_for_filesystem_tools(str(output_path))
-    normalized_reports_path = _normalize_path_for_filesystem_tools(str(reports_path))
+    normalized_output_path = normalize_path_for_filesystem_tools(str(output_path))
+    normalized_reports_path = normalize_path_for_filesystem_tools(str(reports_path))
     return (
         f"Generated `{style_preset}` HTML presentation with {len(slides)} slide(s).\n"
         f"- Saved to output folder: `{normalized_output_path}`\n"

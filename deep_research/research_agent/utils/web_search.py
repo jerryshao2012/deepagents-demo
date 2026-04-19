@@ -6,7 +6,7 @@ from typing import Annotated, Literal
 
 import httpx
 import requests
-from langchain_core.tools import tool, InjectedToolArg
+from langchain_core.tools import InjectedToolArg
 from langgraph.prebuilt import InjectedState
 from markdownify import markdownify
 from tavily import TavilyClient
@@ -47,8 +47,7 @@ def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float 
     return response_dict
 
 
-@tool(parse_docstring=True)
-def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
+def fetch_webpage_content_impl(url: str, timeout: float = 10.0) -> str:
     """Fetch and convert webpage content to markdown.
 
     Use this tool to retrieve the full content of a specific webpage URL and convert it to readable markdown format.
@@ -81,8 +80,7 @@ def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
         return f"Error fetching content from {url}: {exc}"
 
 
-@tool(parse_docstring=True)
-def tavily_search(
+def tavily_search_impl(
         query: str,
         max_results: Annotated[int, InjectedToolArg] = 1,
         topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
@@ -131,7 +129,7 @@ def tavily_search(
     for result in search_results.get("results", []):
         url = result["url"]
         title = result["title"]
-        content = fetch_webpage_content(url)
+        content = fetch_webpage_content_impl(url)
         result_text = f"## {title}\n**URL:** {url}\n\n{content}\n\n---\n"
         result_texts.append(result_text)
 
