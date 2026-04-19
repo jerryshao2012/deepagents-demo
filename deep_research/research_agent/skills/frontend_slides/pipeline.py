@@ -9,10 +9,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from research_agent.skill_registry import get_skill_registry
-
-# Constants
-REPORTS_OUTPUT_FOLDER = "reports"
+from research_agent.utils.skill_registry import get_skill_registry
 
 
 def _normalize_path_for_filesystem_tools(file_path: str) -> str:

@@ -6,7 +6,7 @@ import csv
 import re
 from pathlib import Path
 
-GOLDEN_DATASET_TARGET_ID = "golden-dataset"
+GOLDEN_DATASET_SKILL_ID = "golden-dataset"
 
 
 def normalize_golden_item_ids(payload: dict) -> None:

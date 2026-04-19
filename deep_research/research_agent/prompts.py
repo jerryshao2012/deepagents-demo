@@ -1,6 +1,6 @@
 """Prompt templates and tool descriptions for the research deepagent."""
 
-from research_agent.skill_registry import get_skill_registry
+from research_agent.utils.skill_registry import get_skill_registry
 
 RESEARCH_WORKFLOW_INSTRUCTIONS = """# Research Workflow
 

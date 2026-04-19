@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 
-from research_agent.skill_registry import get_skill_registry
+from research_agent.utils.skill_registry import get_skill_registry
 
 
 def build_parser() -> argparse.ArgumentParser:

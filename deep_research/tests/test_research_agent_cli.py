@@ -1,6 +1,6 @@
-from research_agent import skill_registry
-from research_agent.cli import build_parser
-from research_agent.skill_registry import get_skill_registry
+from research_agent.utils import skill_registry
+from research_agent.utils.cli import build_parser
+from research_agent.utils.skill_registry import get_skill_registry
 
 
 def test_parser_accepts_doc_folder_and_skill() -> None:

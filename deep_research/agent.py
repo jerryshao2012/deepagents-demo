@@ -17,10 +17,6 @@ from research_agent import (
     RESEARCHER_INSTRUCTIONS,
     SUBAGENT_DELEGATION_INSTRUCTIONS,
 )
-from research_agent.cli import (
-    build_instruction,
-)
-from research_agent.skill_registry import SkillRegistry
 from research_agent.tools import (
     normalize_path_for_filesystem_tools,
     list_available_skills,
@@ -39,6 +35,10 @@ from research_agent.tools import (
     tavily_search,
     fetch_webpage_content
 )
+from research_agent.utils.cli import (
+    build_instruction,
+)
+from research_agent.utils.skill_registry import SkillRegistry
 from utils import get_ssl_verify_config, str2bool
 
 # Load environment variables
@@ -350,7 +350,7 @@ class ResearchStateMiddleware(AgentMiddleware):
         instruction = build_instruction(
             subject="",
             doc_folder=state.get("doc_folder"),
-            target=state.get("target"),
+            skill=state.get("skill"),
             no_web=str2bool(state.get("no_web"), False)
         )
         instruction = instruction.replace("Research the following subject: ", "").strip()

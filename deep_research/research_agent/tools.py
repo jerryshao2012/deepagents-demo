@@ -13,7 +13,6 @@ from langchain_core.tools import InjectedToolArg
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
-from research_agent.skill_registry import get_skill_registry
 from research_agent.skills.golden_dataset.pipeline import (
     evaluate_golden_dataset_csv_file,
     export_golden_dataset_csv,
@@ -27,6 +26,7 @@ from research_agent.utils.knowledge_filesystem import (
     read_doc_folder_impl,
 )
 from research_agent.utils.result_rendering import render_skill_output_impl
+from research_agent.utils.skill_registry import get_skill_registry
 from research_agent.utils.web_search import (
     fetch_webpage_content_impl,
     tavily_search_impl

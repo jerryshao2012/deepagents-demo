@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from research_agent import tools
-from research_agent.skill_registry import get_skill_registry
+from research_agent.utils.skill_registry import get_skill_registry
 from research_agent.tools import (
     fetch_webpage_content,
 )
@@ -174,7 +174,7 @@ def test_get_skill_definition_coerces_integer_like_floats() -> None:
 
 
 def test_get_skill_definition_uses_declarative_render_spec(tmp_path, monkeypatch) -> None:
-    from research_agent import skill_registry
+    from research_agent.utils import skill_registry
 
     skill_dir = tmp_path / "skills" / "demo"
     skill_dir.mkdir(parents=True)

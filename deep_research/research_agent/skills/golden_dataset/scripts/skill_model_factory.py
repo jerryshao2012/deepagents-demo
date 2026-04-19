@@ -17,7 +17,10 @@ from utils import get_ssl_verify_config
 
 
 def get_configured_model():
-    """Build the first matching chat model from environment configuration with rate limit retry."""
+    """
+    Build the first matching chat model from environment configuration with rate limit retry.
+    Keep this separate model factory for LLM as Judge using a different model
+    """
     verify_ssl = get_ssl_verify_config()
 
     if os.getenv("GOOGLE_API_KEY") and os.getenv("MODEL_NAME"):

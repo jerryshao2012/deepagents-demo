@@ -1,5 +1,5 @@
-from research_agent.cli import build_parser
-from research_agent.skill_registry import get_skill_registry
+from research_agent.utils.cli import build_parser
+from research_agent.utils.skill_registry import get_skill_registry
 
 ALL_SKILL_TARGET_IDS = {
     "autoresearch-universal",

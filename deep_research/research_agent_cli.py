@@ -12,8 +12,8 @@ from dotenv import load_dotenv
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
 
 from agent import agent, model
-from research_agent.cli import build_parser, list_skills
 from research_agent.tools import REPORTS_OUTPUT_FOLDER, normalize_path_for_filesystem_tools
+from research_agent.utils.cli import build_parser, list_skills
 from utils import str2bool, get_ssl_verify_config, show_prompt, format_messages
 
 # Load environment variables
