@@ -366,14 +366,55 @@ The deep research agent uses custom instructions defined in `research_agent/prom
 
 The deep research agent adds the following custom tools beyond the built-in deepagent tools. You can also use your own tools, including via MCP servers. See the Deep Agents package [README](https://github.com/langchain-ai/deepagents?tab=readme-ov-file#mcp) for more details.
 
+#### Web Search & Content Retrieval
+
 | Tool Name | Description |
 |-----------|-------------|
-| `tavily_search` | Web search tool that uses Tavily purely as a URL discovery engine. Performs searches using Tavily API to find relevant URLs, fetches full webpage content via HTTP with proper User-Agent headers (avoiding 403 errors), converts HTML to markdown, and returns the complete content without summarization to preserve all information for the agent's analysis. Works with both Claude and Gemini models. |
-| `think_tool` | Strategic reflection mechanism that helps the agent pause and assess progress between searches, analyze findings, identify gaps, and plan next steps. |
-| `read_doc_folder` | Extracts text content from supported local files in a specified folder. Supports `.pdf`, `.txt`, `.md`, `.docx`, `.pptx`, and `.xlsx`. |
-| `render_target_output` | Generic target renderer that loads a target skill from `research_agent/skills/*/SKILL.md`, validates the provided JSON payload against that target's schema, and renders the final Markdown output. |
-| `finalize_golden_dataset_output` | Golden-dataset only: validates the same JSON as `render_target_output`, exports a CSV under `output/` via `skills/golden_dataset/pipeline.py`, then runs quality metrics so export and evaluation always happen in order. |
-| `trigger_dataset_evaluation` | Evaluates an existing golden dataset CSV (or use after export); computes quality metrics using the bundled script. Prefer `finalize_golden_dataset_output` for new datasets. |
+| `tavily_search` | Advanced web search tool that uses Tavily purely as a URL discovery engine. Performs searches using Tavily API to find relevant URLs, fetches full webpage content via HTTP with proper User-Agent headers (avoiding 403 errors), converts HTML to markdown, and returns the complete content without summarization to preserve all information for the agent's analysis. Supports configurable result counts and topic filtering (general/news/finance). Works with both Claude and Gemini models. |
+
+#### Strategic Thinking & Reflection
+
+| Tool Name | Description |
+|-----------|-------------|
+| `think_tool` | Strategic reflection mechanism that helps the agent pause and assess progress between searches, analyze findings, identify gaps, and plan next steps. Essential for maintaining coherent research strategy across multiple iterations. |
+
+#### Filesystem & Document Processing
+
+| Tool Name | Description |
+|-----------|-------------|
+| `read_file` | Reads the content of a file at the given path. Checks LangGraph state files first before accessing the local filesystem, enabling seamless access to both in-memory and persistent files. |
+| `ls` | Lists the contents of a directory. Returns filenames with "/" suffix for subdirectories. Normalizes paths for cross-platform compatibility. |
+| `glob` | Finds files matching a glob pattern with recursive support. Handles complex patterns like `**/*.md` and normalizes paths for consistent behavior across Windows and Unix systems. |
+| `read_doc_folder` | Extracts text content from supported local files in a specified folder. Supports `.pdf`, `.txt`, `.md`, `.docx`, `.pptx`, and `.xlsx`. Automatically resolves folder path from agent state or environment variables. Caches extracted content under the active output folder to avoid redundant processing. |
+
+#### Skill Management System
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_available_skills` | Lists all available skills registered in the skill registry with their descriptions. Helps the agent discover what specialized capabilities are available for structured output generation. |
+| `read_skill_supporting_file` | Reads supporting files from a skill directory (e.g., CSS templates, style presets, HTML architecture guides). Use this when a skill's instructions reference external resources needed for implementation. |
+
+#### Structured Output Rendering
+
+| Tool Name | Description |
+|-----------|-------------|
+| `render_target_output` | Generic target renderer that loads a target skill from `research_agent/skills/*/SKILL.md`, validates the provided JSON payload against that target's schema, applies default values for optional fields, coerces data types, and renders the final Markdown output using template specifications. Use ONLY for structured targets with JSON schemas—do NOT use for unstructured markdown documents. |
+
+#### Golden Dataset Generation & Evaluation
+
+| Tool Name | Description |
+|-----------|-------------|
+| `finalize_golden_dataset_output` | Golden-dataset only: validates the same JSON as `render_target_output`, exports a CSV under `output/` via `skills/golden_dataset/pipeline.py`, then runs quality metrics so export and evaluation always happen in order. Generates human-readable quality reports alongside raw metrics. |
+| `trigger_dataset_evaluation` | Evaluates an existing golden dataset CSV file by computing quality metrics using the bundled pipeline script. Prefer `finalize_golden_dataset_output` for new datasets; use this for re-evaluating previously exported datasets. |
+
+#### Frontend Slides Presentation Generation
+
+| Tool Name | Description |
+|-----------|-------------|
+| `frontend-slides` | Generates self-contained HTML slide decks from markdown-style slide content. Accepts presentation content with headings, headlines, subtitles, body text, bullet lists, and callout blocks. Supports 12 visual presets (Bold Signal, Electric Studio, Creative Voltage, Dark Botanical, etc.) and 6 animation styles (dramatic, techy, playful, professional, calm, editorial). Includes optional inline editing mode. Saves generated HTML to both `./output` and `./reports` folders. |
+| `frontend-slides-export-pdf` | Exports an HTML presentation to PDF format using Playwright. Captures screenshots of each slide and compiles them into a single PDF document. Note: animations are not preserved in PDF output. Supports compact mode (1280x720) for smaller file sizes. |
+| `frontend-slides-deploy` | Deploys an HTML presentation to a live Vercel URL using the Vercel CLI. Requires Vercel CLI installation and authentication. Provides shareable public links for presentations. |
+| `frontend-slides-extract-pptx` | Extracts content and images from PowerPoint (.pptx) files. Runs extraction scripts that return JSON structures containing slides, text, and embedded images. Facilitates conversion of existing presentations to HTML format. |
 
 ## 🛡️ Rate Limit Handling
 
