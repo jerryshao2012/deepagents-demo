@@ -19,24 +19,24 @@ STRUCTURED_TARGET_IDS = {
 UNSTRUCTURED_TARGET_IDS = ALL_SKILL_TARGET_IDS - STRUCTURED_TARGET_IDS
 
 
-def test_all_skill_targets_are_discoverable() -> None:
+def test_all_skill_skills_are_discoverable() -> None:
     assert set(get_skill_registry().list_skill_ids()) == ALL_SKILL_TARGET_IDS
 
 
-def test_parser_exposes_all_skill_targets() -> None:
+def test_parser_exposes_all_skill_skills() -> None:
     parser = build_parser()
 
-    assert set(parser._option_string_actions["--target"].choices) == ALL_SKILL_TARGET_IDS | {"list"}
+    assert set(parser._option_string_actions["--skill"].choices) == ALL_SKILL_TARGET_IDS | {"list"}
 
 
 def test_structured_and_unstructured_skill_classification() -> None:
-    for target_id in STRUCTURED_TARGET_IDS:
-        definition = get_skill_registry().get_skill_definition(target_id)
+    for skill_id in STRUCTURED_TARGET_IDS:
+        definition = get_skill_registry().get_skill_definition(skill_id)
         assert definition["schema"] is not None
         assert definition["render"] is not None
 
-    for target_id in UNSTRUCTURED_TARGET_IDS:
-        definition = get_skill_registry().get_skill_definition(target_id)
+    for skill_id in UNSTRUCTURED_TARGET_IDS:
+        definition = get_skill_registry().get_skill_definition(skill_id)
         assert definition["schema"] is None
         assert definition["render"] is None
 

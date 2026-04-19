@@ -1,4 +1,4 @@
-"""CSV export and evaluation for the golden-dataset target."""
+"""CSV export and evaluation for the golden-dataset skill."""
 
 from __future__ import annotations
 

@@ -3,16 +3,16 @@ from research_agent.cli import build_parser
 from research_agent.skill_registry import get_skill_registry
 
 
-def test_parser_accepts_doc_folder_and_target() -> None:
+def test_parser_accepts_doc_folder_and_skill() -> None:
     parser = build_parser()
 
     args = parser.parse_args(
-        ["Research AI Agents", "--doc-folder", "./docs", "--target", "study-slides"]
+        ["Research AI Agents", "--doc-folder", "./docs", "--skill", "study-slides"]
     )
 
     assert args.subject == "Research AI Agents"
     assert args.doc_folder == "./docs"
-    assert args.target == "study-slides"
+    assert args.skill == "study-slides"
 
 
 def test_skill_definition_is_loaded_from_skill() -> None:
@@ -25,7 +25,7 @@ def test_skill_definition_is_loaded_from_skill() -> None:
     assert isinstance(definition["render"]["spec"], list)
 
 
-def test_target_loader_uses_explicit_schema_section(tmp_path, monkeypatch) -> None:
+def test_skill_loader_uses_explicit_schema_section(tmp_path, monkeypatch) -> None:
     skill_dir = tmp_path / "skills" / "demo"
     skill_dir.mkdir(parents=True)
     skill_file = skill_dir / "SKILL.md"
@@ -33,7 +33,7 @@ def test_target_loader_uses_explicit_schema_section(tmp_path, monkeypatch) -> No
         """---
 name: demo
 title: Demo Target
-description: Demo target for testing
+description: Demo skill for testing
 render_template: markdown_blocks
 ---
 

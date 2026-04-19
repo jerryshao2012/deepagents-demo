@@ -41,7 +41,7 @@ def test_select_output_content_prefers_rendered_structured_output_over_last_ai_m
     assert select_output_content(result, "study-slides").startswith("# Presentation:")
 
 
-def test_select_output_content_ignores_failed_render_and_uses_task_output_for_structured_targets() -> None:
+def test_select_output_content_ignores_failed_render_and_uses_task_output_for_structured_skills() -> None:
     result = {
         "messages": [
             ToolMessage(

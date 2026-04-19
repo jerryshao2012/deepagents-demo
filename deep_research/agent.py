@@ -138,7 +138,7 @@ SKILL_KEYWORDS = load_skill_keywords()
 class ResearchState(AgentState):
     """Runtime state for the research agent."""
     doc_folder: str | None
-    target: str | None
+    skill: str | None
     no_web: bool | None
     agent_start_time: float | None
 
@@ -212,9 +212,9 @@ class ResearchStateMiddleware(AgentMiddleware):
         if not state.get("doc_folder"):
             updates["doc_folder"] = self._extract_doc_folder(user_message)
 
-        # Extract target if not already set
-        if not state.get("target"):
-            updates["target"] = self._extract_target(user_message)
+        # Extract skill if not already set
+        if not state.get("skill"):
+            updates["skill"] = self._extract_skill(user_message)
 
         # Extract no_web if not already set
         if state.get("no_web") is None:
@@ -292,7 +292,7 @@ class ResearchStateMiddleware(AgentMiddleware):
         return potential_path
 
     @staticmethod
-    def _extract_target(user_message: str) -> str | None:
+    def _extract_skill(user_message: str) -> str | None:
         """Extract target from user message patterns using dynamic skill registry."""
         # Look for --target pattern
         target_match = re.search(r"--target\s+([^\s]+)", user_message)

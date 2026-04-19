@@ -42,7 +42,7 @@ def _run_cli(monkeypatch, tmp_path: Path, argv: list[str], fake_agent: FakeAgent
 
 
 @pytest.mark.parametrize(
-    ("target", "result", "expected_content"),
+    ("skill", "result", "expected_content"),
     [
         (
                 "study-slides",
@@ -148,14 +148,14 @@ def _run_cli(monkeypatch, tmp_path: Path, argv: list[str], fake_agent: FakeAgent
     ],
 )
 def test_cli_main_saves_expected_report_for_every_skill(
-        monkeypatch, tmp_path: Path, target: str, result: dict, expected_content: str
+        monkeypatch, tmp_path: Path, skill: str, result: dict, expected_content: str
 ) -> None:
     output_file = _run_cli(
         monkeypatch,
         tmp_path,
-        ["Research Claude Code Memory Management", "--target", target, "--verbose", "False"],
+        ["Research Claude Code Memory Management", "--skill", skill, "--verbose", "False"],
         FakeAgent(invoke_result=result),
-        f"{target.replace('-', '_')}_report",
+        f"{skill.replace('-', '_')}_report",
     )
 
     assert output_file.parent == tmp_path
@@ -183,7 +183,7 @@ def test_cli_main_uses_task_tool_output_when_structured_result_is_returned_by_su
     output_file = _run_cli(
         monkeypatch,
         tmp_path,
-        ["Research Claude Code Memory Management", "--target", "study-slides", "--verbose", "False"],
+        ["Research Claude Code Memory Management", "--skill", "study-slides", "--verbose", "False"],
         FakeAgent(invoke_result=result),
         "study_slides_task_result",
     )
@@ -225,7 +225,7 @@ def test_cli_main_retries_with_invoke_when_stream_ends_with_placeholder(
     output_file = _run_cli(
         monkeypatch,
         tmp_path,
-        ["Research Claude Code Memory Management", "--target", "study-slides"],
+        ["Research Claude Code Memory Management", "--skill", "study-slides"],
         fake_agent,
         "study_slides_retry_result",
     )

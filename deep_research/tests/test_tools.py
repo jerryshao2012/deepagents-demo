@@ -14,7 +14,7 @@ from research_agent.tools import (
 def test_get_skill_definition_renders_slides_from_definition() -> None:
     result = get_skill_registry().get_skill_definition.invoke(
         {
-            "target_id": "study-slides",
+            "skill_id": "study-slides",
             "payload_json": """
             {
               "topic": "AI Agents",
@@ -43,7 +43,7 @@ def test_get_skill_definition_renders_slides_from_definition() -> None:
 def test_get_skill_definition_formats_45_minute_interview_kit() -> None:
     result = get_skill_registry().get_skill_definition.invoke(
         {
-            "target_id": "interview",
+            "skill_id": "interview",
             "payload_json": """
             {
               "topic": "AI Agents",
@@ -72,7 +72,7 @@ def test_get_skill_definition_formats_45_minute_interview_kit() -> None:
 def test_get_skill_definition_reports_schema_validation_errors() -> None:
     result = get_skill_registry().get_skill_definition.invoke(
         {
-            "target_id": "study-slides",
+            "skill_id": "study-slides",
             "payload_json": "{\"topic\": \"AI Agents\", \"slides\": [{\"title\": \"Missing fields\"}]}",
         }
     )
@@ -83,7 +83,7 @@ def test_get_skill_definition_reports_schema_validation_errors() -> None:
 def test_get_skill_definition_accepts_dict_payload_for_study_slides() -> None:
     result = get_skill_registry().get_skill_definition.invoke(
         {
-            "target_id": "study-slides",
+            "skill_id": "study-slides",
             "payload_json": {
                 "topic": "AI Agents",
                 "slides": [
@@ -104,7 +104,7 @@ def test_get_skill_definition_accepts_dict_payload_for_study_slides() -> None:
 def test_get_skill_definition_normalizes_legacy_study_slides_fields() -> None:
     result = get_skill_registry().get_skill_definition.invoke(
         {
-            "target_id": "study-slides",
+            "skill_id": "study-slides",
             "payload_json": {
                 "slides": [
                     {
@@ -127,7 +127,7 @@ def test_get_skill_definition_normalizes_legacy_study_slides_fields() -> None:
 def test_get_skill_definition_rejects_missing_required_fields() -> None:
     result = get_skill_registry().get_skill_definition.invoke(
         {
-            "target_id": "interview",
+            "skill_id": "interview",
             "payload_json": """
             {
               "topic": "AI Agents",
@@ -151,7 +151,7 @@ def test_get_skill_definition_rejects_missing_required_fields() -> None:
 def test_get_skill_definition_coerces_integer_like_floats() -> None:
     result = get_skill_registry().get_skill_definition.invoke(
         {
-            "target_id": "interview",
+            "skill_id": "interview",
             "payload_json": """
             {
               "topic": "AI Agents",
@@ -183,7 +183,7 @@ def test_get_skill_definition_uses_declarative_render_spec(tmp_path, monkeypatch
         """---
 name: demo
 title: Demo Target
-description: Demo target for declarative rendering
+description: Demo skill for declarative rendering
 render_template: markdown_blocks
 ---
 
@@ -235,7 +235,7 @@ Return the final result by calling `render_skill_output`.
 
     result = get_skill_registry().get_skill_definition.invoke(
         {
-            "target_id": "demo",
+            "skill_id": "demo",
             "payload_json": """
             {
               "topic": "Agenda",
@@ -254,21 +254,21 @@ Return the final result by calling `render_skill_output`.
     assert "Total: 20" in result
 
 
-def test_get_skill_definition_reports_unknown_target() -> None:
+def test_get_skill_definition_reports_unknown_skill() -> None:
     result = get_skill_registry().get_skill_definition.invoke(
         {
-            "target_id": "does-not-exist",
+            "skill_id": "does-not-exist",
             "payload_json": "{}",
         }
     )
 
-    assert "Unknown target" in result
+    assert "Unknown skill" in result
 
 
 def test_get_skill_definition_renders_golden_dataset_without_metric_fields() -> None:
     result = get_skill_registry().get_skill_definition.invoke(
         {
-            "target_id": "golden-dataset",
+            "skill_id": "golden-dataset",
             "payload_json": """
             {
               "dataset_name": "HR Policy Starter",
@@ -420,7 +420,7 @@ def test_finalize_golden_dataset_output_updates_state_with_text_file_data(tmp_pa
         fake_evaluate_and_report,
     )
 
-    state = {"files": {}, "target": "golden-dataset"}
+    state = {"files": {}, "skill": "golden-dataset"}
 
     result = finalize_golden_dataset_output.func(
         payload_json="""
@@ -554,16 +554,16 @@ def test_glob_handles_nonexistent_base_path() -> None:
     assert "Error: Base path" in result
 
 
-def test_finalize_golden_dataset_output_rejects_non_golden_target_state() -> None:
+def test_finalize_golden_dataset_output_rejects_non_golden_skill_state() -> None:
     result = finalize_golden_dataset_output.func(
         payload_json='{"items": [{"id": "Q1", "coverage_area": "General", "question": "Q?", "answer": "A"}]}',
-        state={"target": "study-slides"},
+        state={"skill": "study-slides"},
     )
 
-    assert "only available when the active target is `golden-dataset`" in result
+    assert "only available when the active skill is `golden-dataset`" in result
 
 
-def test_trigger_dataset_evaluation_rejects_non_golden_target_state(tmp_path) -> None:
+def test_trigger_dataset_evaluation_rejects_non_golden_skill_state(tmp_path) -> None:
     dataset_csv = tmp_path / "starter.csv"
     dataset_csv.write_text(
         "ID,Coverage Area,Question,Answer,Content\n"
@@ -573,10 +573,10 @@ def test_trigger_dataset_evaluation_rejects_non_golden_target_state(tmp_path) ->
 
     result = tools.trigger_dataset_evaluation.func(
         file_path=str(dataset_csv),
-        state={"target": "study-slides"},
+        state={"skill": "study-slides"},
     )
 
-    assert "only available when the active target is `golden-dataset`" in result
+    assert "only available when the active skill is `golden-dataset`" in result
 
 
 def test_fetch_webpage_content_returns_markdown_for_valid_url() -> None:

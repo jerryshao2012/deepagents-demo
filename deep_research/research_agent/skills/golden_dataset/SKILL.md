@@ -36,7 +36,7 @@ defaults:
 
 Create a Golden Dataset starter pack grounded in the available documents and research findings.
 
-This target covers only:
+This skill covers only:
 - Step 1: create realistic, self-contained customer questions
 - Step 2: generate draft LLM responses for those questions
 
@@ -47,7 +47,7 @@ Do not do Step 3 or Step 4 (defined in the [Producing Golden Datasets](https://g
 
 Requirements:
 - **COMPLETION SEQUENCE — follow these steps in order after all items are drafted:**
-  1. Call `render_skill_output` with `target_id="golden-dataset"` and your JSON object (including `items`). This validates the payload and returns the Markdown preview.
+  1. Call `render_skill_output` with `skill_id="golden-dataset"` and your JSON object (including `items`). This validates the payload and returns the Markdown preview.
   2. Call `finalize_golden_dataset_output` with the **same JSON string** as step 1. Implementation lives under `research_agent/skills/golden_dataset/` (`pipeline.py`): it writes the CSV to `./output/`, runs evaluation, generates a markdown table and calls `write_todos` to save as `/golden_dataset_metrics.md`, and creates a comprehensive final report and calls `write_todos` to save as `/final_report.md` in one atomic step.
   3. Call `write_todos` to mark ALL todos as "completed".
   4. Only after steps 1–3 succeed, write a brief summary to the user.

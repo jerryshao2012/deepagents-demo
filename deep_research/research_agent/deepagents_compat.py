@@ -100,7 +100,7 @@ def patch_deepagents_task_tool_result_extraction() -> None:
             """Build a SystemMessage with task configuration context for the subagent.
 
             This ensures subagents know about configured resources (doc_folder,
-            target, no_web) so they can call the right tools — even when the
+            skill, no_web) so they can call the right tools — even when the
             orchestrator's task description doesn't explicitly mention them.
             """
             parts: list[str] = []
@@ -121,9 +121,9 @@ def patch_deepagents_task_tool_result_extraction() -> None:
                     "description are correct — always discover actual files via the tool."
                 )
 
-            target = state.get("target")
-            if target:
-                parts.append(f"The active output target is `{target}`.")
+            skill = state.get("skill")
+            if skill:
+                parts.append(f"The selected skill is `{skill}`.")
 
             no_web = state.get("no_web")
             if no_web:
