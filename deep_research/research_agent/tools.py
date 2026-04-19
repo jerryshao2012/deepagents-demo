@@ -214,7 +214,7 @@ def think_tool(reflection: str) -> str:
         Confirmation that reflection was recorded for decision-making
     """
     # Ensure output directory exists for logging reflections
-    output_dir = Path(os.environ.get("OUTPUT_FOLDER", "./output"))
+    output_dir = Path(REPORTS_OUTPUT_FOLDER)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Log the reflection to a dedicated research log file
