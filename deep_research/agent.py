@@ -1,9 +1,9 @@
 import os
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-import time
 
 import yaml
 from deepagents import create_deep_agent, SubAgent
@@ -133,7 +133,6 @@ class ResearchStateMiddleware(AgentMiddleware):
     """Middleware to configure state variables like DOC_FOLDER before the agent runs."""
 
     def before_agent(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
-        import time
         messages = state.get("messages", [])
 
         # Check if system instructions already exist
@@ -168,17 +167,16 @@ class ResearchStateMiddleware(AgentMiddleware):
 
     def before_model(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
         """Capture chat_start_time before the first model call."""
-        import time
-            
         # Only set chat_start_time once (at the beginning of the conversation)
         if state.get("chat_start_time") is None:
-            return {"chat_start_time": time.time()}
+            return {
+                "chat_start_time": time.time(),
+                "chat_elapsed_seconds": None
+            }
         return None
 
     def after_model(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
         """Calculate chat_elapsed_seconds after each model response."""
-        import time
-        
         chat_start_time = state.get("chat_start_time")
         if chat_start_time is not None:
             chat_elapsed_seconds = time.time() - chat_start_time
