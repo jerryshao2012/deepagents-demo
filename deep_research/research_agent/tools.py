@@ -304,15 +304,15 @@ def finalize_golden_dataset_output(
     output_folder = Path(reports_output_folder)
     csv_path = export_golden_dataset_csv(payload, output_folder)
 
-    agent_start_time = state.get("agent_start_time") if state else None
-    if isinstance(agent_start_time, float):
-        elapsed_seconds = datetime.now().timestamp() - agent_start_time
-    else:
-        elapsed_seconds = 0.0
+    chat_elapsed_seconds = None
+    if state is not None:
+        chat_start_time = state.get("chat_start_time") if state else None
+        if isinstance(chat_start_time, float):
+            chat_elapsed_seconds = datetime.now().timestamp() - chat_start_time
 
     metrics_csv_path, markdown_content, final_report_content = (
         evaluate_and_report_golden_dataset(
-            csv_path, payload, elapsed_seconds
+            csv_path, payload, chat_elapsed_seconds
         )
     )
 

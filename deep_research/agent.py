@@ -3,6 +3,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+import time
 
 import yaml
 from deepagents import create_deep_agent, SubAgent
@@ -124,7 +125,8 @@ class ResearchState(AgentState):
     doc_folder: str | None
     skill: str | None
     no_web: bool | None
-    agent_start_time: float | None
+    chat_start_time: float | None
+    chat_elapsed_seconds: float | None
 
 
 class ResearchStateMiddleware(AgentMiddleware):
@@ -134,12 +136,8 @@ class ResearchStateMiddleware(AgentMiddleware):
         import time
         messages = state.get("messages", [])
 
-        # Capture agent start time if not already set
-        updates: dict[str, Any] = {}
-        if state.get("agent_start_time") is None:
-            updates["agent_start_time"] = time.time()
-
         # Check if system instructions already exist
+        updates: dict[str, Any] = {}
         has_config = any(
             isinstance(m, SystemMessage) and m.content and "Task configurations:" in str(m.content)
             for m in messages
@@ -167,6 +165,25 @@ class ResearchStateMiddleware(AgentMiddleware):
             result["messages"] = [SystemMessage(content=f"Task configurations: \n{instruction}")]
 
         return result if result else None
+
+    def before_model(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
+        """Capture chat_start_time before the first model call."""
+        import time
+            
+        # Only set chat_start_time once (at the beginning of the conversation)
+        if state.get("chat_start_time") is None:
+            return {"chat_start_time": time.time()}
+        return None
+
+    def after_model(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
+        """Calculate chat_elapsed_seconds after each model response."""
+        import time
+        
+        chat_start_time = state.get("chat_start_time")
+        if chat_start_time is not None:
+            chat_elapsed_seconds = time.time() - chat_start_time
+            return {"chat_elapsed_seconds": chat_elapsed_seconds}
+        return None
 
     def _extract_parameters_from_user_input(self, state: ResearchState, messages: list) -> dict[str, Any]:
         """Extract doc_folder, skill, and no_web from user message patterns."""

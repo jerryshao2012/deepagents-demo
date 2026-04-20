@@ -184,7 +184,7 @@ def generate_golden_dataset_report(
         metrics_csv_path: str,
         markdown_content: str,
         payload: dict,
-        elapsed_seconds: float = 0.0
+        elapsed_seconds: float | None = None
 ) -> str:
     """Generate a comprehensive final report for the golden dataset generation process.
     
@@ -238,7 +238,7 @@ def generate_golden_dataset_report(
 
 **Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
-**Time Spent:** {elapsed_seconds:.2f} seconds
+**Time Spent:** {f"{elapsed_seconds:.2f}" if elapsed_seconds is not None else "N/A"} seconds
 
 ## Overview
 

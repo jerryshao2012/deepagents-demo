@@ -76,7 +76,7 @@ def evaluate_golden_dataset_csv_file(file_path: str) -> tuple[Path, str]:
 def evaluate_and_report_golden_dataset(
         csv_path: Path,
         payload: dict,
-        elapsed_seconds: float = 0.0
+        elapsed_seconds: float | None = None
 ) -> tuple[Path, str, str]:
     """Evaluate golden dataset CSV and generate both metrics markdown and final report.
     
