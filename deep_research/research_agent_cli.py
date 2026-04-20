@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
 
 from agent import agent, model
-from research_agent.tools import REPORTS_OUTPUT_FOLDER, normalize_path_for_filesystem_tools
+from research_agent.tools import normalize_path_for_filesystem_tools
 from research_agent.utils.cli import build_parser, list_skills
 from utils import str2bool, get_ssl_verify_config, show_prompt, format_messages
 
@@ -37,7 +37,7 @@ class Spinner:
         if message:
             self.message = message
         self.stop_running.clear()
-        self.thread = threading.Thread(skill=self.spin)
+        self.thread = threading.Thread(target=self.spin)
         self.thread.daemon = True
         self.thread.start()
 
@@ -272,8 +272,8 @@ def save_research_to_file(research_content, filename=None, output_folder=None):
 
 def derive_output_folder(doc_folder: str | None) -> Path:
     if not doc_folder:
-        return Path(REPORTS_OUTPUT_FOLDER)
-    return Path(REPORTS_OUTPUT_FOLDER) / Path(doc_folder).name
+        return Path(os.environ.get("REPORTS_OUTPUT_FOLDER", "./output"))
+    return Path(os.environ.get("REPORTS_OUTPUT_FOLDER", "./output")) / Path(doc_folder).name
 
 
 def configure_output_folder(doc_folder: str | None) -> Path:

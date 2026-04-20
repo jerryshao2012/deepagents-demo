@@ -15,7 +15,6 @@ from research_agent.utils.content_extractors import extract_supported_document
 load_dotenv()
 # These can be configured via environment variables with sensible defaults
 MAX_GLOB_DEPTH = int(os.environ.get("MAX_GLOB_DEPTH", "3"))
-REPORTS_OUTPUT_FOLDER = os.environ.get("REPORTS_OUTPUT_FOLDER", "./output")
 MAX_FILES_TO_READ = int(os.environ.get("MAX_FILES_TO_READ", "20"))
 MAX_TOTAL_SIZE_MB = int(os.environ.get("MAX_TOTAL_SIZE_MB", "50"))
 
@@ -73,10 +72,11 @@ def _get_extracted_path(file_path: Path, output_folder: Path) -> Path:
 
 
 def _resolve_doc_output_subfolder(folder: Path) -> Path:
-    configured_output = Path(os.environ.get("OUTPUT_FOLDER", REPORTS_OUTPUT_FOLDER))
+    reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
+    configured_output = Path(os.environ.get("OUTPUT_FOLDER", reports_output_folder))
     if configured_output.name == folder.name:
         return configured_output
-    if configured_output == Path(REPORTS_OUTPUT_FOLDER):
+    if configured_output == Path(reports_output_folder):
         return configured_output / folder.name
     return configured_output
 
@@ -85,7 +85,8 @@ def _save_extracted_content(original_file_path: Path, content: str, output_folde
     if output_folder:
         output_dir = output_folder
     else:
-        output_dir = Path(REPORTS_OUTPUT_FOLDER)
+        reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
+        output_dir = Path(reports_output_folder)
     output_dir.mkdir(parents=True, exist_ok=True)
     file_path = _get_extracted_path(original_file_path, output_dir)
     file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -355,7 +356,8 @@ def write_file_impl(
                 pass
 
         # Fallback to local filesystem
-        output_dir = Path(REPORTS_OUTPUT_FOLDER)
+        reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
+        output_dir = Path(reports_output_folder)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Resolve the full path

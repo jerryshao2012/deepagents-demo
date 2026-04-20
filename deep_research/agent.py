@@ -38,9 +38,6 @@ from utils import get_ssl_verify_config, str2bool
 # Load environment variables
 load_dotenv()
 
-# Constants
-REPORTS_OUTPUT_FOLDER = os.environ.get("REPORTS_OUTPUT_FOLDER", "./output")
-
 # Create SSL verification setting - CLI flag takes precedence over env var
 verify_ssl = get_ssl_verify_config()
 
@@ -150,7 +147,7 @@ class ResearchStateMiddleware(AgentMiddleware):
         if has_config:
             return updates if updates else None
 
-        # Step 1: Extract doc_folder and target from user message if not already set
+        # Step 1: Extract doc_folder and skill from user message if not already set
         extracted_updates = self._extract_parameters_from_user_input(state, messages)
         updates.update(extracted_updates)
 
@@ -158,6 +155,8 @@ class ResearchStateMiddleware(AgentMiddleware):
         if updates.get("doc_folder") or (state.get("doc_folder") and not extracted_updates):
             doc_folder = updates.get("doc_folder") or state.get("doc_folder")
             self._configure_output_folder(doc_folder)
+        else:
+            self._configure_output_folder(None)
 
         # Step 3: Build instruction based on full state (including extracted parameters)
         merged_state: ResearchState = {**state, **updates}  # type: ignore[assignment]
@@ -170,7 +169,7 @@ class ResearchStateMiddleware(AgentMiddleware):
         return result if result else None
 
     def _extract_parameters_from_user_input(self, state: ResearchState, messages: list) -> dict[str, Any]:
-        """Extract doc_folder, target, and no_web from user message patterns."""
+        """Extract doc_folder, skill, and no_web from user message patterns."""
         user_message = None
         for m in messages:
             # Handle dictionary messages
@@ -220,10 +219,11 @@ class ResearchStateMiddleware(AgentMiddleware):
         (which may not include ``doc_folder``) can still access it as a
         fallback inside ``read_doc_folder``.
         """
+        reports_output_folder = os.environ.get("REPORTS_OUTPUT_FOLDER", "./output")
         if not doc_folder:
-            output_folder = REPORTS_OUTPUT_FOLDER
+            output_folder = reports_output_folder
         else:
-            output_folder = str(Path(REPORTS_OUTPUT_FOLDER) / Path(doc_folder).name)
+            output_folder = str(Path(reports_output_folder) / Path(doc_folder).name)
 
         # Normalize path for deepagents filesystem tools compatibility (cross-platform)
         normalized_path = normalize_path_for_filesystem_tools(output_folder)
@@ -280,11 +280,11 @@ class ResearchStateMiddleware(AgentMiddleware):
 
     @staticmethod
     def _extract_skill(user_message: str) -> str | None:
-        """Extract target from user message patterns using dynamic skill registry."""
-        # Look for --target pattern
-        target_match = re.search(r"--target\s+([^\s]+)", user_message)
-        if target_match:
-            return target_match.group(1)
+        """Extract skill from user message patterns using dynamic skill registry."""
+        # Look for --skill pattern
+        skill_match = re.search(r"--skill\s+([^\s]+)", user_message)
+        if skill_match:
+            return skill_match.group(1)
 
         # Use skill registry to find matching skills by keyword
         message_lower = user_message.lower()

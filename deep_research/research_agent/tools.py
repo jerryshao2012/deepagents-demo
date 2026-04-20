@@ -35,9 +35,6 @@ from research_agent.utils.web_search import (
 # Load environment variables
 load_dotenv()
 
-# Constants
-REPORTS_OUTPUT_FOLDER = os.environ.get("REPORTS_OUTPUT_FOLDER", "./output")
-
 
 # --- Web Search Tools ---
 
@@ -178,7 +175,8 @@ def think_tool(reflection: str) -> str:
         Confirmation that reflection was recorded for decision-making
     """
     # Ensure output directory exists for logging reflections
-    output_dir = Path(REPORTS_OUTPUT_FOLDER)
+    reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
+    output_dir = Path(reports_output_folder)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Log the reflection to a dedicated research log file
@@ -267,7 +265,8 @@ def render_skill_output(
 
 def write_content_to_output_folder(filename: str, content: str) -> str:
     """Write content to a file in the output folder."""
-    output_subfolder = Path(REPORTS_OUTPUT_FOLDER)
+    reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
+    output_subfolder = Path(reports_output_folder)
     output_subfolder.mkdir(parents=True, exist_ok=True)
     file_path = output_subfolder / filename
     with open(file_path, 'w', encoding='utf-8') as f:
@@ -297,7 +296,8 @@ def finalize_golden_dataset_output(
     except json.JSONDecodeError as e:
         return f"Error: Invalid JSON in payload_json: {e}"
 
-    output_folder = Path(REPORTS_OUTPUT_FOLDER)
+    reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
+    output_folder = Path(reports_output_folder)
     csv_path = export_golden_dataset_csv(payload, output_folder)
 
     agent_start_time = state.get("agent_start_time") if state else None
@@ -427,7 +427,8 @@ def frontend_slides(
         safe_name = f"{_slugify_filename(resolved_title)}.html"
 
     # Save to BOTH output folders: ./output and ./reports
-    output_folder = Path(REPORTS_OUTPUT_FOLDER)
+    reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
+    output_folder = Path(reports_output_folder)
     output_folder.mkdir(parents=True, exist_ok=True)
     output_path = output_folder / safe_name
     output_path.write_text(html_content, encoding="utf-8")
