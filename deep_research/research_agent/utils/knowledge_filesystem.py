@@ -350,7 +350,7 @@ def write_file_impl(
                 files = state.get("files", {})
                 files[file_path] = create_file_data(content)
                 state["files"] = files
-                return f"Successfully wrote {len(content)} bytes to `{normalized_path}`"
+                return f"Successfully wrote {len(content)} bytes to `{file_path}`"
             except Exception:
                 pass
 
