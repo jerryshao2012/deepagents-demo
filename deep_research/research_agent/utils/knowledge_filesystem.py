@@ -59,6 +59,17 @@ def normalize_path_for_filesystem_tools(path_str: str) -> str:
     return normalized
 
 
+def write_content_to_output_folder(filename: str, content: str) -> str:
+    """Write content to a file in the output folder."""
+    reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
+    output_subfolder = Path(reports_output_folder)
+    output_subfolder.mkdir(parents=True, exist_ok=True)
+    file_path = output_subfolder / filename
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    return normalize_path_for_filesystem_tools(str(file_path))
+
+
 def _get_extracted_path(file_path: Path, output_folder: Path) -> Path:
     """Get the target path for an extracted file."""
     suffix = file_path.suffix.lower()

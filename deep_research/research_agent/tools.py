@@ -24,6 +24,7 @@ from research_agent.utils.knowledge_filesystem import (
     glob_impl,
     read_file_impl,
     read_doc_folder_impl,
+    write_content_to_output_folder,
 )
 from research_agent.utils.result_rendering import render_skill_output_impl
 from research_agent.utils.skill_registry import get_skill_registry
@@ -39,7 +40,10 @@ load_dotenv()
 # --- Web Search Tools ---
 
 @tool(parse_docstring=True)
-def fetch_webpage_content(url: str, timeout: float = 10.0) -> str:
+def fetch_webpage_content(
+        url: str,
+        timeout: float = 10.0
+) -> str:
     """Fetch and convert webpage content to markdown.
 
     Use this tool to retrieve the full content of a specific webpage URL and convert it to readable markdown format.
@@ -81,7 +85,10 @@ def tavily_search(
 # --- Filesystem Tools ---
 
 @tool(parse_docstring=True)
-def ls(path: str, state: Annotated[dict, InjectedState] = None) -> str:
+def ls(
+        path: str,
+        state: Annotated[dict, InjectedState] = None
+) -> str:
     """List files in a directory with fallback support.
 
     Tries to list from the virtual filesystem in state first (DeepAgents backend),
@@ -98,7 +105,10 @@ def ls(path: str, state: Annotated[dict, InjectedState] = None) -> str:
 
 
 @tool(parse_docstring=True)
-def glob(pattern: str, state: Annotated[dict, InjectedState] = None) -> str:
+def glob(
+        pattern: str,
+        state: Annotated[dict, InjectedState] = None
+) -> str:
     """Find files matching a glob pattern with fallback support.
 
     Tries to match against the virtual filesystem in state first, then falls back
@@ -115,8 +125,10 @@ def glob(pattern: str, state: Annotated[dict, InjectedState] = None) -> str:
 
 
 @tool(parse_docstring=True)
-def read_file(file_path: str,
-              state: Annotated[dict, InjectedState] = None) -> str:
+def read_file(
+        file_path: str,
+        state: Annotated[dict, InjectedState] = None
+) -> str:
     """Read the content of a file with fallback support.
 
     Tries to read from the virtual filesystem in state first (DeepAgents backend),
@@ -162,7 +174,9 @@ def read_doc_folder(
 # --- Thinking Tool ---
 
 @tool(parse_docstring=True)
-def think_tool(reflection: str) -> str:
+def think_tool(
+        reflection: str
+) -> str:
     """Tool for strategic reflection on research progress and decision-making.
 
     Use this tool after each search to analyze results and plan next steps systematically.
@@ -263,16 +277,6 @@ def render_skill_output(
 
 # --- Golden Dataset Tools ---
 
-def write_content_to_output_folder(filename: str, content: str) -> str:
-    """Write content to a file in the output folder."""
-    reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
-    output_subfolder = Path(reports_output_folder)
-    output_subfolder.mkdir(parents=True, exist_ok=True)
-    file_path = output_subfolder / filename
-    with open(file_path, 'w', encoding='utf-8') as f:
-        f.write(content)
-    return normalize_path_for_filesystem_tools(str(file_path))
-
 
 @tool(parse_docstring=True)
 def finalize_golden_dataset_output(
@@ -334,8 +338,10 @@ def finalize_golden_dataset_output(
 
 
 @tool(parse_docstring=True)
-def trigger_dataset_evaluation(file_path: str,
-                               state: Annotated[dict, InjectedState] = None, ) -> str:
+def trigger_dataset_evaluation(
+        file_path: str,
+        state: Annotated[dict, InjectedState] = None,
+) -> str:
     """Run quality metrics on an existing golden-dataset CSV file.
 
     Use this tool if you already have a CSV file and want to evaluate its quality.
@@ -346,7 +352,7 @@ def trigger_dataset_evaluation(file_path: str,
         state: LangGraph state (injected automatically).
 
     Returns:
-        A confirmation message with the path to the metrics file, or an error message.
+        A confirmation message with the path to the metrics file.
     """
     metrics_csv_path, markdown_content = evaluate_golden_dataset_csv_file(file_path)
     if state is not None:
