@@ -73,7 +73,7 @@ class SkillRegistry:
         """
         if skills_dir is None:
             # Default to the skills directory relative to this file
-            self.skills_dir = Path(__file__).parent / "skills"
+            self.skills_dir = Path(__file__).parent.parent / "skills"
         else:
             self.skills_dir = Path(skills_dir)
 
