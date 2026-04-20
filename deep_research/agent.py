@@ -19,13 +19,7 @@ from research_agent import (
 )
 from research_agent.tools import (
     normalize_path_for_filesystem_tools,
-    list_available_skills,
-    read_skill_supporting_file,
     think_tool,
-    frontend_slides,
-    frontend_slides_export_pdf,
-    frontend_slides_deploy,
-    frontend_slides_extract_pptx,
     finalize_golden_dataset_output,
     trigger_dataset_evaluation,
     ls,
@@ -38,7 +32,7 @@ from research_agent.tools import (
 from research_agent.utils.cli import (
     build_instruction,
 )
-from research_agent.utils.skill_registry import SkillRegistry
+from research_agent.utils.skill_registry import get_skill_registry
 from utils import get_ssl_verify_config, str2bool
 
 # Load environment variables
@@ -57,8 +51,8 @@ MAX_RESEARCHER_ITERATIONS = int(os.environ.get("MAX_RESEARCHER_ITERATIONS", "3")
 # Get current date
 current_date = datetime.now().strftime("%Y-%m-%d")
 
-# Initialize dynamic skill registry
-skill_registry = SkillRegistry()
+# Initialize dynamic skill registry (use singleton to avoid duplicate initialization)
+skill_registry = get_skill_registry()
 
 
 def load_skill_keywords(skills_dir: str | None = None) -> dict[str, list[str]]:
@@ -375,14 +369,8 @@ research_sub_agent: SubAgent = {
         ls,
         glob,
         read_doc_folder,
-        frontend_slides,
-        frontend_slides_export_pdf,
-        frontend_slides_deploy,
-        frontend_slides_extract_pptx,
         finalize_golden_dataset_output,
         trigger_dataset_evaluation,
-        list_available_skills,
-        read_skill_supporting_file,
     ],
 }
 
@@ -399,14 +387,8 @@ agent = create_deep_agent(
         ls,
         glob,
         read_doc_folder,
-        frontend_slides,
-        frontend_slides_export_pdf,
-        frontend_slides_deploy,
-        frontend_slides_extract_pptx,
         finalize_golden_dataset_output,
         trigger_dataset_evaluation,
-        list_available_skills,
-        read_skill_supporting_file,
     ],
     system_prompt=INSTRUCTIONS,
     subagents=[research_sub_agent],

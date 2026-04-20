@@ -65,11 +65,12 @@ class SkillRegistry:
     _QUALITY_GUIDELINES_SECTION_RE = re.compile(r"^## Quality Guidelines\s*$", re.MULTILINE)
     SUPPORTED_RENDER_TEMPLATES = {"markdown_blocks"}
 
-    def __init__(self, skills_dir: str | Path | None = None):
+    def __init__(self, skills_dir: str | Path | None = None, config_file: str | Path | None = None):
         """Initialize the skill registry.
 
         Args:
             skills_dir: Path to the skills directory. Defaults to research_agent/skills/
+            config_file: Path to skill_config.yaml. Defaults to research_agent/utils/skill_config.yaml
         """
         if skills_dir is None:
             # Default to the skills directory relative to this file
@@ -77,16 +78,76 @@ class SkillRegistry:
         else:
             self.skills_dir = Path(skills_dir)
 
+        # Load skill configuration
+        self._available_skills = self._load_skill_config(config_file)
+
         self._skills: dict[str, SkillInfo] = {}
         self._load_timestamps: dict[str, float] = {}
         self._skill_definitions: dict[str, dict[str, Any]] = {}
         self._load_all_skills()
+
+    @staticmethod
+    def _load_skill_config(config_file: str | Path | None = None) -> list[str] | None:
+        """Load skill configuration from YAML file.
+
+        Args:
+            config_file: Path to the skill_config.yaml file
+
+        Returns:
+            List of available skill IDs, or None if no config file (load all skills)
+        """
+        if config_file is None:
+            # Default config location
+            config_file = Path(__file__).parent / "skill_config.yaml"
+
+            if config_file:
+                config_path = Path(config_file)
+                if not config_path.exists():
+                    print(f"Warning: Skill config file not found: {config_path}. Loading all skills.")
+                    return None
+
+                try:
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        config = yaml.safe_load(f)
+
+                    if not config or 'skill' not in config or 'available' not in config['skill']:
+                        print(f"Warning: Invalid skill config format in {config_path}. Loading all skills.")
+                        return None
+
+                    available = config['skill']['available']
+                    if isinstance(available, list):
+                        # Extract skill IDs (first part before ': ' if present)
+                        skill_ids = []
+                        for item in available:
+                            if isinstance(item, str):
+                                # Format: "skill-id/skill-name"
+                                skill_id = item.strip()
+                                skill_ids.append(skill_id)
+                            elif isinstance(item, dict):
+                                # Alternative format with explicit id field
+                                skill_ids.append(item.get('id', ''))
+
+                        print(f"Loaded skill config: {len(skill_ids)} skills configured")
+                        return skill_ids
+                    else:
+                        print(f"Warning: 'available' should be a list in {config_path}. Loading all skills.")
+                        return None
+
+                except Exception as e:
+                    print(f"Warning: Failed to load skill config {config_path}: {e}. Loading all skills.")
+                    return None
+
+        print(f"Warning: Failed to find skill config file - {config_file}.")
+        return None
 
     def _load_all_skills(self) -> None:
         """Scan and load all skills from the skills directory."""
         if not self.skills_dir.exists():
             print(f"Warning: Skills directory not found: {self.skills_dir}")
             return
+
+        loaded_count = 0
+        skipped_count = 0
 
         # Iterate through all subdirectories in the skills folder
         for skill_path in sorted(self.skills_dir.iterdir()):
@@ -102,6 +163,12 @@ class SkillRegistry:
                 if parsed_skill:
                     # Use the 'name' field from frontmatter as skill_id (not directory name)
                     skill_id = parsed_skill.get("name", skill_path.name)
+
+                    # Check if skill is in the allowed list (if config exists)
+                    if self._available_skills is not None and skill_id not in self._available_skills:
+                        skipped_count += 1
+                        continue
+
                     parsed_skill["skill_id"] = skill_id
                     parsed_skill["path"] = skill_path
                     self._skills[skill_id] = SkillInfo(
@@ -109,9 +176,15 @@ class SkillRegistry:
                     if "skill_definition" in parsed_skill:
                         self._skill_definitions.update(parsed_skill["skill_definition"])
                     self._load_timestamps[skill_id] = skill_file.stat().st_mtime
+                    loaded_count += 1
             except Exception as e:
                 print(f"Warning: Failed to load skill from {skill_file}: {e}")
                 continue
+
+        if self._available_skills is not None:
+            print(f"Loaded {loaded_count} skills, skipped {skipped_count} (filtered by config)")
+        else:
+            print(f"Loaded {loaded_count} skills (no config filter)")
 
     def _parse_skill_file(self, file_path: Path) -> dict[str, Any] | None:
         """Parse a SKILL.md file, extracting frontmatter and body.
@@ -311,12 +384,21 @@ class SkillRegistry:
             print(f"Warning: Failed to read supporting file {file_path}: {e}")
             return None
 
-    def reload_all(self) -> None:
-        """Force reload all skills from disk."""
+    def reload_all(self, reload_config: bool = False) -> None:
+        """Force reload all skills from disk.
+
+        Args:
+            reload_config: If True, also reload the skill configuration file
+        """
         self._skills.clear()
         self._load_timestamps.clear()
         self._skill_definitions.clear()
-        self._load_all_skills()
+
+        if reload_config:
+            self._available_skills = self._load_skill_config()
+        else:
+            self._load_all_skills()
+
         print(f"Reloaded {len(self._skills)} skills from {self.skills_dir}")
 
     @property
