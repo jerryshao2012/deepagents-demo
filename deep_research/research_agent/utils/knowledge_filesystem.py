@@ -5,7 +5,7 @@ import random
 from pathlib import Path
 from typing import Annotated
 
-from deepagents.backends.utils import file_data_to_string
+from deepagents.backends.utils import file_data_to_string, create_file_data
 from dotenv import load_dotenv
 from langgraph.prebuilt import InjectedState
 
@@ -319,6 +319,58 @@ def read_file_impl(file_path: str,
         return path.read_text(encoding="utf-8")
     except Exception as e:
         return f"Error reading file '{file_path}': {e}"
+
+
+def write_file_impl(
+        file_path: str,
+        content: str,
+        state: Annotated[dict, InjectedState] = None
+) -> str:
+    """Write content to a file with virtual filesystem support.
+
+    Writes content to the specified file path. If using a DeepAgents backend,
+    the file is stored in the virtual filesystem. Otherwise, it writes to the
+    local filesystem.
+
+    Args:
+        file_path: The path where the file should be written.
+        content: The content to write to the file.
+        state: LangGraph state containing virtual filesystem (injected automatically).
+
+    Returns:
+        Confirmation message with the normalized file path, or an error message.
+    """
+    try:
+        # Normalize the file path
+        normalized_path = normalize_path_for_filesystem_tools(file_path)
+
+        # Try to use virtual filesystem if available in state
+        if state is not None:
+            try:
+                files = state.get("files", {})
+                files[file_path] = create_file_data(content)
+                state["files"] = files
+                return f"Successfully wrote {len(content)} bytes to `{normalized_path}`"
+            except Exception:
+                pass
+
+        # Fallback to local filesystem
+        output_dir = Path(REPORTS_OUTPUT_FOLDER)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Resolve the full path
+        full_path = Path(normalized_path)
+        if not full_path.is_absolute():
+            full_path = output_dir / normalized_path
+
+        # Create parent directories if needed
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write the file
+        full_path.write_text(content, encoding="utf-8")
+        return f"Successfully wrote {len(content)} bytes to `{normalize_path_for_filesystem_tools(str(full_path))}`"
+    except Exception as e:
+        return f"Error writing file `{file_path}`: {str(e)}"
 
 
 def read_doc_folder_impl(

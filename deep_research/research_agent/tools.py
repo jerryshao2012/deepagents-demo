@@ -23,6 +23,7 @@ from research_agent.utils.knowledge_filesystem import (
     ls_impl,
     glob_impl,
     read_file_impl,
+    write_file_impl,
     read_doc_folder_impl,
 )
 from research_agent.utils.result_rendering import render_skill_output_impl
@@ -133,6 +134,29 @@ def read_file(file_path: str,
         The content of the file or an error message if the file not found.
     """
     return read_file_impl(file_path, state)
+
+
+@tool(parse_docstring=True)
+def write_file(
+        file_path: str,
+        content: str,
+        state: Annotated[dict, InjectedState] = None
+) -> str:
+    """Write content to a file with virtual filesystem support.
+
+    Writes content to the specified file path. If using a DeepAgents backend,
+    the file is stored in the virtual filesystem. Otherwise, it writes to the
+    local filesystem.
+
+    Args:
+        file_path: The path where the file should be written.
+        content: The content to write to the file.
+        state: LangGraph state containing virtual filesystem (injected automatically).
+
+    Returns:
+        Confirmation message with the normalized file path, or an error message.
+    """
+    return write_file_impl(file_path, content, state)
 
 
 @tool(parse_docstring=True)

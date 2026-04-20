@@ -31,6 +31,7 @@ from research_agent.tools import (
     ls,
     glob,
     read_file,
+    write_file,
     read_doc_folder,
     tavily_search,
     fetch_webpage_content
@@ -403,6 +404,7 @@ agent = create_deep_agent(
         fetch_webpage_content,
         think_tool,
         read_file,
+        write_file,
         ls,
         glob,
         read_doc_folder,
