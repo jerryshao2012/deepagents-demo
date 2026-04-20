@@ -308,7 +308,7 @@ def finalize_golden_dataset_output(
 
     metrics_csv_path, markdown_content, final_report_content = (
         evaluate_and_report_golden_dataset(
-            csv_path, payload, output_folder, elapsed_seconds
+            csv_path, payload, elapsed_seconds
         )
     )
 
@@ -317,6 +317,12 @@ def finalize_golden_dataset_output(
     report_filepath = write_content_to_output_folder(
         report_filename, final_report_content
     )
+
+    if state is not None:
+        files = state.get("files", {})
+        files["/golden_dataset_metrics.md"] = create_file_data(markdown_content)
+        files["/final_report.md"] = create_file_data(final_report_content)
+        state["files"] = files
 
     return (
         f"Successfully exported and evaluated the golden dataset.\n"
@@ -328,7 +334,8 @@ def finalize_golden_dataset_output(
 
 
 @tool(parse_docstring=True)
-def trigger_dataset_evaluation(file_path: str) -> str:
+def trigger_dataset_evaluation(file_path: str,
+                               state: Annotated[dict, InjectedState] = None, ) -> str:
     """Run quality metrics on an existing golden-dataset CSV file.
 
     Use this tool if you already have a CSV file and want to evaluate its quality.
@@ -336,11 +343,23 @@ def trigger_dataset_evaluation(file_path: str) -> str:
 
     Args:
         file_path: The absolute path to the golden dataset CSV file.
+        state: LangGraph state (injected automatically).
 
     Returns:
         A confirmation message with the path to the metrics file, or an error message.
     """
-    return evaluate_golden_dataset_csv_file(file_path)
+    metrics_csv_path, markdown_content = evaluate_golden_dataset_csv_file(file_path)
+    if state is not None:
+        files = state.get("files", {})
+        files["/golden_dataset_metrics.md"] = create_file_data(markdown_content)
+        state["files"] = files
+
+    return (
+        f"Successfully exported and evaluated the golden dataset.\n"
+        f"- Raw data saved to: {normalize_path_for_filesystem_tools(str(file_path))}\n"
+        f"- Metrics saved to: {normalize_path_for_filesystem_tools(str(metrics_csv_path))}\n"
+        f"## Golden Dataset Quality Metrics\n\n{markdown_content}"
+    )
 
 
 # --- Frontend Slides Tools ---

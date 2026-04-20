@@ -106,7 +106,6 @@ def test_pipeline_integration():
             metrics_csv, markdown_content, final_report = evaluate_and_report_golden_dataset(
                 csv_path=csv_path,
                 payload=payload,
-                output_folder=output_folder
             )
 
             print("\n✓ Pipeline integration successful!")

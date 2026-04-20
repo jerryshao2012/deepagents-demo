@@ -6,6 +6,15 @@ import csv
 import re
 from pathlib import Path
 
+from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import (
+    convert_csv_to_markdown,
+    generate_golden_dataset_report,
+    score_dataset_file,
+)
+from research_agent.skills.golden_dataset.scripts.humanize_report import (
+    humanize_report,
+)
+
 GOLDEN_DATASET_SKILL_ID = "golden-dataset"
 
 
@@ -50,28 +59,23 @@ def export_golden_dataset_csv(payload: dict, output_folder: Path) -> Path:
     return csv_path
 
 
-def evaluate_golden_dataset_csv_file(file_path: str) -> str:
+def evaluate_golden_dataset_csv_file(file_path: str) -> tuple[Path, str]:
     """Run quality metrics on a golden-dataset CSV; same behavior as `trigger_dataset_evaluation`."""
     path_obj = Path(file_path)
     if not path_obj.exists():
-        return f"File not found: {file_path}"
+        return Path(file_path), f"Error: File not found: {file_path}"
 
-    try:
-        from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import (
-            score_dataset_file,
-        )
+    output_csv = str(path_obj.with_name(f"{path_obj.stem}-with-metrics{path_obj.suffix}"))
+    metrics_csv_path = score_dataset_file(str(path_obj), output_csv)
 
-        output_csv = str(path_obj.with_name(f"{path_obj.stem}-with-metrics{path_obj.suffix}"))
-        result_path = score_dataset_file(str(path_obj), output_csv)
-        return f"Successfully evaluated dataset. Metrics saved to: {result_path}"
-    except Exception as exc:
-        return f"Failed to run metric evaluation: {exc}"
+    # Step 2: Convert metrics CSV to markdown table
+    markdown_content = convert_csv_to_markdown(str(metrics_csv_path))
+    return metrics_csv_path, markdown_content
 
 
 def evaluate_and_report_golden_dataset(
         csv_path: Path,
         payload: dict,
-        output_folder: Path,
         elapsed_seconds: float = 0.0
 ) -> tuple[Path, str, str]:
     """Evaluate golden dataset CSV and generate both metrics markdown and final report.
@@ -79,21 +83,11 @@ def evaluate_and_report_golden_dataset(
     Args:
         csv_path: Path to the original CSV file.
         payload: The golden dataset payload with metadata.
-        output_folder: Output folder for generated files.
         elapsed_seconds: Total time spent in agent chat (in seconds).
         
     Returns:
         Tuple of (metrics_csv_path, markdown_content, final_report_content).
     """
-    from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import (
-        convert_csv_to_markdown,
-        generate_golden_dataset_report,
-        score_dataset_file,
-    )
-    from research_agent.skills.golden_dataset.scripts.humanize_report import (
-        humanize_report,
-    )
-
     # Step 1: Run quality metrics
     metrics_csv_path_str = str(csv_path.with_name(f"{csv_path.stem}-with-metrics{csv_path.suffix}"))
     metrics_csv_path = Path(score_dataset_file(str(csv_path), metrics_csv_path_str))
