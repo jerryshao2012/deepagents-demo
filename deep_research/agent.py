@@ -45,13 +45,6 @@ from utils import get_ssl_verify_config, str2bool
 # Load environment variables
 load_dotenv()
 
-# Ensure task() returns the subagent's final content even when it is not stored in `.text`.
-from research_agent.deepagents_compat import (
-    patch_deepagents_task_tool_result_extraction,
-)
-
-patch_deepagents_task_tool_result_extraction()
-
 # Constants
 REPORTS_OUTPUT_FOLDER = os.environ.get("REPORTS_OUTPUT_FOLDER", "./output")
 

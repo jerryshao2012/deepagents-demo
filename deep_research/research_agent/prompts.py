@@ -7,18 +7,18 @@ RESEARCH_WORKFLOW_INSTRUCTIONS = """# Research Workflow
 Follow this workflow for all research requests:
 
 1. **Plan**: Create a todo list with write_todos to break down the research into focused tasks
-2. **Save the request**: Use write_file() to save the user's research question to `/research_request.md`
+2. **Save the request**: Use `write_file(file_path='/research_request.md', content='<user query>')` to save the user's research question
 3. **Research**: Delegate research tasks to sub-agents using the task() tool - ALWAYS use sub-agents for research, never conduct research yourself
 4. **Synthesize**: Review all sub-agent findings and consolidate citations (each unique URL gets one number across all findings)
 5. **Deliver Output** — choose based on the request type:
-   - **Standard research** → Use the `write_file` tool to write a comprehensive final report to `/final_report.md` (see Report Writing Guidelines below)
+   - **Standard research** → Use `write_file(file_path='/final_report.md', content='<report markdown>')` to write a comprehensive final report (see Report Writing Guidelines below)
    - **Structured output skill (e.g. `golden-dataset`)** → You MUST call the required tools **right now** in this order:
       1. Call `render_skill_output` with the skill id and the full JSON payload.
       2. For `golden-dataset` only: immediately call `finalize_golden_dataset_output` with the **same** JSON. This exports the CSV and runs metrics.
       3. Call `write_todos` to mark ALL todos as "completed".
       4. Only after all three steps succeed, write a brief confirmation summary.
       **Do NOT write to `/final_report.md` for structured skills. The tool calls ARE the deliverable — a verbal summary or a promise to call the tools later is completely unacceptable.**
-   - **Unstructured skill (e.g. `interview-coach-pro`)** → Use the `write_file` tool to write the specialized markdown content directly to `/final_report.md`. Do NOT call `render_skill_output`.
+   - **Unstructured skill (e.g. `interview-coach-pro`)** → Use `write_file(file_path='/final_report.md', content='<specialized markdown>')` to write the specialized markdown content directly. Do NOT call `render_skill_output`.
 6. **Verify**: Read `/research_request.md` and confirm you've addressed all aspects with proper citations and structure
 
 ## Research Planning Guidelines
@@ -75,8 +75,10 @@ Simply list items with details - no introduction needed:
 
 ## CRITICAL EXECUTION RULES
 1. **NEVER ask the user for results**: When you delegate a task via the `task()` tool, the subagent's findings will be returned directly to you in the tool's output context. You MUST read the tool output. Do NOT ask the user to provide the results.
-2. **Never pause for narrative**: When moving from synthesis to output delivery, DO NOT output a conversational message like "I will now synthesize..." or "Note on deliverable...". You MUST immediately and directly call the `write_file` tool.
-3. **Always complete tasks**: Before returning your final response, you MUST call `write_todos` to mark all tasks as "completed". This is your final action.
+2. **task() returns automatically**: After calling `task()`, the subagent executes and returns its findings in the NEXT conversation turn as tool output. You do NOT need to "wait" or use think_tool to check status — simply continue your workflow when the results appear. If you see task results in the conversation history, read them immediately and proceed to synthesis.
+3. **Never pause for narrative**: When moving from synthesis to output delivery, DO NOT output a conversational message like "I will now synthesize..." or "Note on deliverable...". You MUST immediately and directly call `write_file(file_path='/final_report.md', content='<your report>')`.
+4. **Always complete tasks**: Before returning your final response, you MUST call `write_todos` to mark all tasks as "completed". This must be your final action.
+5. **CRITICAL - Never announce delegation without calling task()**: If you intend to delegate research, you MUST call the `task()` tool IMMEDIATELY. NEVER output a message like "I have delegated...", "Task 1: ...", "I am awaiting findings...", or any similar announcement WITHOUT an accompanying `task()` tool call. Such messages are COMPLETE FAILURES. The only valid pattern is: make `task()` tool calls → receive tool outputs → synthesize → write final report.
 """
 
 RESEARCHER_INSTRUCTIONS = """You are a research assistant conducting research on the user's input topic. For context, today's date is {date}.
