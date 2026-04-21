@@ -384,8 +384,8 @@ def finalize_golden_dataset_output(
         files["/golden_dataset_metrics.md"] = create_file_data(markdown_content)
         files["/final_report.md"] = create_file_data(final_report_content)
         state["files"] = files
-        return_msg = "- Note: /golden_dataset_metrics.md, /final_report.md are saved in state\n\n"
-        logger.debug("Updated state with golden dataset files")
+        return_msg = "- Note: /golden_dataset_metrics.md, /final_report.md are saved in sandbox\n\n"
+        logger.info("Updated state with golden dataset files")
 
     logger.info("Golden dataset finalization completed successfully")
     return (
@@ -428,8 +428,8 @@ def trigger_dataset_evaluation(
         files = state.get("files", {})
         files["/golden_dataset_metrics.md"] = create_file_data(markdown_content)
         state["files"] = files
-        return_msg = "- Note: /golden_dataset_metrics.md are saved in state\n\n"
-        logger.debug("Updated state with metrics file")
+        return_msg = "- Note: /golden_dataset_metrics.md are saved in sandbox\n\n"
+        logger.info("Updated state with metrics file")
 
     logger.info("Dataset evaluation completed successfully")
     return (
