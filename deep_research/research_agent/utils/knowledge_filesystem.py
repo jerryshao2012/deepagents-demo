@@ -316,45 +316,37 @@ def read_file_impl(
 
     # Try 1: Check state["files"] for virtual filesystem (DeepAgents backend)
     if state and "files" in state:
-        # Try exact match with original path first
-        if file_path in state["files"]:
-            try:
-                sandbox_file_path = file_path.lstrip('.') if file_path.startswith('./') else file_path
-                file_content = file_data_to_string(state["files"][sandbox_file_path])
-                return file_content
-            except Exception:
-                pass  # Fall through to other attempts
-
-        # Try normalized path
-        if normalized_path in state["files"]:
-            try:
-                file_content = file_data_to_string(state["files"][normalized_path])
-                return file_content
-            except Exception:
-                pass  # Fall through to other attempts
-
-        # Try additional normalized variants for maximum compatibility
+        # Try normalized variants with original path and normalized path for maximum compatibility
         normalized_variants = [
+            file_path,
+            normalized_path,
+            '/' + normalized_path.lstrip('./'),
             normalized_path.lstrip('/'),
-            '/' + normalized_path.lstrip('/'),
-            './' + normalized_path.lstrip('./'),
         ]
 
         for variant in normalized_variants:
             if variant in state["files"]:
                 try:
                     file_content = file_data_to_string(state["files"][variant])
+                    logger.info(f"Read from virtual filesystem: {variant}")
                     return file_content
                 except Exception:
                     continue
 
     # Try 2: Use local filesystem
-    path = Path(normalized_path)
-    if not path.exists():
-        return f"Error: File '{file_path}' not found"
+    reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
+    output_dir = Path(reports_output_folder)
+    # Resolve the full path
+    full_path = Path(normalized_path)
+    if not full_path.is_absolute():
+        full_path = output_dir / normalized_path
+    if not full_path.exists():
+        return f"Error: File '{full_path}' not found"
 
     try:
-        return path.read_text(encoding="utf-8")
+        file_content = full_path.read_text(encoding="utf-8")
+        logger.info(f"Read from local filesystem: {full_path}")
+        return file_content
     except Exception as e:
         return f"Error reading file '{file_path}': {e}"
 
