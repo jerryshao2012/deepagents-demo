@@ -127,6 +127,7 @@ class ResearchState(AgentState):
     no_web: bool | None
     chat_start_time: float | None
     chat_elapsed_seconds: float | None
+    files: dict | None
 
 
 class ResearchStateMiddleware(AgentMiddleware):

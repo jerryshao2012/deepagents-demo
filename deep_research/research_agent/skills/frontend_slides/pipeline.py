@@ -11,13 +11,12 @@ from typing import Any
 
 from research_agent.utils.skill_registry import get_skill_registry
 
+_SKILL_DIR = Path(__file__).resolve().parent
+
 
 def _normalize_path_for_filesystem_tools(file_path: str) -> str:
     """Normalize file paths for filesystem tools compatibility."""
     return file_path.replace("\\", "/")
-
-
-_SKILL_DIR = Path(__file__).resolve().parent
 
 
 def _load_style_presets() -> dict[str, dict[str, str]]:

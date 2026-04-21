@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import time
 from functools import wraps
@@ -12,12 +11,13 @@ from typing import Any, Callable, TypeVar, List, Tuple
 import tiktoken
 from dotenv import load_dotenv
 
+from logger_utils import setup_logger
 from utils import str2bool
 
 # Load environment variables
 load_dotenv()
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 # Configuration from environment variables
 MAX_RETRIES = int(os.getenv("MODEL_MAX_RETRIES", "5"))

@@ -8,11 +8,15 @@ from docx import Document
 from openpyxl import load_workbook
 from pptx import Presentation
 
+from logger_utils import setup_logger
+
+logger = setup_logger(__name__)
+
 
 def _extract_pdf_text(file_path: Path) -> str:
     """Extract PDF content as markdown without ML model downloads.\n\n    Returns:\n        str: Extracted content from the PDF file.\n    """
     try:
-        print("Use PyMuPDF4LLM for PDF markdown extraction.")
+        logger.info("Use PyMuPDF4LLM for PDF markdown extraction.")
 
         markdown_content = pymupdf4llm.to_markdown(str(file_path))
         if isinstance(markdown_content, list):
@@ -21,10 +25,10 @@ def _extract_pdf_text(file_path: Path) -> str:
         if markdown_content.strip():
             return markdown_content
     except Exception as e:
-        print(f"PyMuPDF4LLM PDF extraction failed: {e}")
+        logger.error(f"PyMuPDF4LLM PDF extraction failed: {e}")
         # Fallback to pypdf if markdown extraction fails
         try:
-            print("Falling back to pypdf for PDF text extraction.")
+            logger.info("Falling back to pypdf for PDF text extraction.")
             reader = pypdf.PdfReader(file_path)
             page_texts: list[str] = []
             for index, page in enumerate(reader.pages, start=1):

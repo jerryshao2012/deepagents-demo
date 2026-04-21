@@ -9,6 +9,7 @@ from deepagents.backends.utils import file_data_to_string, create_file_data
 from dotenv import load_dotenv
 from langgraph.prebuilt import InjectedState
 
+from logger_utils import setup_logger
 from research_agent.utils.content_extractors import extract_supported_document
 
 # Load environment variables
@@ -22,6 +23,8 @@ SUPPORTED_DOC_SUFFIXES = {".pdf", ".txt", ".md", ".docx", ".pptx", ".xlsx"}
 
 # Global in‑memory cache for folder listings (path → list of Path objects)
 _folder_listing_cache: dict[str, list[Path]] = {}
+
+logger = setup_logger(__name__)
 
 
 def normalize_path_for_filesystem_tools(
@@ -453,7 +456,7 @@ def read_doc_folder_impl(
     try:
         folder.relative_to(allowed_root)
     except ValueError:
-        print(
+        logger.error(
             f"[read_doc_folder] Redirecting '{folder_path}' → '{allowed_root}' (only the configured doc_folder is permitted).")
         folder = allowed_root
 
@@ -514,16 +517,16 @@ def read_doc_folder_impl(
     for file_path in files_to_process:
         target_path = _get_extracted_path(file_path, output_subfolder)
         if target_path.exists():
-            print(f"Skipping {file_path.name}, already extracted to {target_path}")
+            logger.info(f"Skipping {file_path.name}, already extracted to {target_path}")
             try:
                 content = target_path.read_text(encoding="utf-8")
                 processed_files.append(f"{file_path.name} (skipped, loaded from {target_path})")
                 extracted_text.append(f"--- Content of {file_path.name} (from cache) ---\n{content}\n")
                 continue
             except Exception as exc:
-                print(f"Failed to read existing extract {target_path}: {exc}. Re-extracting...")
+                logger.error(f"Failed to read existing extract {target_path}: {exc}. Re-extracting...")
 
-        print(f"Processing document: {file_path.name}...")
+        logger.info(f"Processing document: {file_path.name}...")
         try:
             content = extract_supported_document(file_path)
             saved_path = _save_extracted_content(file_path, content, output_folder=output_subfolder)
@@ -545,9 +548,9 @@ def read_doc_folder_impl(
 
     total_text = "\n".join(extracted_text)
     if len(total_text) > 40000:
-        print("\n".join(summary_lines))
+        logger.info("\n".join(summary_lines))
         return "\n".join(summary_lines + ["",
                                           f"Text omitted because total size is {len(total_text)} chars (too large to display inline). Please use the `read_file` tool on the specific file paths listed above to read them."])
     else:
-        print("\n".join(summary_lines))
+        logger.info("\n".join(summary_lines))
         return "\n".join(summary_lines + ["", "--- EXTRACTED DOCUMENTS ---", ""] + extracted_text)

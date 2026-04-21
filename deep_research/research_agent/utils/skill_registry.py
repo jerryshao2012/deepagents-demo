@@ -18,7 +18,10 @@ from typing import Any
 
 import yaml
 
+from logger_utils import setup_logger
 from research_agent.utils.json_utils import robust_json_loads
+
+logger = setup_logger(__name__)
 
 
 class SkillInfo:
@@ -103,7 +106,7 @@ class SkillRegistry:
             if config_file:
                 config_path = Path(config_file)
                 if not config_path.exists():
-                    print(f"Warning: Skill config file not found: {config_path}. Loading all skills.")
+                    logger.error(f"Warning: Skill config file not found: {config_path}. Loading all skills.")
                     return None
 
                 try:
@@ -111,7 +114,7 @@ class SkillRegistry:
                         config = yaml.safe_load(f)
 
                     if not config or 'skill' not in config or 'available' not in config['skill']:
-                        print(f"Warning: Invalid skill config format in {config_path}. Loading all skills.")
+                        logger.error(f"Warning: Invalid skill config format in {config_path}. Loading all skills.")
                         return None
 
                     available = config['skill']['available']
@@ -127,23 +130,23 @@ class SkillRegistry:
                                 # Alternative format with explicit id field
                                 skill_ids.append(item.get('id', ''))
 
-                        print(f"Loaded skill config: {len(skill_ids)} skills configured")
+                        logger.info(f"Loaded skill config: {len(skill_ids)} skills configured")
                         return skill_ids
                     else:
-                        print(f"Warning: 'available' should be a list in {config_path}. Loading all skills.")
+                        logger.warning(f"Warning: 'available' should be a list in {config_path}. Loading all skills.")
                         return None
 
                 except Exception as e:
-                    print(f"Warning: Failed to load skill config {config_path}: {e}. Loading all skills.")
+                    logger.error(f"Warning: Failed to load skill config {config_path}: {e}. Loading all skills.")
                     return None
 
-        print(f"Warning: Failed to find skill config file - {config_file}.")
+        logger.error(f"Warning: Failed to find skill config file - {config_file}.")
         return None
 
     def _load_all_skills(self) -> None:
         """Scan and load all skills from the skills directory."""
         if not self.skills_dir.exists():
-            print(f"Warning: Skills directory not found: {self.skills_dir}")
+            logger.error(f"Warning: Skills directory not found: {self.skills_dir}")
             return
 
         loaded_count = 0
@@ -178,13 +181,13 @@ class SkillRegistry:
                     self._load_timestamps[skill_id] = skill_file.stat().st_mtime
                     loaded_count += 1
             except Exception as e:
-                print(f"Warning: Failed to load skill from {skill_file}: {e}")
+                logger.error(f"Warning: Failed to load skill from {skill_file}: {e}")
                 continue
 
         if self._available_skills is not None:
-            print(f"Loaded {loaded_count} skills, skipped {skipped_count} (filtered by config)")
+            logger.info(f"Loaded {loaded_count} skills, skipped {skipped_count} (filtered by config)")
         else:
-            print(f"Loaded {loaded_count} skills (no config filter)")
+            logger.info(f"Loaded {loaded_count} skills (no config filter)")
 
     def _parse_skill_file(self, file_path: Path) -> dict[str, Any] | None:
         """Parse a SKILL.md file, extracting frontmatter and body.
@@ -199,13 +202,13 @@ class SkillRegistry:
 
         match = self._FRONTMATTER_RE.match(content)
         if not match:
-            print(f"Warning: {file_path} is missing YAML frontmatter.")
+            logger.info(f"Warning: {file_path} is missing YAML frontmatter.")
             return None
 
         try:
             frontmatter = yaml.safe_load(match.group(1)) or {}
         except yaml.YAMLError as e:
-            print(f"Warning: Failed to parse YAML in {file_path}: {e}")
+            logger.error(f"Warning: Failed to parse YAML in {file_path}: {e}")
             return None
 
         body = match.group(2)
@@ -215,7 +218,7 @@ class SkillRegistry:
         description = frontmatter.get("description")
 
         if not name or not description:
-            print(f"Warning: {file_path} missing required 'name' or 'description' in frontmatter")
+            logger.error(f"Warning: {file_path} missing required 'name' or 'description' in frontmatter")
             return None
 
         # Extract optional fields
@@ -289,7 +292,7 @@ class SkillRegistry:
             cached_mtime = self._load_timestamps.get(skill_id, 0)
             if current_mtime > cached_mtime:
                 # File has been modified, reload it
-                print(f"Hot-reloading skill: {skill_id}")
+                logger.info(f"Hot-reloading skill: {skill_id}")
                 parsed_skill = self._parse_skill_file(skill_file)
                 if parsed_skill:
                     parsed_skill["skill_id"] = skill_id
@@ -301,7 +304,7 @@ class SkillRegistry:
                     self._load_timestamps[skill_id] = current_mtime
                     return self._skills[skill_id].instructions
                 else:
-                    print(f"Warning: Failed to reload skill {skill_id}, using cached version")
+                    logger.warning(f"Warning: Failed to reload skill {skill_id}, using cached version")
                     return skill_info.instructions
 
         return skill_info.instructions
@@ -381,7 +384,7 @@ class SkillRegistry:
         try:
             return file_path.read_text(encoding="utf-8")
         except Exception as e:
-            print(f"Warning: Failed to read supporting file {file_path}: {e}")
+            logger.error(f"Warning: Failed to read supporting file {file_path}: {e}")
             return None
 
     def reload_all(self, reload_config: bool = False) -> None:
@@ -399,7 +402,7 @@ class SkillRegistry:
         else:
             self._load_all_skills()
 
-        print(f"Reloaded {len(self._skills)} skills from {self.skills_dir}")
+        logger.info(f"Reloaded {len(self._skills)} skills from {self.skills_dir}")
 
     @property
     def skill_ids(self) -> list[str]:

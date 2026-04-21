@@ -13,6 +13,7 @@ from langchain_core.tools import InjectedToolArg
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
+from logger_utils import setup_logger
 from research_agent.skills.golden_dataset.pipeline import (
     evaluate_golden_dataset_csv_file,
     export_golden_dataset_csv,
@@ -36,6 +37,8 @@ from research_agent.utils.web_search import (
 # Load environment variables
 load_dotenv()
 
+logger = setup_logger(__name__)
+
 
 # --- Web Search Tools ---
 
@@ -56,7 +59,11 @@ def fetch_webpage_content(
     Returns:
         The webpage content converted to markdown format, or an error message if the fetch fails.
     """
-    return fetch_webpage_content_impl(url, timeout)
+    logger.info(f"Fetching webpage content from URL: {url} (timeout: {timeout}s)")
+
+    result = fetch_webpage_content_impl(url, timeout)
+    logger.info(f"Successfully fetched webpage content from {url}")
+    return result
 
 
 @tool(parse_docstring=True)
@@ -79,7 +86,11 @@ def tavily_search(
     Returns:
         Formatted search results with full webpage content
     """
-    return tavily_search_impl(query, max_results, topic, state)
+    logger.info(f"Executing Tavily search - Query: '{query}', Max Results: {max_results}, Topic: {topic}")
+
+    result = tavily_search_impl(query, max_results, topic, state)
+    logger.info(f"Tavily search completed successfully for query: '{query}'")
+    return result
 
 
 # --- Filesystem Tools ---
@@ -101,7 +112,11 @@ def ls(
     Returns:
         A list of files in the directory or an error message.
     """
-    return ls_impl(path, state)
+    logger.debug(f"Listing directory contents for path: {path}")
+
+    result = ls_impl(path, state)
+    logger.debug(f"Successfully listed directory: {path}")
+    return result
 
 
 @tool(parse_docstring=True)
@@ -121,7 +136,11 @@ def glob(
     Returns:
         A list of matching file paths or an error message.
     """
-    return glob_impl(pattern, state)
+    logger.debug(f"Searching for files matching pattern: {pattern}")
+
+    result = glob_impl(pattern, state)
+    logger.debug(f"Glob pattern '{pattern}' search completed")
+    return result
 
 
 @tool(parse_docstring=True)
@@ -141,7 +160,14 @@ def read_file(
     Returns:
         The content of the file or an error message if the file not found.
     """
-    return read_file_impl(file_path, state)
+    logger.debug(f"Reading file: {file_path}")
+    try:
+        result = read_file_impl(file_path, state)
+        logger.debug(f"Successfully read file: {file_path}")
+        return result
+    except Exception as e:
+        logger.error(f"Failed to read file {file_path}: {e}")
+        raise
 
 
 @tool(parse_docstring=True)
@@ -168,7 +194,11 @@ def read_doc_folder(
     Returns:
         Extracted text from supported documents, a summary for large folders, or an error message.
     """
-    return read_doc_folder_impl(folder_path, specific_files, state)
+    logger.info(f"Reading document folder: {folder_path}, Specific files: {specific_files}")
+
+    result = read_doc_folder_impl(folder_path, specific_files, state)
+    logger.info(f"Successfully processed document folder: {folder_path}")
+    return result
 
 
 # --- Thinking Tool ---
@@ -188,6 +218,7 @@ def think_tool(
     Returns:
         Confirmation that reflection was recorded for decision-making
     """
+    logger.info("Think tool invoked - recording research reflection")
     # Ensure output directory exists for logging reflections
     reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
     output_dir = Path(reports_output_folder)
@@ -201,7 +232,7 @@ def think_tool(
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(f"[{timestamp}] REFLECTION:\n{reflection}\n")
         f.write("-" * 80 + "\n")
-
+    logger.info(f"Reflection logged to file: {log_file}")
     return f"Reflection recorded: {reflection}"
 
 
@@ -210,15 +241,18 @@ def think_tool(
 @tool
 def list_available_skills() -> str:
     """List all available skills with their descriptions."""
+    logger.debug("Listing available skills")
     registry = get_skill_registry()
     summaries = registry.get_all_summaries()
 
     if not summaries:
+        logger.warning("No skills are currently available")
         return "No skills are currently available."
 
     output = "Available skills:\n"
     for summary in summaries:
         output += f"- **{summary['name']}**: {summary['description']}\n"
+    logger.debug(f"Found {len(summaries)} available skills")
     return output
 
 
@@ -234,19 +268,24 @@ def read_skill_supporting_file(skill_id: str, filename: str) -> str:
         skill_id: The skill identifier (e.g., 'frontend-slides', 'golden-dataset')
         filename: The name of the supporting file to read.
     """
+    logger.debug(f"Reading supporting file '{filename}' from skill '{skill_id}'")
     registry = get_skill_registry()
     content = registry.read_supporting_file(skill_id, filename)
 
     if content is None:
+        logger.warning(f"File '{filename}' not found in skill '{skill_id}'")
         skill_info = registry.get_skill_info(skill_id)
         if not skill_info:
+            logger.error(f"Skill '{skill_id}' not found")
             return f"Error: Skill '{skill_id}' not found."
 
         available_files = [f.name for f in skill_info.path.iterdir() if f.is_file()]
+        logger.debug(f"Available files in skill '{skill_id}': {available_files}")
         return (
             f"Error: File '{filename}' not found in skill '{skill_id}'.\n"
             f"Available files: {', '.join(available_files)}"
         )
+    logger.debug(f"Successfully read supporting file '{filename}' from skill '{skill_id}'")
     return content
 
 
@@ -272,7 +311,11 @@ def render_skill_output(
     Returns:
         Rendered markdown output or a validation error message.
     """
-    return render_skill_output_impl(skill_id, payload_json)
+    logger.info(f"Rendering skill output for skill: {skill_id}")
+
+    result = render_skill_output_impl(skill_id, payload_json)
+    logger.info(f"Successfully rendered output for skill: {skill_id}")
+    return result
 
 
 # --- Golden Dataset Tools ---
@@ -298,32 +341,42 @@ def finalize_golden_dataset_output(
     Returns:
         A confirmation message with paths to the generated files.
     """
+    logger.info("Finalizing golden dataset output")
     try:
         payload = json.loads(payload_json)
+        logger.debug("Successfully parsed golden dataset JSON payload")
     except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in payload_json: {e}")
         return f"Error: Invalid JSON in payload_json: {e}"
 
     reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
     output_folder = Path(reports_output_folder)
+    logger.info(f"Exporting golden dataset CSV to: {output_folder}")
     csv_path = export_golden_dataset_csv(payload, output_folder)
+    logger.info(f"CSV exported to: {csv_path}")
 
     chat_elapsed_seconds = None
     if state is not None:
         chat_start_time = state.get("chat_start_time") if state else None
         if isinstance(chat_start_time, float):
             chat_elapsed_seconds = datetime.now().timestamp() - chat_start_time
+            logger.debug(f"Chat elapsed time: {chat_elapsed_seconds:.2f} seconds")
 
+    logger.info("Evaluating golden dataset and generating quality metrics")
     metrics_csv_path, markdown_content, final_report_content = (
         evaluate_and_report_golden_dataset(
             csv_path, payload, chat_elapsed_seconds
         )
     )
+    logger.info(f"Quality metrics generated - Metrics CSV: {metrics_csv_path}")
 
     # Write the final humanized report to a file
     report_filename = f"{csv_path.stem}_report.md"
+    logger.info(f"Writing final report: {report_filename}")
     report_filepath = write_content_to_output_folder(
         report_filename, final_report_content
     )
+    logger.info(f"Final report saved to: {report_filepath}")
 
     return_msg = "\n"
     if state is not None:
@@ -332,11 +385,13 @@ def finalize_golden_dataset_output(
         files["/final_report.md"] = create_file_data(final_report_content)
         state["files"] = files
         return_msg = "- Note: /golden_dataset_metrics.md, /final_report.md are saved in state\n\n"
+        logger.debug("Updated state with golden dataset files")
 
+    logger.info("Golden dataset finalization completed successfully")
     return (
         f"Successfully exported and evaluated the golden dataset.\n"
-        f"- Raw data saved to: {str(csv_path)}\n"
-        f"- Metrics saved to: {str(metrics_csv_path)}\n"
+        f"- Raw data saved to: {normalize_path_for_filesystem_tools(str(csv_path))}\n"
+        f"- Metrics saved to: {normalize_path_for_filesystem_tools(str(metrics_csv_path))}\n"
         f"- Final report saved to: {report_filepath}\n"
         f"{return_msg}"
         f"## Golden Dataset Quality Metrics\n\n{markdown_content}"
@@ -360,7 +415,13 @@ def trigger_dataset_evaluation(
     Returns:
         A confirmation message with the path to the metrics file.
     """
-    metrics_csv_path, markdown_content = evaluate_golden_dataset_csv_file(file_path)
+    logger.info(f"Triggering dataset evaluation for file: {file_path}")
+    try:
+        metrics_csv_path, markdown_content = evaluate_golden_dataset_csv_file(file_path)
+        logger.info(f"Dataset evaluation completed - Metrics CSV: {metrics_csv_path}")
+    except Exception as e:
+        logger.error(f"Dataset evaluation failed for {file_path}: {e}")
+        raise
 
     return_msg = "\n"
     if state is not None:
@@ -368,7 +429,9 @@ def trigger_dataset_evaluation(
         files["/golden_dataset_metrics.md"] = create_file_data(markdown_content)
         state["files"] = files
         return_msg = "- Note: /golden_dataset_metrics.md are saved in state\n\n"
+        logger.debug("Updated state with metrics file")
 
+    logger.info("Dataset evaluation completed successfully")
     return (
         f"Successfully exported and evaluated the golden dataset.\n"
         f"- Raw data saved to: {normalize_path_for_filesystem_tools(str(file_path))}\n"
@@ -417,11 +480,14 @@ def frontend_slides(
     Returns:
         str: Confirmation containing the generated file path and slide count, or an error message.
     """
+    logger.info(f"Generating frontend slides - Style: {style_preset}, Animation: {animation_feeling}")
     from research_agent.skills.frontend_slides.pipeline import _parse_sections, _build_html, _slugify_filename
 
     # Parse the markdown content into structured slide data
+    logger.debug("Parsing presentation markdown into slides")
     slides = _parse_sections(presentation_markdown)
     if not slides:
+        logger.warning("No slides detected in presentation markdown")
         return (
             "Error: No slides were detected. Use headings like:\n"
             "- `# [Slide 1] Title: My Slide` (explicit numbering)\n"
@@ -429,10 +495,13 @@ def frontend_slides(
             "- `# My Slide Title` (plain heading, auto-numbered)\n"
             "Separate slides with `---` on a new line."
         )
+    logger.info(f"Parsed {len(slides)} slides from markdown")
 
     # Build HTML using the template engine with dynamic resources
     resolved_title = deck_title or str(slides[0]["title"])
+    logger.debug(f"Building HTML with title: '{resolved_title}'")
     html_content = _build_html(resolved_title, slides, style_preset, animation_feeling, enable_inline_editing)
+    logger.debug(f"HTML content generated ({len(html_content)} bytes)")
 
     # Determine safe filename
     if output_filename:
@@ -441,16 +510,19 @@ def frontend_slides(
             safe_name = f"{safe_name}.html"
     else:
         safe_name = f"{_slugify_filename(resolved_title)}.html"
+    logger.debug(f"Output filename: {safe_name}")
 
     # Save to BOTH output folders: ./output and ./reports
     reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
     output_folder = Path(reports_output_folder)
     output_folder.mkdir(parents=True, exist_ok=True)
     output_path = output_folder / safe_name
+    logger.info(f"Writing HTML presentation to: {output_path}")
     output_path.write_text(html_content, encoding="utf-8")
 
     reports_path = output_folder / safe_name
     reports_path.write_text(html_content, encoding="utf-8")
+    logger.info(f"Presentation saved to both output and reports folders")
 
     # Update state if available
     if state is not None:
@@ -458,6 +530,7 @@ def frontend_slides(
             files = state.get("files", {})
             files[f"/{safe_name}"] = create_file_data(html_content)
             state["files"] = files
+            logger.debug("Updated state with generated HTML file")
         except ImportError:
             # Fallback: manually create file data structure
             files = state.get("files", {})
@@ -466,9 +539,11 @@ def frontend_slides(
                 "type": "text/html",
             }
             state["files"] = files
+            logger.debug("Updated state with generated HTML file (fallback method)")
 
     normalized_output_path = normalize_path_for_filesystem_tools(str(output_path))
     normalized_reports_path = normalize_path_for_filesystem_tools(str(reports_path))
+    logger.info(f"Frontend slides generation completed successfully: {len(slides)} slides")
     return (
         f"Generated `{style_preset}` HTML presentation with {len(slides)} slide(s).\n"
         f"- Saved to output folder: `{normalized_output_path}`\n"
@@ -496,20 +571,28 @@ def frontend_slides_export_pdf(
     Returns:
         str: The path to the generated PDF file or an error message.
     """
+    logger.info(f"Exporting HTML to PDF - Source: {html_file_path}, Compact: {compact}")
     from research_agent.skills.frontend_slides.pipeline import _SKILL_DIR
 
     script_path = _SKILL_DIR / "scripts" / "export-pdf.sh"
+    logger.debug(f"Using export script: {script_path}")
 
     cmd = ["bash", str(script_path), html_file_path]
     if output_pdf_path:
         cmd.append(output_pdf_path)
+        logger.debug(f"Custom output PDF path: {output_pdf_path}")
     if compact:
         cmd.append("--compact")
+        logger.debug("Compact mode enabled")
 
     try:
+        logger.info(f"Executing PDF export command: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        logger.info(f"PDF export completed successfully")
+        logger.debug(f"Export output: {result.stdout[:200]}...")
         return f"Successfully exported PDF.\\n\\n{result.stdout}"
     except subprocess.CalledProcessError as e:
+        logger.error(f"PDF export failed: {e.stderr}")
         return f"Error exporting PDF: {e.stderr}\\n\\n{e.stdout}"
 
 
@@ -529,16 +612,22 @@ def frontend_slides_deploy(
     Returns:
         str: The deployment output including the live URL, or an error message.
     """
+    logger.info(f"Deploying HTML presentation to Vercel: {html_file_path}")
     from research_agent.skills.frontend_slides.pipeline import _SKILL_DIR
 
     script_path = _SKILL_DIR / "scripts" / "deploy.sh"
+    logger.debug(f"Using deploy script: {script_path}")
 
     cmd = ["bash", str(script_path), html_file_path]
 
     try:
+        logger.info(f"Executing deployment command: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        logger.info(f"Deployment completed successfully")
+        logger.debug(f"Deployment output: {result.stdout[:200]}...")
         return f"Successfully deployed presentation.\\n\\n{result.stdout}"
     except subprocess.CalledProcessError as e:
+        logger.error(f"Deployment failed: {e.stderr}")
         return f"Error deploying presentation: {e.stderr}\\n\\n{e.stdout}"
 
 
@@ -560,16 +649,23 @@ def frontend_slides_extract_pptx(
     Returns:
         str: The output of the extraction process, including the path to the extracted JSON.
     """
+    logger.info(f"Extracting PowerPoint content from: {pptx_file_path}")
     from research_agent.skills.frontend_slides.pipeline import _SKILL_DIR
 
     script_path = _SKILL_DIR / "scripts" / "extract-pptx.py"
+    logger.debug(f"Using extraction script: {script_path}")
 
     cmd = ["python3", str(script_path), pptx_file_path]
     if output_dir:
         cmd.append(output_dir)
+        logger.debug(f"Output directory specified: {output_dir}")
 
     try:
+        logger.info(f"Executing PPTX extraction command: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        logger.info(f"PowerPoint extraction completed successfully")
+        logger.debug(f"Extraction output: {result.stdout[:200]}...")
         return f"Successfully extracted PowerPoint content.\\n\\n{result.stdout}"
     except subprocess.CalledProcessError as e:
+        logger.error(f"PowerPoint extraction failed: {e.stderr}")
         return f"Error extracting PowerPoint content: {e.stderr}\\n\\n{e.stdout}"
