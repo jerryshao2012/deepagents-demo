@@ -24,7 +24,9 @@ SUPPORTED_DOC_SUFFIXES = {".pdf", ".txt", ".md", ".docx", ".pptx", ".xlsx"}
 _folder_listing_cache: dict[str, list[Path]] = {}
 
 
-def normalize_path_for_filesystem_tools(path_str: str) -> str:
+def normalize_path_for_filesystem_tools(
+        path_str: str
+) -> str:
     """Normalize paths for cross-platform compatibility with deepagents filesystem tools.
     
     Deepagents filesystem tools (glob, ls, etc.) expect paths relative to the working directory.
@@ -59,7 +61,10 @@ def normalize_path_for_filesystem_tools(path_str: str) -> str:
     return normalized
 
 
-def write_content_to_output_folder(filename: str, content: str) -> str:
+def write_content_to_output_folder(
+        filename: str,
+        content: str
+) -> str:
     """Write content to a file in the output folder."""
     reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
     output_subfolder = Path(reports_output_folder)
@@ -70,7 +75,10 @@ def write_content_to_output_folder(filename: str, content: str) -> str:
     return normalize_path_for_filesystem_tools(str(file_path))
 
 
-def _get_extracted_path(file_path: Path, output_folder: Path) -> Path:
+def _get_extracted_path(
+        file_path: Path,
+        output_folder: Path
+) -> Path:
     """Get the target path for an extracted file."""
     suffix = file_path.suffix.lower()
     if suffix in {".pdf", ".md", ".docx", ".pptx"}:
@@ -82,7 +90,9 @@ def _get_extracted_path(file_path: Path, output_folder: Path) -> Path:
     return output_folder / "extracted" / new_filename
 
 
-def _resolve_doc_output_subfolder(folder: Path) -> Path:
+def _resolve_doc_output_subfolder(
+        folder: Path
+) -> Path:
     reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
     configured_output = Path(os.environ.get("OUTPUT_FOLDER", reports_output_folder))
     if configured_output.name == folder.name:
@@ -92,7 +102,11 @@ def _resolve_doc_output_subfolder(folder: Path) -> Path:
     return configured_output
 
 
-def _save_extracted_content(original_file_path: Path, content: str, output_folder: Path | None = None) -> str:
+def _save_extracted_content(
+        original_file_path: Path,
+        content: str,
+        output_folder: Path | None = None
+) -> str:
     if output_folder:
         output_dir = output_folder
     else:
@@ -106,7 +120,10 @@ def _save_extracted_content(original_file_path: Path, content: str, output_folde
     return normalize_path_for_filesystem_tools(str(file_path))
 
 
-def ls_impl(path: str, state: Annotated[dict, InjectedState] = None) -> str:
+def ls_impl(
+        path: str,
+        state: Annotated[dict, InjectedState] = None
+) -> str:
     """List files in a directory with fallback support.
     
     Tries to list from the virtual filesystem in state first (DeepAgents backend),
@@ -168,7 +185,10 @@ def ls_impl(path: str, state: Annotated[dict, InjectedState] = None) -> str:
         return f"Error listing directory '{path}': {e}"
 
 
-def glob_impl(pattern: str, state: Annotated[dict, InjectedState] = None) -> str:
+def glob_impl(
+        pattern: str,
+        state: Annotated[dict, InjectedState] = None
+) -> str:
     """Implementation of glob pattern matching with fallback support.
     
     Tries to match against the virtual filesystem in state first, then falls back
@@ -272,8 +292,10 @@ def glob_impl(pattern: str, state: Annotated[dict, InjectedState] = None) -> str
         return f"Error running glob for pattern '{pattern}': {e}"
 
 
-def read_file_impl(file_path: str,
-                   state: Annotated[dict, InjectedState] = None) -> str:
+def read_file_impl(
+        file_path: str,
+        state: Annotated[dict, InjectedState] = None
+) -> str:
     """Implementation of file reading with fallback support.
     
     Tries to read from the virtual filesystem in state first (DeepAgents backend),

@@ -62,9 +62,9 @@ def fetch_webpage_content(
 @tool(parse_docstring=True)
 def tavily_search(
         query: str,
+        state: Annotated[dict, InjectedState],
         max_results: Annotated[int, InjectedToolArg] = 1,
         topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
-        state: Annotated[dict, InjectedState] = None,
 ) -> str:
     """Search the web for information on a given query.
 
@@ -87,7 +87,7 @@ def tavily_search(
 @tool(parse_docstring=True)
 def ls(
         path: str,
-        state: Annotated[dict, InjectedState] = None
+        state: Annotated[dict, InjectedState]
 ) -> str:
     """List files in a directory with fallback support.
 
@@ -107,7 +107,7 @@ def ls(
 @tool(parse_docstring=True)
 def glob(
         pattern: str,
-        state: Annotated[dict, InjectedState] = None
+        state: Annotated[dict, InjectedState]
 ) -> str:
     """Find files matching a glob pattern with fallback support.
 
@@ -127,7 +127,7 @@ def glob(
 @tool(parse_docstring=True)
 def read_file(
         file_path: str,
-        state: Annotated[dict, InjectedState] = None
+        state: Annotated[dict, InjectedState]
 ) -> str:
     """Read the content of a file with fallback support.
 
@@ -147,8 +147,8 @@ def read_file(
 @tool(parse_docstring=True)
 def read_doc_folder(
         folder_path: str,
+        state: Annotated[dict, InjectedState],
         specific_files: list[str] | None = None,
-        state: Annotated[dict, InjectedState] = None,
 ) -> str:
     """Read and extract text from supported documents in a given folder.
 
@@ -195,7 +195,7 @@ def think_tool(
 
     # Log the reflection to a dedicated research log file
     now = datetime.now()
-    log_file = output_dir / f"research_reflection_{now.strftime("%Y-%m-%d %H_%M_%S")}.log"
+    log_file = output_dir / f"research_reflection_{now.strftime('%Y-%m-%d %H_%M_%S')}.log"
     timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
     with open(log_file, "a", encoding="utf-8") as f:
@@ -281,12 +281,15 @@ def render_skill_output(
 @tool(parse_docstring=True)
 def finalize_golden_dataset_output(
         payload_json: str,
-        state: Annotated[dict, InjectedState] = None,
+        state: Annotated[dict, InjectedState],
 ) -> str:
     """Export a validated golden-dataset JSON payload to CSV and run quality metrics.
 
     For the ``golden-dataset`` skill, call this after ``render_skill_output`` with the
     same ``payload_json`` to get the final CSV and quality report.
+    It also generates:
+    - `/golden_dataset_metrics.md`: Markdown table of all items with quality metrics
+    - `/final_report.md`: Comprehensive report of the entire golden dataset generation process
 
     Args:
         payload_json: A string containing the validated JSON payload.
@@ -322,17 +325,20 @@ def finalize_golden_dataset_output(
         report_filename, final_report_content
     )
 
+    return_msg = "\n"
     if state is not None:
         files = state.get("files", {})
         files["/golden_dataset_metrics.md"] = create_file_data(markdown_content)
         files["/final_report.md"] = create_file_data(final_report_content)
         state["files"] = files
+        return_msg = "- Note: /golden_dataset_metrics.md, /final_report.md are saved in state\n\n"
 
     return (
         f"Successfully exported and evaluated the golden dataset.\n"
-        f"- Raw data saved to: {normalize_path_for_filesystem_tools(str(csv_path))}\n"
-        f"- Metrics saved to: {normalize_path_for_filesystem_tools(str(metrics_csv_path))}\n"
-        f"- Final report saved to: {report_filepath}\n\n"
+        f"- Raw data saved to: {str(csv_path)}\n"
+        f"- Metrics saved to: {str(metrics_csv_path)}\n"
+        f"- Final report saved to: {report_filepath}\n"
+        f"{return_msg}"
         f"## Golden Dataset Quality Metrics\n\n{markdown_content}"
     )
 
@@ -340,7 +346,7 @@ def finalize_golden_dataset_output(
 @tool(parse_docstring=True)
 def trigger_dataset_evaluation(
         file_path: str,
-        state: Annotated[dict, InjectedState] = None,
+        state: Annotated[dict, InjectedState],
 ) -> str:
     """Run quality metrics on an existing golden-dataset CSV file.
 
@@ -355,15 +361,19 @@ def trigger_dataset_evaluation(
         A confirmation message with the path to the metrics file.
     """
     metrics_csv_path, markdown_content = evaluate_golden_dataset_csv_file(file_path)
+
+    return_msg = "\n"
     if state is not None:
         files = state.get("files", {})
         files["/golden_dataset_metrics.md"] = create_file_data(markdown_content)
         state["files"] = files
+        return_msg = "- Note: /golden_dataset_metrics.md are saved in state\n\n"
 
     return (
         f"Successfully exported and evaluated the golden dataset.\n"
         f"- Raw data saved to: {normalize_path_for_filesystem_tools(str(file_path))}\n"
         f"- Metrics saved to: {normalize_path_for_filesystem_tools(str(metrics_csv_path))}\n"
+        f"{return_msg}"
         f"## Golden Dataset Quality Metrics\n\n{markdown_content}"
     )
 
@@ -373,12 +383,12 @@ def trigger_dataset_evaluation(
 @tool("frontend-slides", parse_docstring=True)
 def frontend_slides(
         presentation_markdown: str,
+        state: Annotated[dict, InjectedState],
         output_filename: str | None = None,
         deck_title: str | None = None,
         style_preset: str = "Creative Voltage",
         animation_feeling: str = "professional",
         enable_inline_editing: bool = False,
-        state: Annotated[dict, InjectedState] = None,
 ) -> str:
     """Generate a self-contained HTML slide deck from markdown-style slide content.
 
@@ -397,12 +407,12 @@ def frontend_slides(
 
     Args:
         presentation_markdown: Markdown-style slide content to convert into HTML slides.
+        state: LangGraph state (injected automatically, do not supply).
         output_filename: Optional filename for the generated HTML. Saved under OUTPUT_FOLDER.
         deck_title: Optional browser title for the presentation. Defaults to the first slide title.
         style_preset: Visual preset name. Supported: Bold Signal, Electric Studio, Creative Voltage, Dark Botanical, Notebook Tabs, Pastel Geometry, Split Pastel, Vintage Editorial, Neon Cyber, Terminal Green, Swiss Modern, Paper & Ink.
         animation_feeling: Animation style feeling. Options: dramatic (cinematic), techy (futuristic), playful (bouncy), professional (subtle), calm (gentle), editorial (staggered).
         enable_inline_editing: Whether to include in-browser text editing capabilities. Options: True / False.
-        state: LangGraph state (injected automatically, do not supply).
 
     Returns:
         str: Confirmation containing the generated file path and slide count, or an error message.
