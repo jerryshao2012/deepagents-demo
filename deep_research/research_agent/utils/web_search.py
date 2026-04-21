@@ -47,7 +47,11 @@ def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float 
     return response_dict
 
 
-def fetch_webpage_content_impl(url: str, timeout: float = 10.0) -> str:
+def fetch_webpage_content_impl(
+        url: str,
+        timeout: float = 10.0,
+        state: Annotated[dict, InjectedState] = None,
+) -> str:
     """Fetch and convert webpage content to markdown.
 
     Use this tool to retrieve the full content of a specific webpage URL and convert it to readable markdown format.
@@ -56,10 +60,15 @@ def fetch_webpage_content_impl(url: str, timeout: float = 10.0) -> str:
     Args:
         url: The URL of the webpage to fetch.
         timeout: Request timeout in seconds (default: 10.0).
+        state: LangGraph state containing no_web flag (injected automatically).
 
     Returns:
         The webpage content converted to markdown format, or an error message if the fetch fails.
     """
+    # Check if web access is disabled
+    if state and state.get("no_web", False):
+        return "Note: Web access is disabled for this research task. Cannot fetch webpage content. Please use local documents or internal knowledge only."
+
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -99,6 +108,11 @@ def tavily_search_impl(
     Returns:
         Formatted search results with full webpage content
     """
+    # Check if web search is disabled via state flag
+    if state and state.get("no_web", False):
+        return "Note: Web search is disabled for this research task. Please use local documents or internal knowledge only."
+
+    # Legacy check: also respect the instruction text pattern
     if state:
         messages = state.get("messages", [])
         for msg in messages:
@@ -129,7 +143,7 @@ def tavily_search_impl(
     for result in search_results.get("results", []):
         url = result["url"]
         title = result["title"]
-        content = fetch_webpage_content_impl(url)
+        content = fetch_webpage_content_impl(url, state=state)
         result_text = f"## {title}\n**URL:** {url}\n\n{content}\n\n---\n"
         result_texts.append(result_text)
 

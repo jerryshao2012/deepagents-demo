@@ -45,6 +45,7 @@ logger = setup_logger(__name__)
 @tool(parse_docstring=True)
 def fetch_webpage_content(
         url: str,
+        state: Annotated[dict, InjectedState],
         timeout: float = 10.0
 ) -> str:
     """Fetch and convert webpage content to markdown.
@@ -55,13 +56,14 @@ def fetch_webpage_content(
     Args:
         url: The URL of the webpage to fetch.
         timeout: Request timeout in seconds (default: 10.0).
+        state: LangGraph state containing no_web flag (injected automatically).
 
     Returns:
         The webpage content converted to markdown format, or an error message if the fetch fails.
     """
     logger.info(f"Fetching webpage content from URL: {url} (timeout: {timeout}s)")
 
-    result = fetch_webpage_content_impl(url, timeout)
+    result = fetch_webpage_content_impl(url, timeout, state)
     logger.info(f"Successfully fetched webpage content from {url}")
     return result
 
