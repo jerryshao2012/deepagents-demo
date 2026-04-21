@@ -168,12 +168,10 @@ class ResearchStateMiddleware(AgentMiddleware):
     def before_model(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
         """Capture chat_start_time before the first model call."""
         # Only set chat_start_time once (at the beginning of the conversation)
-        if state.get("chat_start_time") is None:
-            return {
-                "chat_start_time": time.time(),
-                "chat_elapsed_seconds": None
-            }
-        return None
+        return {
+            "chat_start_time": time.time(),
+            "chat_elapsed_seconds": None
+        }
 
     def after_model(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
         """Calculate chat_elapsed_seconds after each model response."""
