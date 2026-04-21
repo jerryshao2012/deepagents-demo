@@ -52,7 +52,6 @@ Requirements:
   3. Call `write_todos` to mark ALL todos as "completed".
   4. Only after steps 1–3 succeed, write a brief summary to the user.
   **Do NOT skip steps 1, 2, or 3. A verbal description of the dataset is NOT a substitute for the tool calls.**
-  - Optional: use `trigger_dataset_evaluation` only if you need to re-run metrics on an existing CSV file path.
 - **DOCUMENT ACCESS WORKFLOW**: 
   - Step 1: Call `read_doc_folder` on the configured doc folder (e.g., `./docs/policy/`). This will extract documents and return a summary showing saved paths like `output/policy/extracted/filename.pdf_extracted.md`.
   - Step 2: **IMPORTANT**: Use the EXACT file paths shown in the `read_doc_folder` output. When you see "saved to output/policy/extracted/file.md", use that path with `read_file` as `output/policy/extracted/file.md` (do NOT add leading `/`).

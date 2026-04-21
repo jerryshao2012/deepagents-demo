@@ -456,32 +456,6 @@ def test_finalize_golden_dataset_output_updates_state_with_text_file_data(tmp_pa
     ]
 
 
-def test_trigger_dataset_evaluation_scores_exported_golden_dataset_csv(tmp_path, monkeypatch) -> None:
-    dataset_csv = tmp_path / "starter.csv"
-    dataset_csv.write_text(
-        "ID,Coverage Area,Question,Answer,Content\n"
-        "Q1,Leave,How do I request parental leave?,Review the leave policy first.,Leave section.\n",
-        encoding="utf-8",
-    )
-
-    def fake_score_dataset_file(input_csv: str, output_csv: str):
-        assert input_csv == str(dataset_csv)
-        output_path = Path(output_csv)
-        output_path.write_text("scored", encoding="utf-8")
-        return output_path
-
-    monkeypatch.setattr(
-        "research_agent.skills.golden_dataset.scripts.golden_dataset_metrics.score_dataset_file",
-        fake_score_dataset_file,
-    )
-
-    result = tools.trigger_dataset_evaluation.invoke({"file_path": str(dataset_csv)})
-
-    assert "Successfully evaluated dataset" in result
-    assert str(tmp_path / "starter-with-metrics.csv") in result
-    assert (tmp_path / "starter-with-metrics.csv").exists()
-
-
 def test_read_doc_folder_reads_text_and_markdown_files(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(tools, "REPORTS_OUTPUT_FOLDER", str(tmp_path / "output"))
     (tmp_path / "notes.txt").write_text("alpha", encoding="utf-8")
@@ -557,22 +531,6 @@ def test_glob_handles_nonexistent_base_path() -> None:
 def test_finalize_golden_dataset_output_rejects_non_golden_skill_state() -> None:
     result = finalize_golden_dataset_output.func(
         payload_json='{"items": [{"id": "Q1", "coverage_area": "General", "question": "Q?", "answer": "A"}]}',
-        state={"skill": "study-slides"},
-    )
-
-    assert "only available when the active skill is `golden-dataset`" in result
-
-
-def test_trigger_dataset_evaluation_rejects_non_golden_skill_state(tmp_path) -> None:
-    dataset_csv = tmp_path / "starter.csv"
-    dataset_csv.write_text(
-        "ID,Coverage Area,Question,Answer,Content\n"
-        "Q1,Leave,How do I request parental leave?,Review the leave policy first.,Leave section.\n",
-        encoding="utf-8",
-    )
-
-    result = tools.trigger_dataset_evaluation.func(
-        file_path=str(dataset_csv),
         state={"skill": "study-slides"},
     )
 

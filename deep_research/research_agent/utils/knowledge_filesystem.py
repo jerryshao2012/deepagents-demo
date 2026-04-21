@@ -334,12 +334,29 @@ def read_file_impl(
                     continue
 
     # Try 2: Use local filesystem
-    reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
-    output_dir = Path(reports_output_folder)
-    # Resolve the full path
-    full_path = Path(normalized_path)
-    if not full_path.is_absolute():
-        full_path = output_dir / normalized_path
+    # Resolve relative paths in this order:
+    # 1) relative to current working directory
+    # 2) relative to OUTPUT_FOLDER (for short paths like "extracted/foo.md")
+    input_path = Path(normalized_path)
+    if input_path.is_absolute():
+        full_path = input_path
+    else:
+        cwd_candidate = Path(normalized_path)
+        if cwd_candidate.exists():
+            full_path = cwd_candidate
+        else:
+            reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
+            output_dir = Path(reports_output_folder)
+
+            relative_normalized = normalized_path.lstrip("./")
+            output_root_normalized = output_dir.as_posix().lstrip("./")
+            # If caller already passed a path rooted at OUTPUT_FOLDER (e.g. output/policy/...),
+            # do not prepend OUTPUT_FOLDER again.
+            if output_root_normalized and relative_normalized.startswith(output_root_normalized + "/"):
+                full_path = Path(relative_normalized)
+            else:
+                full_path = output_dir / relative_normalized
+
     if not full_path.exists():
         return f"Error: File '{full_path}' not found"
 

@@ -22,7 +22,6 @@ from research_agent.tools import (
     normalize_path_for_filesystem_tools,
     think_tool,
     finalize_golden_dataset_output,
-    trigger_dataset_evaluation,
     ls,
     glob,
     read_file,
@@ -386,7 +385,6 @@ research_sub_agent: SubAgent = {
         glob,
         read_doc_folder,
         finalize_golden_dataset_output,
-        trigger_dataset_evaluation,
     ],
 }
 
@@ -404,7 +402,6 @@ agent = create_deep_agent(
         glob,
         read_doc_folder,
         finalize_golden_dataset_output,
-        trigger_dataset_evaluation,
     ],
     system_prompt=INSTRUCTIONS,
     subagents=[research_sub_agent],

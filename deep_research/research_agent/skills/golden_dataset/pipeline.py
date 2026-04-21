@@ -60,7 +60,7 @@ def export_golden_dataset_csv(payload: dict, output_folder: Path) -> Path:
 
 
 def evaluate_golden_dataset_csv_file(file_path: str) -> tuple[Path, str]:
-    """Run quality metrics on a golden-dataset CSV; same behavior as `trigger_dataset_evaluation`."""
+    """Run quality metrics on a golden-dataset CSV."""
     path_obj = Path(file_path)
     if not path_obj.exists():
         return Path(file_path), f"Error: File not found: {file_path}"

@@ -15,7 +15,6 @@ from langgraph.prebuilt import InjectedState
 
 from logger_utils import setup_logger
 from research_agent.skills.golden_dataset.pipeline import (
-    evaluate_golden_dataset_csv_file,
     export_golden_dataset_csv,
     evaluate_and_report_golden_dataset,
 )
@@ -395,49 +394,6 @@ def finalize_golden_dataset_output(
         f"- Raw data saved to: {normalize_path_for_filesystem_tools(str(csv_path))}\n"
         f"- Metrics saved to: {normalize_path_for_filesystem_tools(str(metrics_csv_path))}\n"
         f"- Final report saved to: {report_filepath}\n"
-        f"{return_msg}"
-        f"## Golden Dataset Quality Metrics\n\n{markdown_content}"
-    )
-
-
-@tool(parse_docstring=True)
-def trigger_dataset_evaluation(
-        file_path: str,
-        state: Annotated[dict, InjectedState],
-) -> str:
-    """Run quality metrics on an existing golden-dataset CSV file.
-
-    Use this tool if you already have a CSV file and want to evaluate its quality.
-    If you are generating a new dataset, prefer using ``finalize_golden_dataset_output``.
-
-    Args:
-        file_path: The absolute path to the golden dataset CSV file.
-        state: LangGraph state (injected automatically).
-
-    Returns:
-        A confirmation message with the path to the metrics file.
-    """
-    logger.info(f"Triggering dataset evaluation for file: {file_path}")
-    try:
-        metrics_csv_path, markdown_content = evaluate_golden_dataset_csv_file(file_path)
-        logger.info(f"Dataset evaluation completed - Metrics CSV: {metrics_csv_path}")
-    except Exception as e:
-        logger.error(f"Dataset evaluation failed for {file_path}: {e}")
-        raise
-
-    return_msg = "\n"
-    if state is not None:
-        files = state.get("files", {})
-        files["/golden_dataset_metrics.md"] = create_file_data(markdown_content)
-        state["files"] = files
-        return_msg = "- Note: /golden_dataset_metrics.md are saved in sandbox\n\n"
-        logger.info("Updated state with metrics file")
-
-    logger.info("Dataset evaluation completed successfully")
-    return (
-        f"Successfully exported and evaluated the golden dataset.\n"
-        f"- Raw data saved to: {normalize_path_for_filesystem_tools(str(file_path))}\n"
-        f"- Metrics saved to: {normalize_path_for_filesystem_tools(str(metrics_csv_path))}\n"
         f"{return_msg}"
         f"## Golden Dataset Quality Metrics\n\n{markdown_content}"
     )

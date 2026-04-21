@@ -305,7 +305,7 @@ What is used in the deep research agent?
 
 ### 6. Structured Output Skills
 - **Structured Skills**: The agent can generate structured data using skills like `golden-dataset`.
-- **Validation and Finalization**: Tools like `render_skill_output`, `finalize_golden_dataset_output`, and `trigger_dataset_evaluation` are used to validate schemas, export CSVs, and run or re-run quality metrics.
+- **Validation and Finalization**: Tools like `render_skill_output` and `finalize_golden_dataset_output` are used to validate schemas, export CSVs, and run or re-run quality metrics.
 
 ### 7. Context Management
 - **Reflection**: The `think_tool` is used for "inner monologue" and strategic planning, helping the agent reflect on findings before deciding the next step.
@@ -405,7 +405,6 @@ The deep research agent adds the following custom tools beyond the built-in deep
 | Tool Name | Description |
 |-----------|-------------|
 | `finalize_golden_dataset_output` | Golden-dataset only: validates the same JSON as `render_skill_output`, exports a CSV under `output/` via `skills/golden_dataset/pipeline.py`, then runs quality metrics so export and evaluation always happen in order. Generates human-readable quality reports alongside raw metrics. |
-| `trigger_dataset_evaluation` | Evaluates an existing golden dataset CSV file by computing quality metrics using the bundled pipeline script. Prefer `finalize_golden_dataset_output` for new datasets; use this for re-evaluating previously exported datasets. |
 
 #### Frontend Slides Presentation Generation
 
