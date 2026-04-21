@@ -319,7 +319,8 @@ def read_file_impl(
         # Try exact match with original path first
         if file_path in state["files"]:
             try:
-                file_content = file_data_to_string(state["files"][file_path])
+                sandbox_file_path = file_path.lstrip('.') if file_path.startswith('./') else file_path
+                file_content = file_data_to_string(state["files"][sandbox_file_path])
                 return file_content
             except Exception:
                 pass  # Fall through to other attempts
@@ -385,9 +386,10 @@ def write_file_impl(
         if state is not None:
             try:
                 files = state.get("files", {})
-                files[file_path] = create_file_data(content)
+                sandbox_file_path = file_path.lstrip('.') if file_path.startswith('./') else file_path
+                files[sandbox_file_path] = create_file_data(content)
                 state["files"] = files
-                return f"Successfully wrote {len(content)} bytes to `{file_path}`"
+                return f"Successfully wrote {len(content)} bytes to `{sandbox_file_path}`"
             except Exception:
                 pass
 
