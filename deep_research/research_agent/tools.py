@@ -25,6 +25,7 @@ from research_agent.utils.knowledge_filesystem import (
     read_file_impl,
     read_doc_folder_impl,
     write_content_to_output_folder,
+    send_files_to_state,
 )
 from research_agent.utils.result_rendering import render_skill_output_impl
 from research_agent.utils.skill_registry import get_skill_registry
@@ -379,14 +380,18 @@ def finalize_golden_dataset_output(
     )
     logger.info(f"Final report saved to: {report_filepath}")
 
+    # Persist files to LangGraph state via the channel API so they
+    # survive the node boundary (direct state["files"] mutation doesn't).
     return_msg = "\n"
-    if state is not None:
-        files = state.get("files", {})
-        files["/golden_dataset_metrics.md"] = create_file_data(markdown_content)
-        files["/final_report.md"] = create_file_data(final_report_content)
-        state["files"] = files
+    try:
+        send_files_to_state({
+            "/golden_dataset_metrics.md": create_file_data(markdown_content),
+            "/final_report.md": create_file_data(final_report_content),
+        })
         return_msg = "- Note: /golden_dataset_metrics.md, /final_report.md are saved in sandbox\n\n"
-        logger.info("Updated state with golden dataset files")
+        logger.info("Persisted golden dataset files to state")
+    except Exception as e:
+        logger.warning(f"Could not persist files to state: {e}")
 
     logger.info("Golden dataset finalization completed successfully")
     return (
@@ -482,22 +487,13 @@ def frontend_slides(
     reports_path.write_text(html_content, encoding="utf-8")
     logger.info(f"Presentation saved to both output and reports folders")
 
-    # Update state if available
-    if state is not None:
-        try:
-            files = state.get("files", {})
-            files[f"/{safe_name}"] = create_file_data(html_content)
-            state["files"] = files
-            logger.debug("Updated state with generated HTML file")
-        except ImportError:
-            # Fallback: manually create file data structure
-            files = state.get("files", {})
-            files[f"/{safe_name}"] = {
-                "content": html_content,
-                "type": "text/html",
-            }
-            state["files"] = files
-            logger.debug("Updated state with generated HTML file (fallback method)")
+    # Persist to LangGraph state via the channel API so the file
+    # survives the node boundary.
+    try:
+        send_files_to_state({f"/{safe_name}": create_file_data(html_content)})
+        logger.debug("Persisted generated HTML file to state")
+    except Exception as e:
+        logger.warning(f"Could not persist HTML to state: {e}")
 
     normalized_output_path = normalize_path_for_filesystem_tools(str(output_path))
     normalized_reports_path = normalize_path_for_filesystem_tools(str(reports_path))

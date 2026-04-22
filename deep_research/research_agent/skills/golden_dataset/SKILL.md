@@ -46,18 +46,21 @@ Do not do Step 3 or Step 4 (defined in the [Producing Golden Datasets](https://g
 - Do not invent citations or source references that are not supported by the provided materials
 
 Requirements:
-- **COMPLETION SEQUENCE — follow these steps in order after all items are drafted:**
-  1. Call `render_skill_output` with `skill_id="golden-dataset"` and your JSON object (including `items`). This validates the payload and returns the Markdown preview.
+- **ROLE SPLIT — who does what:**
+  - The main agent **orchestrator** performs the DOCUMENT ACCESS WORKFLOW (below) using local filesystem/document tools, prepares grounded context, and coordinates the final output tool sequence.
+  - The **research sub-agent** is web-only (`tavily_search`, `fetch_webpage_content`), drafts the 12 Q/A items using orchestrator-provided grounding plus optional web evidence, and returns the full JSON payload (matching the schema) to the orchestrator. The sub-agent does **not** call `render_skill_output` or `finalize_golden_dataset_output`.
+- **COMPLETION SEQUENCE (orchestrator only) — follow these steps in order after the sub-agent returns the drafted items:**
+  1. Call `render_skill_output` with `skill_id="golden-dataset"` and the sub-agent's JSON object (including `items`). This validates the payload and returns the Markdown preview.
   2. Call `finalize_golden_dataset_output` with the **same JSON string** as step 1. Implementation lives under `research_agent/skills/golden_dataset/` (`pipeline.py`): it writes the CSV to `./output/`, runs evaluation, generates a markdown table and calls `write_todos` to save as `/golden_dataset_metrics.md`, and creates a comprehensive final report and calls `write_todos` to save as `/final_report.md` in one atomic step.
   3. Call `write_todos` to mark ALL todos as "completed".
   4. Only after steps 1–3 succeed, write a brief summary to the user.
   **Do NOT skip steps 1, 2, or 3. A verbal description of the dataset is NOT a substitute for the tool calls.**
-- **DOCUMENT ACCESS WORKFLOW**: 
-  - Step 1: Call `read_doc_folder` on the configured doc folder (e.g., `./docs/policy/`). This will extract documents and return a summary showing saved paths like `output/policy/extracted/filename.pdf_extracted.md`.
-  - Step 2: **IMPORTANT**: Use the EXACT file paths shown in the `read_doc_folder` output. When you see "saved to output/policy/extracted/file.md", use that path with `read_file` as `output/policy/extracted/file.md` (do NOT add leading `/`).
-  - Step 3: If filesystem tools (`ls`, `glob`) return paths starting with `/` (like `/output/policy/extracted/`), strip the leading `/` before using with `read_file`. Always use relative paths starting with `output/` not `/output/`.
-  - Step 4: Base all questions, answers, and content references on these extracted markdown files—NOT on the raw source documents in `./docs/`.
-- Produce a reviewable starter batch with exactly 12 items unless the user explicitly asks for a different count.
+ **DOCUMENT ACCESS WORKFLOW (orchestrator only)**:
+  - Step 1: Call `read_doc_folder` exactly once on the configured doc folder (e.g., `./docs/policy/`). This extracts documents and returns saved paths like `output/policy/extracted/filename.pdf_extracted.md`.
+  - Step 2: Use the EXACT extracted paths with `read_file` as `output/policy/extracted/file.md` (do NOT add leading `/`).
+  - Step 3: If `ls` or `glob` returns paths starting with `/` (for example `/output/policy/extracted/...`), strip the leading `/` before `read_file`.
+  - Step 4: Build grounded notes/snippets from extracted markdown files and pass them into the sub-agent task prompt for drafting.
+  - Step 5: Sub-agent returns the full JSON payload to orchestrator; orchestrator then runs `render_skill_output` and `finalize_golden_dataset_output`.- Produce a reviewable starter batch with exactly 12 items unless the user explicitly asks for a different count.
 - Questions and answers are based on extracted knowledge documents in markdown format from `./output/<sub-folder>/extracted/` (NOT from `./docs/<sub-folder>/`). For example, if documents were provided from `./docs/policy/`, read the extracted content from `./output/policy/extracted/`. Use `read_file` or filesystem tools to access these pre-extracted markdown files.
 - Questions must sound like realistic non-expert customer questions.
 - Every question must be self-contained and unambiguous.

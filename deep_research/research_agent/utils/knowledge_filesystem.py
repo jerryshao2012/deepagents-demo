@@ -7,6 +7,8 @@ from typing import Annotated
 
 from deepagents.backends.utils import file_data_to_string, create_file_data
 from dotenv import load_dotenv
+from langgraph._internal._constants import CONFIG_KEY_SEND
+from langgraph.config import get_config
 from langgraph.prebuilt import InjectedState
 
 from logger_utils import setup_logger
@@ -25,6 +27,24 @@ SUPPORTED_DOC_SUFFIXES = {".pdf", ".txt", ".md", ".docx", ".pptx", ".xlsx"}
 _folder_listing_cache: dict[str, list[Path]] = {}
 
 logger = setup_logger(__name__)
+
+
+def send_files_to_state(updates: dict) -> None:
+    """Persist file updates to LangGraph state via the Pregel channel API.
+
+    This mirrors how deepagents' built-in write_file tool persists files.
+    Direct mutation of state["files"] via InjectedState does NOT persist
+    because LangGraph only tracks changes queued through CONFIG_KEY_SEND.
+
+    Args:
+        updates: dict mapping file paths to FileData dicts (from create_file_data).
+    """
+    try:
+        config = get_config()
+        send = config["configurable"][CONFIG_KEY_SEND]
+        send([("files", updates)])
+    except Exception as e:
+        logger.warning(f"Could not persist files to state: {e}")
 
 
 def normalize_path_for_filesystem_tools(
@@ -391,16 +411,15 @@ def write_file_impl(
         # Normalize the file path
         normalized_path = normalize_path_for_filesystem_tools(file_path)
 
-        # Try to use virtual filesystem if available in state
-        if state is not None:
-            try:
-                files = state.get("files", {})
-                sandbox_file_path = file_path.lstrip('.') if file_path.startswith('./') else file_path
-                files[sandbox_file_path] = create_file_data(content)
-                state["files"] = files
-                return f"Successfully wrote {len(content)} bytes to `{sandbox_file_path}`"
-            except Exception:
-                pass
+        # Persist to LangGraph state via the channel API (same mechanism as
+        # deepagents' built-in write_file tool).  Direct mutation of
+        # state["files"] does NOT survive the node boundary.
+        sandbox_file_path = file_path.lstrip('.') if file_path.startswith('./') else file_path
+        try:
+            send_files_to_state({sandbox_file_path: create_file_data(content)})
+            logger.info(f"Persisted to state: {sandbox_file_path}")
+        except Exception as e:
+            logger.warning(f"Could not persist {sandbox_file_path} to state: {e}")
 
         # Fallback to local filesystem
         reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")

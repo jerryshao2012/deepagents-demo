@@ -21,13 +21,14 @@ from research_agent import (
 from research_agent.tools import (
     normalize_path_for_filesystem_tools,
     think_tool,
+    render_skill_output,
     finalize_golden_dataset_output,
     ls,
     glob,
     read_file,
     read_doc_folder,
     tavily_search,
-    fetch_webpage_content
+    fetch_webpage_content,
 )
 from research_agent.utils.cli import (
     build_instruction,
@@ -167,7 +168,7 @@ class ResearchStateMiddleware(AgentMiddleware):
 
     def before_model(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
         """Capture chat_start_time before the first model call."""
-        # Only set chat_start_time once (at the beginning of the conversation)
+        # Set chat_start_time (at the beginning of each conversation)
         return {
             "chat_start_time": time.time(),
             "chat_elapsed_seconds": None
@@ -370,6 +371,8 @@ INSTRUCTIONS = (
 )
 
 # Create research subagent
+# The sub-agent is intentionally web-only to keep delegation focused and avoid
+# filesystem/state write confusion inside isolated sub-agent contexts.
 research_sub_agent: SubAgent = {
     "name": "research-agent",
     "description": "Delegate research to the sub-agent researcher. Only give this researcher one topic at a time.",
@@ -378,27 +381,23 @@ research_sub_agent: SubAgent = {
         tavily_search,
         fetch_webpage_content,
         think_tool,
-        read_file,
-        ls,
-        glob,
-        read_doc_folder,
-        finalize_golden_dataset_output,
     ],
 }
 
 model = get_configured_model()
 
 # Create the agent
+# Orchestrator owns document/filesystem tools and structured-output finalization.
+# Web discovery can still be delegated to `research-agent` via task().
 agent = create_deep_agent(
     model=model,
     tools=[
-        tavily_search,
-        fetch_webpage_content,
         think_tool,
         read_file,
         ls,
         glob,
         read_doc_folder,
+        render_skill_output,
         finalize_golden_dataset_output,
     ],
     system_prompt=INSTRUCTIONS,
