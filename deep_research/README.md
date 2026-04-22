@@ -370,50 +370,51 @@ The deep research agent adds the following custom tools beyond the built-in deep
 
 | Tool Name | Description |
 |-----------|-------------|
-| `tavily_search` | Advanced web search tool that uses Tavily purely as a URL discovery engine. Performs searches using Tavily API to find relevant URLs, fetches full webpage content via HTTP with proper User-Agent headers (avoiding 403 errors), converts HTML to markdown, and returns the complete content without summarization to preserve all information for the agent's analysis. Supports configurable result counts and topic filtering (general/news/finance). Works with both Claude and Gemini models. |
+| `tavily_search` | Advanced web search tool that uses Tavily purely as a URL discovery engine. Performs searches using Tavily API to find relevant URLs, fetches full webpage content via HTTP with proper User-Agent headers (avoiding 403 errors), converts HTML to markdown, and returns the complete content without summarization to preserve all information for the agent's analysis. Supports configurable result counts and topic filtering (general/news/finance). Respects the `no_web` state flag to disable web access when needed. Works with both Claude and Gemini models. |
+| `fetch_webpage_content` | Fetches and converts a specific webpage URL to markdown format. Useful when you have a direct URL and need to extract its content for analysis. Uses proper User-Agent headers and respects SSL verification settings. Also checks the `no_web` state flag before fetching. |
 
 #### Strategic Thinking & Reflection
 
 | Tool Name | Description |
 |-----------|-------------|
-| `think_tool` | Strategic reflection mechanism that helps the agent pause and assess progress between searches, analyze findings, identify gaps, and plan next steps. Essential for maintaining coherent research strategy across multiple iterations. |
+| `think_tool` | Strategic reflection mechanism that helps the agent pause and assess progress between searches, analyze findings, identify gaps, and plan next steps. Records reflections to timestamped log files in the output folder for audit trails. Essential for maintaining coherent research strategy across multiple iterations. |
 
 #### Filesystem & Document Processing
 
 | Tool Name | Description |
 |-----------|-------------|
-| `read_file` | Reads the content of a file at the given path. Checks LangGraph state files first before accessing the local filesystem, enabling seamless access to both in-memory and persistent files. |
-| `ls` | Lists the contents of a directory. Returns filenames with "/" suffix for subdirectories. Normalizes paths for cross-platform compatibility. |
-| `glob` | Finds files matching a glob pattern with recursive support. Handles complex patterns like `**/*.md` and normalizes paths for consistent behavior across Windows and Unix systems. |
-| `read_doc_folder` | Extracts text content from supported local files in a specified folder. Supports `.pdf`, `.txt`, `.md`, `.docx`, `.pptx`, and `.xlsx`. Automatically resolves folder path from agent state or environment variables. Caches extracted content under the active output folder to avoid redundant processing. |
+| `read_file` | Reads the content of a file at the given path. Implements a two-tier fallback strategy: first checks LangGraph state virtual filesystem (DeepAgents backend), then falls back to the local filesystem if not available. Normalizes paths for cross-platform compatibility. |
+| `ls` | Lists the contents of a directory with fallback support. Tries virtual filesystem in state first, then local filesystem. Returns filenames with "/" suffix for subdirectories. Normalizes paths for consistent behavior across Windows and Unix systems. |
+| `glob` | Finds files matching a glob pattern with recursive support (e.g., `**/*.md`). Implements dual-path resolution: virtual filesystem first, then local filesystem. Handles complex patterns and normalizes paths for cross-platform compatibility. |
+| `read_doc_folder` | Extracts text content from supported document files in a specified folder. Supports `.pdf`, `.txt`, `.md`, `.docx`, `.pptx`, and `.xlsx` formats. Automatically resolves folder paths from agent state or environment variables. Caches extracted content under the active output folder to avoid redundant processing. For large folders, returns a summary instead of full content; use the `specific_files` parameter to target individual documents. |
 
 #### Skill Management System
 
 | Tool Name | Description |
 |-----------|-------------|
-| `list_available_skills` | Lists all available skills registered in the skill registry with their descriptions. Helps the agent discover what specialized capabilities are available for structured output generation. |
-| `read_skill_supporting_file` | Reads supporting files from a skill directory (e.g., CSS templates, style presets, HTML architecture guides). Use this when a skill's instructions reference external resources needed for implementation. |
+| `list_available_skills` | Lists all available skills registered in the dynamic skill registry with their descriptions. Scans the `research_agent/skills/` directory and extracts metadata from SKILL.md frontmatter. Helps the agent discover what specialized capabilities are available for structured output generation (e.g., frontend-slides, golden-dataset, interview-prep). |
+| `read_skill_supporting_file` | Reads supporting files from a skill directory (e.g., CSS templates, style presets, HTML architecture guides, animation patterns). Use this when a skill's instructions reference external resources needed for implementation. Provides error messages with available file listings if the requested file doesn't exist. |
 
 #### Structured Output Rendering
 
 | Tool Name | Description |
 |-----------|-------------|
-| `render_skill_output` | Generic skill renderer that loads a skill skill from `research_agent/skills/*/SKILL.md`, validates the provided JSON payload against that skill's schema, applies default values for optional fields, coerces data types, and renders the final Markdown output using template specifications. Use ONLY for structured skills with JSON schemas—do NOT use for unstructured markdown documents. |
+| `render_skill_output` | Generic skill renderer that loads a skill definition from `research_agent/skills/*/SKILL.md`, validates the provided JSON payload against that skill's schema, applies default values for optional fields, coerces data types, and renders the final Markdown output using template specifications. **Use ONLY for structured skills with JSON schemas**—do NOT use for unstructured markdown documents. Returns validation errors if the payload doesn't match the schema. |
 
 #### Golden Dataset Generation & Evaluation
 
 | Tool Name | Description |
 |-----------|-------------|
-| `finalize_golden_dataset_output` | Golden-dataset only: validates the same JSON as `render_skill_output`, exports a CSV under `output/` via `skills/golden_dataset/pipeline.py`, then runs quality metrics so export and evaluation always happen in order. Generates human-readable quality reports alongside raw metrics. |
+| `finalize_golden_dataset_output` | Golden-dataset only: validates the same JSON payload as `render_skill_output`, exports a CSV under the output folder via `skills/golden_dataset/pipeline.py`, then runs quality metrics so export and evaluation always happen in order. Generates human-readable quality reports (`final_report.md`) alongside raw metrics (`golden_dataset_metrics.md`). Persists files to LangGraph state for downstream access. Calculates chat elapsed time for performance tracking. |
 
 #### Frontend Slides Presentation Generation
 
 | Tool Name | Description |
 |-----------|-------------|
-| `frontend-slides` | Generates self-contained HTML slide decks from markdown-style slide content. Accepts presentation content with headings, headlines, subtitles, body text, bullet lists, and callout blocks. Supports 12 visual presets (Bold Signal, Electric Studio, Creative Voltage, Dark Botanical, etc.) and 6 animation styles (dramatic, techy, playful, professional, calm, editorial). Includes optional inline editing mode. Saves generated HTML to both `./output` and `./reports` folders. |
-| `frontend-slides-export-pdf` | Exports an HTML presentation to PDF format using Playwright. Captures screenshots of each slide and compiles them into a single PDF document. Note: animations are not preserved in PDF output. Supports compact mode (1280x720) for smaller file sizes. |
-| `frontend-slides-deploy` | Deploys an HTML presentation to a live Vercel URL using the Vercel CLI. Requires Vercel CLI installation and authentication. Provides shareable public links for presentations. |
-| `frontend-slides-extract-pptx` | Extracts content and images from PowerPoint (.pptx) files. Runs extraction scripts that return JSON structures containing slides, text, and embedded images. Facilitates conversion of existing presentations to HTML format. |
+| `frontend-slides` | Generates self-contained HTML slide decks from markdown-style slide content. Accepts presentation content with headings (`# [Slide 1] Title:`), headlines, subtitles, body text, bullet lists, and callout blocks. Supports 12 visual presets (Bold Signal, Electric Studio, Creative Voltage, Dark Botanical, Notebook Tabs, Pastel Geometry, Split Pastel, Vintage Editorial, Neon Cyber, Terminal Green, Swiss Modern, Paper & Ink) and 6 animation styles (dramatic, techy, playful, professional, calm, editorial). Includes optional inline editing mode. Saves generated HTML to both `./output` and `./reports` folders. Persists files to LangGraph state. |
+| `frontend-slides-export-pdf` | Exports an HTML presentation to PDF format using Playwright. Calls `scripts/export-pdf.sh` which captures screenshots of each slide and compiles them into a single PDF document. Note: animations are not preserved in PDF output. Supports compact mode (1280x720 instead of 1920x1080) for smaller file sizes. Requires Playwright installation. |
+| `frontend-slides-deploy` | Deploys an HTML presentation to a live Vercel URL using the Vercel CLI. Calls `scripts/deploy.sh` which requires Vercel CLI installation and authentication. Provides shareable public links for presentations. |
+| `frontend-slides-extract-pptx` | Extracts content and images from PowerPoint (.pptx) files. Runs `scripts/extract-pptx.py` which returns JSON structures containing slides, text, and embedded images. Facilitates conversion of existing presentations to HTML format. Outputs extracted data to a specified directory for further processing. |
 
 ## 🛡️ Rate Limit Handling
 
