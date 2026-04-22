@@ -47,6 +47,36 @@ def send_files_to_state(updates: dict) -> None:
         logger.warning(f"Could not persist files to state: {e}")
 
 
+def send_timing_to_state(
+        chat_start_time: float | None,
+        chat_elapsed_seconds: float | None,
+) -> None:
+    """Persist timing metrics to LangGraph state via the Pregel channel API.
+
+    Each state field is its own channel, so we push individual
+    ``(channel_name, value)`` pairs via CONFIG_KEY_SEND.  This makes
+    ``chat_start_time`` and ``chat_elapsed_seconds`` available to the
+    frontend in the same way that file updates are streamed.
+
+    Args:
+        chat_start_time: Unix timestamp when the chat session started.
+        chat_elapsed_seconds: Total seconds elapsed since chat start.
+    """
+
+    try:
+        config = get_config()
+        send = config["configurable"][CONFIG_KEY_SEND]
+        updates: list[tuple[str, float]] = []
+        if chat_start_time is not None:
+            updates.append(("chat_start_time", chat_start_time))
+        if chat_elapsed_seconds is not None:
+            updates.append(("chat_elapsed_seconds", chat_elapsed_seconds))
+        if updates:
+            send(updates)
+    except Exception as e:
+        logger.warning(f"Could not persist timing to state: {e}")
+
+
 def normalize_path_for_filesystem_tools(
         path_str: str
 ) -> str:

@@ -33,6 +33,7 @@ from research_agent.tools import (
 from research_agent.utils.cli import (
     build_instruction,
 )
+from research_agent.utils.knowledge_filesystem import send_timing_to_state
 from research_agent.utils.skill_registry import get_skill_registry
 from utils import get_ssl_verify_config, str2bool
 
@@ -127,7 +128,6 @@ class ResearchState(AgentState):
     no_web: bool | None
     chat_start_time: float | None
     chat_elapsed_seconds: float | None
-    files: dict | None
 
 
 class ResearchStateMiddleware(AgentMiddleware):
@@ -167,18 +167,26 @@ class ResearchStateMiddleware(AgentMiddleware):
         return result if result else None
 
     def before_model(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
-        """Capture chat_start_time before the first model call."""
-        # Set chat_start_time (at the beginning of each conversation)
+        """Capture chat_start_time before model calls, only initializing once per chat."""
+        # Initialize once; do not reset on subsequent model turns.
+        if isinstance(state.get("chat_start_time"), (int, float)):
+            return None
+
+        chat_start_time = time.time()
+        send_timing_to_state(chat_start_time, None)
         return {
-            "chat_start_time": time.time(),
-            "chat_elapsed_seconds": None
+            "chat_start_time": chat_start_time,
+            "chat_elapsed_seconds": None,
         }
 
     def after_model(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
         """Calculate chat_elapsed_seconds after each model response."""
         chat_start_time = state.get("chat_start_time")
-        if chat_start_time is not None:
+        if isinstance(chat_start_time, (int, float)):
             chat_elapsed_seconds = time.time() - chat_start_time
+            # Push timing values to the frontend via the channel API so they
+            # are streamed to consumers (same mechanism as send_files_to_state).
+            send_timing_to_state(chat_start_time, chat_elapsed_seconds)
             return {"chat_elapsed_seconds": chat_elapsed_seconds}
         return None
 

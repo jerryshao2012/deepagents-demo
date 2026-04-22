@@ -358,11 +358,19 @@ def finalize_golden_dataset_output(
     logger.info(f"CSV exported to: {csv_path}")
 
     chat_elapsed_seconds = None
-    if state is not None:
-        chat_start_time = state.get("chat_start_time") if state else None
-        if isinstance(chat_start_time, float):
-            chat_elapsed_seconds = datetime.now().timestamp() - chat_start_time
-            logger.debug(f"Chat elapsed time: {chat_elapsed_seconds:.2f} seconds")
+    if isinstance(state, dict):
+        # Prefer middleware-computed elapsed time if available.
+        elapsed_from_state = state.get("chat_elapsed_seconds")
+        if isinstance(elapsed_from_state, (int, float)):
+            chat_elapsed_seconds = float(elapsed_from_state)
+        else:
+            # Fallback to start-time calculation when elapsed value is not present.
+            chat_start_time = state.get("chat_start_time")
+            if isinstance(chat_start_time, (int, float)):
+                chat_elapsed_seconds = datetime.now().timestamp() - float(chat_start_time)
+
+    if isinstance(chat_elapsed_seconds, float):
+        logger.debug(f"Chat elapsed time: {chat_elapsed_seconds:.2f} seconds")
 
     logger.info("Evaluating golden dataset and generating quality metrics")
     metrics_csv_path, markdown_content, final_report_content = (
