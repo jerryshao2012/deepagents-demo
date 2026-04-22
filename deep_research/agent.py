@@ -33,7 +33,6 @@ from research_agent.tools import (
 from research_agent.utils.cli import (
     build_instruction,
 )
-from research_agent.utils.knowledge_filesystem import send_timing_to_state
 from research_agent.utils.skill_registry import get_skill_registry
 from utils import get_ssl_verify_config, str2bool
 
@@ -133,6 +132,9 @@ class ResearchState(AgentState):
 class ResearchStateMiddleware(AgentMiddleware):
     """Middleware to configure state variables like DOC_FOLDER before the agent runs."""
 
+    # Ensure middleware state update are validated against the standard state schema.
+    state_schema = ResearchState
+
     def before_agent(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
         messages = state.get("messages", [])
 
@@ -173,7 +175,6 @@ class ResearchStateMiddleware(AgentMiddleware):
             return None
 
         chat_start_time = time.time()
-        send_timing_to_state(chat_start_time, None)
         return {
             "chat_start_time": chat_start_time,
             "chat_elapsed_seconds": None,
@@ -184,9 +185,6 @@ class ResearchStateMiddleware(AgentMiddleware):
         chat_start_time = state.get("chat_start_time")
         if isinstance(chat_start_time, (int, float)):
             chat_elapsed_seconds = time.time() - chat_start_time
-            # Push timing values to the frontend via the channel API so they
-            # are streamed to consumers (same mechanism as send_files_to_state).
-            send_timing_to_state(chat_start_time, chat_elapsed_seconds)
             return {"chat_elapsed_seconds": chat_elapsed_seconds}
         return None
 
