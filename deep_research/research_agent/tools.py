@@ -207,7 +207,7 @@ def read_doc_folder(
 
 @tool(parse_docstring=True)
 def think_tool(
-        reflection: str
+        reflection: str,
 ) -> str:
     """Tool for strategic reflection on research progress and decision-making.
 
@@ -228,13 +228,22 @@ def think_tool(
 
     # Log the reflection to a dedicated research log file
     now = datetime.now()
-    log_file = output_dir / f"research_reflection_{now.strftime('%Y-%m-%d %H_%M_%S')}.log"
+    log_file = output_dir / f"research_reflection.log"
     timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(f"[{timestamp}] REFLECTION:\n{reflection}\n")
         f.write("-" * 80 + "\n")
     logger.info(f"Reflection logged to file: {log_file}")
+
+    # Also save reflection to state using send_files_to_state
+    try:
+        reflection_content = f"# Research Reflection\n\n**Timestamp:** {timestamp}\n\n---\n\n{reflection}\n"
+        send_files_to_state({"/research_reflection.md": create_file_data(reflection_content)})
+        logger.info("Reflection saved to state: /research_reflection.md")
+    except Exception as e:
+        logger.warning(f"Could not save reflection to state: {e}")
+
     return f"Reflection recorded: {reflection}"
 
 
@@ -417,7 +426,6 @@ def finalize_golden_dataset_output(
 @tool("frontend-slides", parse_docstring=True)
 def frontend_slides(
         presentation_markdown: str,
-        state: Annotated[dict, InjectedState],
         output_filename: str | None = None,
         deck_title: str | None = None,
         style_preset: str = "Creative Voltage",
@@ -441,7 +449,6 @@ def frontend_slides(
 
     Args:
         presentation_markdown: Markdown-style slide content to convert into HTML slides.
-        state: LangGraph state (injected automatically, do not supply).
         output_filename: Optional filename for the generated HTML. Saved under OUTPUT_FOLDER.
         deck_title: Optional browser title for the presentation. Defaults to the first slide title.
         style_preset: Visual preset name. Supported: Bold Signal, Electric Studio, Creative Voltage, Dark Botanical, Notebook Tabs, Pastel Geometry, Split Pastel, Vintage Editorial, Neon Cyber, Terminal Green, Swiss Modern, Paper & Ink.

@@ -391,7 +391,6 @@ def read_file_impl(
 def write_file_impl(
         file_path: str,
         content: str,
-        state: Annotated[dict, InjectedState] = None
 ) -> str:
     """Write content to a file with virtual filesystem support.
 
@@ -402,7 +401,6 @@ def write_file_impl(
     Args:
         file_path: The path where the file should be written.
         content: The content to write to the file.
-        state: LangGraph state containing virtual filesystem (injected automatically).
 
     Returns:
         Confirmation message with the normalized file path, or an error message.
