@@ -137,9 +137,15 @@ optional arguments:
   --doc-folder DOC_FOLDER
                         Optional folder containing supported documents to use as research material
   --no-web              Disable web search (Tavily) during research
-  --skill {list,slides,interview,golden-dataset}
-                        Optional structured output skill. Use '--skill list' to see all options.
-  --title TITLE         Optional research title for output file
+  --skill {list,<available-skill-ids>}
+                        Optional structured output skill. Use '--skill list' to see all available skills.
+  --title TITLE         Optional research title for output file naming
+  --eval-golden-dataset Enable golden-dataset regression tracking and JSONL report output
+  --eval-mode {baseline,candidate}
+                        Evaluation mode for --eval-golden-dataset (default: candidate)
+  --eval-history-file EVAL_HISTORY_FILE
+                        Optional JSONL output file path for evaluation history.
+                        Default: ./output/eval_history/golden_dataset_runs.jsonl
 ```
 
 #### Examples
@@ -168,6 +174,23 @@ Generate a golden dataset:
 ```bash
 uv run python research_agent_cli.py "Generate 20 question-answer pairs for the documents provided" --doc-folder ./docs/policy/ --skill golden-dataset
 ```
+
+Create a baseline evaluation entry for a fixed golden-dataset test case:
+```bash
+uv run python research_agent_cli.py "Generate 5 question-answer pairs for the documents provided" --doc-folder ./docs/policy/ --skill golden-dataset --eval-golden-dataset --eval-mode baseline
+```
+
+Run a candidate evaluation and compare against the latest baseline with the same test input:
+```bash
+uv run python research_agent_cli.py "Generate 5 question-answer pairs for the documents provided" --doc-folder ./docs/policy/ --skill golden-dataset --eval-golden-dataset --eval-mode candidate
+```
+
+Write JSONL history to a custom location:
+```bash
+uv run python research_agent_cli.py "Generate 5 question-answer pairs for the documents provided" --doc-folder ./docs/policy/ --skill golden-dataset --eval-golden-dataset --eval-history-file ./output/eval_history/my_runs.jsonl
+```
+
+> Important: comparisons are only performed when the test case is exactly the same (same subject text, skill, doc-folder, model, and flags). Inputs like "Generate 5 pairs..." and "Generate 10 pairs..." are intentionally treated as non-comparable.
 
 <img width="937" alt="Deep Research Agent Architecture" src="./resources/Deep_Research_Agent_with_Golden_Dataset_Generation_Skill.png" />
 
@@ -601,3 +624,204 @@ To run with pytest instead:
 ```bash
 pytest tests/test_retry_utils.py -v
 ```
+
+---
+
+## 📊 Golden Dataset Evaluation & Regression Tracking
+
+### Overview
+
+The golden-dataset skill now includes comprehensive evaluation tracking to monitor quality, efficiency, and regressions across model updates. Each run is logged as a JSONL record with rich metrics, enabling comparison between baseline and candidate implementations.
+
+### Key Metrics Tracked
+
+#### Completeness
+| Metric | Description |
+|--------|-------------|
+| `completeness.pass` | Boolean flag. True only if both `/golden_dataset_metrics.md` and `/final_report.md` are present in the output. |
+| `completeness.has_golden_dataset_metrics_md` | Whether the quality metrics report was generated. |
+| `completeness.has_final_report_md` | Whether the final report was generated. |
+
+#### Tool Execution
+| Metric | Description |
+|--------|-------------|
+| `tool_execution.total_tool_calls` | Total number of tool invocations across the entire run. |
+| `tool_execution.successful_tool_calls` | Count of tool calls that returned valid responses. |
+| `tool_execution.failed_tool_calls` | Count of tool calls that failed or returned error content. |
+| `tool_execution.success_rate` | Ratio of successful to total tool calls. (1.0 if no calls made) |
+
+#### Failure & Intervention
+| Metric | Description |
+|--------|-------------|
+| `failure.intervention_required` | Boolean. True if completeness failed, stream fallback was used, or tool failure rate > 0. |
+| `failure.failure_rate` | Ratio: 1.0 if intervention needed, 0.0 otherwise. |
+
+#### Token Efficiency
+| Metric | Description |
+|--------|-------------|
+| `token_efficiency.available` | Boolean. Whether token usage metadata was captured. |
+| `token_efficiency.prompt_tokens` | Total input tokens across all messages. |
+| `token_efficiency.completion_tokens` | Total output tokens across all messages. |
+| `token_efficiency.total_tokens` | Sum of prompt and completion tokens. |
+| `token_efficiency.tokens_per_successful_task` | Aggregate token count if completeness passed, else null. |
+
+#### Latency
+| Metric | Description |
+|--------|-------------|
+| `latency.runtime_seconds` | End-to-end execution time in seconds. |
+| `latency.p50_seconds` | Median latency (currently = runtime for single runs; p50/p95 aggregated across rolling history). |
+| `latency.p95_seconds` | 95th percentile latency (currently = runtime; will improve with multi-run analysis). |
+
+### Run Record Structure
+
+Each JSONL entry contains:
+```json
+{
+  "timestamp_utc": "2026-04-23T10:15:30.123456+00:00",
+  "run_type": "baseline",
+  "manifest": {
+    "subject": "Generate 10 question-answer pairs...",
+    "skill": "golden-dataset",
+    "doc_folder": "./docs/policy",
+    "no_web": false,
+    "model_name": "claude-sonnet-4-5-20250929",
+    "verify_ssl": "True"
+  },
+  "manifest_hash": "a1b2c3d4e5f6g7h8...",
+  "model_name": "claude-sonnet-4-5-20250929",
+  "git_sha": "abc1234",
+  "runtime_seconds": 45.2,
+  "stream_fallback_used": false,
+  "output_file": "./output/bmo_policy_qa_pairs-2026-04-23_10_15_30.md",
+  "metrics": { /* as detailed above */ }
+}
+```
+
+### Manifest & Comparison Logic
+
+**Manifest Hash**: Canonical SHA256 hash of the test case (subject, skill, doc_folder, model, etc.). Used for **same-input comparisons only**.
+
+**Critical Design**:
+- `"Generate 5 pairs..."` vs `"Generate 10 pairs..."` are **non-comparable** (different manifest hashes).
+- Only runs with identical manifests are compared.
+- Prevents false regressions when comparing different test cases.
+
+### Usage: Create Baseline & Evaluate Candidate
+
+#### Step 1: Record a Baseline
+```bash
+uv run python research_agent_cli.py \
+  "Generate 5 question-answer pairs for the documents provided" \
+  --doc-folder ./docs/policy/ \
+  --skill golden-dataset \
+  --eval-golden-dataset \
+  --eval-mode baseline
+```
+
+Output: JSONL entry appended to `./output/eval_history/golden_dataset_runs.jsonl`
+
+#### Step 2: Run a Candidate (Same Input)
+```bash
+uv run python research_agent_cli.py \
+  "Generate 5 question-answer pairs for the documents provided" \
+  --doc-folder ./docs/policy/ \
+  --skill golden-dataset \
+  --eval-golden-dataset \
+  --eval-mode candidate
+```
+
+**Comparison Output**:
+- Fetches latest baseline with matching manifest hash.
+- Computes per-metric verdicts: `better`, `same`, `worse`, or `unavailable`.
+- Logs verdict summary to stdout.
+- Overall verdict combines all metrics:
+  - `better` if any metric improved and none regressed.
+  - `worse` if any metric degraded (e.g., completeness dropped, failure rate increased, tool calls > baseline * 1.30).
+  - `same` if no significant change.
+
+#### Step 3: Custom History File
+```bash
+uv run python research_agent_cli.py \
+  "Generate 5 question-answer pairs for the documents provided" \
+  --doc-folder ./docs/policy/ \
+  --skill golden-dataset \
+  --eval-golden-dataset \
+  --eval-history-file ./output/my_eval_runs.jsonl
+```
+
+### Regression Thresholds (Built-In)
+
+| Metric | Threshold | Condition |
+|--------|-----------|-----------|
+| **Tool Growth** | 30% | Candidate tool_calls > baseline * 1.30 → **worse** |
+| **Token Efficiency** | 20% | Candidate total_tokens > baseline * 1.20 → **worse** |
+| **Latency** | 15% | Candidate p95_seconds > baseline * 1.15 → **worse** |
+
+### Programmatic Access
+
+```python
+from research_agent.utils.eval_tracking import (
+    build_manifest,
+    collect_run_metrics,
+    make_run_record,
+    append_jsonl,
+    load_jsonl,
+    latest_baseline,
+    compare_records,
+)
+
+# Build manifest
+manifest = build_manifest(
+    subject="Generate 5 pairs",
+    skill="golden-dataset",
+    doc_folder="./docs/policy",
+    no_web=False,
+    model_name="claude-sonnet-4-5-20250929",
+    verify_ssl=True,
+)
+
+# Collect metrics from a run result
+metrics = collect_run_metrics(
+    result={"messages": [...], "files": {...}},
+    runtime_seconds=45.2,
+    stream_fallback_used=False,
+)
+
+# Create run record
+record = make_run_record(
+    manifest=manifest,
+    run_type="candidate",
+    metrics=metrics,
+    runtime_seconds=45.2,
+    model_name="claude-sonnet-4-5-20250929",
+    stream_fallback_used=False,
+    output_file="./output/run.md",
+    git_sha="abc1234",
+)
+
+# Append to history
+history_path = Path("./output/eval_history/runs.jsonl")
+append_jsonl(history_path, record)
+
+# Load and compare
+records = load_jsonl(history_path)
+baseline = latest_baseline(records, manifest_hash=record["manifest_hash"])
+comparison = compare_records(baseline=baseline, candidate=record)
+print(f"Overall verdict: {comparison['overall_verdict']}")
+print(f"Per-metric: {comparison['per_metric']}")
+```
+
+### Testing
+
+Run the evaluation tracking tests:
+```bash
+pytest tests/test_eval_tracking.py -v
+```
+
+Tests verify:
+- Manifest hash stability and change detection.
+- Completeness gating (both artifacts required).
+- Tool-call success/failure parsing.
+- Baseline selection (latest matching manifest).
+- Non-comparable manifest mismatches.
+- JSONL append and reload integrity.

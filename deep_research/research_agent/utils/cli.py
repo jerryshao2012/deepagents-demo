@@ -70,6 +70,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional structured output skill. Use '--skill list' to see all options.",
     )
     parser.add_argument("--title", type=str, help="Optional research title for output file")
+    parser.add_argument(
+        "--eval-golden-dataset",
+        action="store_true",
+        help="Enable golden-dataset regression tracking and JSONL report output.",
+    )
+    parser.add_argument(
+        "--eval-mode",
+        choices=["baseline", "candidate"],
+        default="candidate",
+        help="Evaluation mode for --eval-golden-dataset (default: candidate).",
+    )
+    parser.add_argument(
+        "--eval-history-file",
+        type=str,
+        help=(
+            "Optional JSONL output file path for evaluation history. "
+            "Default: ./output/eval_history/golden_dataset_runs.jsonl"
+        ),
+    )
     return parser
 
 

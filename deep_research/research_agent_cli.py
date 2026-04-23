@@ -14,6 +14,16 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMe
 from agent import agent, model
 from research_agent.tools import normalize_path_for_filesystem_tools
 from research_agent.utils.cli import build_parser, list_skills
+from research_agent.utils.eval_tracking import (
+    append_jsonl,
+    build_manifest,
+    collect_run_metrics,
+    compare_records,
+    get_git_sha,
+    latest_baseline,
+    load_jsonl,
+    make_run_record,
+)
 from utils import str2bool, get_ssl_verify_config, show_prompt, format_messages
 
 # Load environment variables
@@ -309,6 +319,10 @@ def main():
         with open(args.subject_file, "r", encoding="utf-8") as handle:
             subject = handle.read().strip()
 
+    if args.eval_golden_dataset and args.skill != "golden-dataset":
+        print("Error: --eval-golden-dataset requires --skill golden-dataset")
+        sys.exit(2)
+
     instruction = subject
     title = None
 
@@ -323,6 +337,7 @@ def main():
     result = {}
     start_time = time.time()
     last_time = start_time
+    stream_fallback_used = False
 
     # Create SSL verification setting - CLI flag takes precedence over env var
     verify_ssl = get_ssl_verify_config()
@@ -415,6 +430,7 @@ def main():
         except Exception as e:
             spinner.stop()
             total_time = time.time() - start_time
+            stream_fallback_used = True
             role, name, preview = _last_stream_message_diagnostics(last_stream_state)
             diagnostic_tool_name = name or last_tool_name or "unknown"
 
@@ -456,6 +472,60 @@ def main():
 
     file_content = select_output_content(result, args.skill)
     filename = save_research_to_file(file_content, title, output_folder=output_folder)
+
+    if args.eval_golden_dataset:
+        reports_output_folder = Path(os.environ.get("REPORTS_OUTPUT_FOLDER", "./output"))
+        history_path = (
+            Path(args.eval_history_file)
+            if args.eval_history_file
+            else reports_output_folder / "eval_history" / "golden_dataset_runs.jsonl"
+        )
+
+        runtime_seconds = time.time() - start_time
+        manifest = build_manifest(
+            subject=subject,
+            skill=args.skill,
+            doc_folder=args.doc_folder,
+            no_web=bool(args.no_web),
+            model_name=str(
+                getattr(model, "model", None) or getattr(model, "model_name", None) or model.__class__.__name__),
+            verify_ssl=verify_ssl,
+        )
+        run_metrics = collect_run_metrics(result, runtime_seconds, stream_fallback_used)
+        run_record = make_run_record(
+            manifest=manifest,
+            run_type=args.eval_mode,
+            metrics=run_metrics,
+            runtime_seconds=runtime_seconds,
+            model_name=str(
+                getattr(model, "model", None) or getattr(model, "model_name", None) or model.__class__.__name__),
+            stream_fallback_used=stream_fallback_used,
+            output_file=filename,
+            git_sha=get_git_sha(Path(__file__).resolve().parent),
+        )
+
+        records = load_jsonl(history_path)
+        baseline = latest_baseline(records, run_record["manifest_hash"])
+        comparison = compare_records(baseline=baseline, candidate=run_record)
+        run_record["comparison"] = comparison
+
+        append_jsonl(history_path, run_record)
+
+        print("\nEvaluation Tracking Summary")
+        print("=" * 80)
+        print(f"Run type: {args.eval_mode}")
+        print(f"History file: {history_path}")
+        print(f"Manifest hash: {run_record['manifest_hash']}")
+        print(f"Comparable: {comparison.get('comparable')}")
+        print(f"Overall verdict: {comparison.get('overall_verdict')}")
+        if comparison.get("reason"):
+            print(f"Reason: {comparison['reason']}")
+        per_metric = comparison.get("per_metric", {})
+        if per_metric:
+            print("Per-metric verdicts:")
+            for metric, verdict in per_metric.items():
+                print(f"- {metric}: {verdict}")
+        print("=" * 80)
 
     print("\n" + "=" * 80)
     if "/final_report.md" in result.get("files", {}):
