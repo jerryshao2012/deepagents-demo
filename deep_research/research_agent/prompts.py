@@ -176,7 +176,7 @@ The orchestrator will consolidate citations from all sub-agents into the final r
 """
 
 RESEARCHER_DESCRIPTION = """
-Delegate research to the sub-agent researcher. Only give this researcher one topic at a time. This research agent is doing web search ONLY.
+Delegate research to the sub-agent researcher. Only give this researcher one topic at a time.
 """
 
 TASK_DESCRIPTION_PREFIX = """Delegate a task to a specialized sub-agent with isolated context. Available agents for delegation are:
