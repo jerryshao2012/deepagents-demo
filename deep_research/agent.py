@@ -18,6 +18,7 @@ from research_agent import (
     RESEARCHER_INSTRUCTIONS,
     SUBAGENT_DELEGATION_INSTRUCTIONS,
 )
+from research_agent.prompts import RESEARCHER_DESCRIPTION
 from research_agent.tools import (
     normalize_path_for_filesystem_tools,
     think_tool,
@@ -381,7 +382,7 @@ INSTRUCTIONS = (
 # filesystem/state write confusion inside isolated sub-agent contexts.
 research_sub_agent: SubAgent = {
     "name": "research-agent",
-    "description": "Delegate research to the sub-agent researcher. Only give this researcher one topic at a time.",
+    "description": RESEARCHER_DESCRIPTION,
     "system_prompt": RESEARCHER_INSTRUCTIONS.format(
         date=current_date,
         skill_catalog=get_skill_registry().format_skill_catalog(),
