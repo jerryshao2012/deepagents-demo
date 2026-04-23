@@ -382,7 +382,11 @@ INSTRUCTIONS = (
 research_sub_agent: SubAgent = {
     "name": "research-agent",
     "description": "Delegate research to the sub-agent researcher. Only give this researcher one topic at a time.",
-    "system_prompt": RESEARCHER_INSTRUCTIONS.format(date=current_date),
+    "system_prompt": RESEARCHER_INSTRUCTIONS.format(
+        date=current_date,
+        skill_catalog=get_skill_registry().format_skill_catalog(),
+        skill_quality_guidelines=get_skill_registry().format_skill_quality_guidelines(),
+    ),
     "tools": [
         tavily_search,
         fetch_webpage_content,

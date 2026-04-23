@@ -1,7 +1,5 @@
 """Prompt templates and tool descriptions for the research deepagent."""
 
-from research_agent.utils.skill_registry import get_skill_registry
-
 RESEARCH_WORKFLOW_INSTRUCTIONS = """# Research Workflow
 
 Follow this workflow for all research requests:
@@ -217,9 +215,3 @@ Your role is to coordinate research by delegating tasks from your TODO list to s
 - Stop after {max_researcher_iterations} delegation rounds if you've haven't found adequate sources
 - Stop when you have sufficient information to answer comprehensively
 - Bias towards focused research over exhaustive exploration"""
-
-RESEARCHER_INSTRUCTIONS = RESEARCHER_INSTRUCTIONS.format(
-    date="{date}",
-    skill_catalog=get_skill_registry().format_skill_catalog(),
-    skill_quality_guidelines=get_skill_registry().format_skill_quality_guidelines(),
-)
