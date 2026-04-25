@@ -63,9 +63,9 @@ def parse_metric_scores(response_text: str) -> dict[str, float]:
     return metrics
 
 
-def build_judge_prompt(question: str, answer: str, content: str = "") -> str:
+def build_judge_prompt(question: str, answer: str, context: str = "") -> str:
     """Create a deterministic judge prompt for the four dataset metrics."""
-    content_block = content.strip() or "No grounding content was provided. Groundedness should be scored conservatively."
+    context_block = context.strip() or "No grounding context was provided. Groundedness should be scored conservatively."
     metric_guidance_lines = "\n".join(
         f"- {metric_name}: {METRIC_GUIDANCE[metric_name]}" for metric_name in METRIC_NAMES
     )
@@ -73,7 +73,7 @@ def build_judge_prompt(question: str, answer: str, content: str = "") -> str:
         metric_guidance_lines=metric_guidance_lines,
         question=question.strip(),
         answer=answer.strip(),
-        content=content_block,
+        context=context_block,
     )
 
 
@@ -82,7 +82,7 @@ def score_row(model, row: dict[str, str]) -> dict[str, float]:
     prompt = build_judge_prompt(
         question=row["Question"],
         answer=row["Answer"],
-        content=row.get("Context", ""),
+        context=row.get("Context", ""),
     )
     response = model.invoke([HumanMessage(content=prompt)])
     content = getattr(response, "content", response)
@@ -102,11 +102,11 @@ def validate_input_columns(fieldnames: Iterable[str] | None) -> None:
 
 
 def build_missing_context_report(rows: Iterable[dict[str, str]]) -> str:
-    """Build a small warning report for rows that are missing grounding content."""
+    """Build a small warning report for rows that are missing grounding context."""
     missing_rows: list[str] = []
     for index, row in enumerate(rows, start=1):
-        content = (row.get("Context") or row.get("context") or "").strip()
-        if content:
+        context = (row.get("Context") or row.get("context") or "").strip()
+        if context:
             continue
         row_id = (row.get("ID") or row.get("id") or f"row-{index}").strip()
         question = (row.get("Question") or row.get("question") or "").strip()

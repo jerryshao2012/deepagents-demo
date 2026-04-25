@@ -42,5 +42,5 @@ judge_prompt: |
   Draft Answer:
   {answer}
 
-  Content:
-  {content}
+  Context:
+  {context}

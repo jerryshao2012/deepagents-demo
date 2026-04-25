@@ -53,7 +53,7 @@ def export_golden_dataset_csv(payload: dict, output_folder: Path) -> Path:
                     item.get("coverage_area", ""),
                     item.get("question", ""),
                     item.get("answer", ""),
-                    item.get("content", ""),
+                    item.get("context", ""),
                 ]
             )
     return csv_path

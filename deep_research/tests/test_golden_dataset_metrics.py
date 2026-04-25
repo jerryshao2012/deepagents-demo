@@ -44,7 +44,7 @@ def test_build_judge_prompt_includes_metric_descriptions_and_goals() -> None:
     prompt = build_judge_prompt(
         question="What is the parental leave policy?",
         answer="Employees should review the handbook and submit a request to HR.",
-        content="The handbook explains leave policy and approval steps.",
+        context="The handbook explains leave policy and approval steps.",
     )
 
     assert "Measures how similar the response is to a human expert answer" in prompt

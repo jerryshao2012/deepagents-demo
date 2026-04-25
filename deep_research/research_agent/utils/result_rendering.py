@@ -166,9 +166,9 @@ def _fill_defaults(skill_id: str, payload: dict) -> dict:
         elif expr == "ensure_item_ids":
             for idx, item in enumerate(items, start=1):
                 if not item.get("id"): item["id"] = str(idx)
-        elif expr == "ensure_item_content":
+        elif expr == "ensure_item_context":
             for item in items:
-                if "content" not in item: item["content"] = ""
+                if "context" not in item: item["context"] = ""
         else:
             payload[field] = expr
     return payload
