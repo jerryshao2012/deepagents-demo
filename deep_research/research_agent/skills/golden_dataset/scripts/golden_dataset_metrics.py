@@ -271,7 +271,7 @@ Based on the quality metrics:
 
 1. **Review Low-Scoring Items:** Focus on items where any metric falls below the suggested goal
 2. **Expert Validation:** Have domain experts review and replace draft answers with authoritative responses
-3. **Content Enhancement:** For items with low Groundedness scores, consider adding more supporting RAG content
+3. **Context Enhancement:** For items with low Groundedness scores, consider adding more supporting RAG context
 4. **Iterative Improvement:** Use these metrics as a baseline for future dataset refinements
 
 ## Files Generated

@@ -18,6 +18,7 @@ from research_agent.skills.golden_dataset.pipeline import (
     export_golden_dataset_csv,
     evaluate_and_report_golden_dataset,
 )
+from research_agent.utils.json_utils import robust_json_loads
 from research_agent.utils.knowledge_filesystem import (
     normalize_path_for_filesystem_tools,
     ls_impl,
@@ -354,7 +355,7 @@ def finalize_golden_dataset_output(
     """
     logger.info("Finalizing golden dataset output")
     try:
-        payload = json.loads(payload_json)
+        payload = robust_json_loads(payload_json)
         logger.debug("Successfully parsed golden dataset JSON payload")
     except json.JSONDecodeError as e:
         logger.error(f"Invalid JSON in payload_json: {e}")

@@ -45,7 +45,7 @@ def export_golden_dataset_csv(payload: dict, output_folder: Path) -> Path:
     csv_path = output_folder / f"{filename}.csv"
     with open(csv_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["ID", "Coverage Area", "Question", "Answer", "Content"])
+        writer.writerow(["ID", "Coverage Area", "Question", "Answer", "Context"])
         for item in items:
             writer.writerow(
                 [
