@@ -452,7 +452,7 @@ The deep research agent adds the following custom tools beyond the built-in deep
   </tr>
   <tr>
     <td><code>read_file</code></td>
-    <td>Reads the content of a file at the given path. Implements a two-tier fallback strategy: first checks LangGraph state virtual filesystem (DeepAgents backend), then falls back to the local filesystem if not available. Normalizes paths for cross-platform compatibility.</td>
+    <td>Reads the content of a file at the given path. Implements a two-tier fallback strategy: first checks LangGraph state virtual filesystem (DeepAgents backend), then falls back to the local filesystem if not available. Normalizes paths for cross-platform compatibility.<br><br><strong>Section Selection:</strong> For Markdown files, append <code>#</code> followed by the heading text to read specific sections (e.g., <code>report.md#Introduction</code> or <code>docs/guide.md## Installation Steps</code>). The section selector is case-insensitive and matches the exact heading text including <code>#</code> symbols.</td>
   </tr>
   <tr>
     <td><code>ls</code></td>

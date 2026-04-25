@@ -7,6 +7,7 @@ from typing import Any
 
 import yaml
 from deepagents import create_deep_agent, SubAgent
+from deepagents.backends.utils import create_file_data
 from dotenv import load_dotenv
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
@@ -130,6 +131,7 @@ class ResearchState(AgentState):
     no_web: bool | None
     chat_start_time: float | None
     chat_elapsed_seconds: float | None
+    files: dict | None
 
 
 class ResearchStateMiddleware(AgentMiddleware):
@@ -138,11 +140,40 @@ class ResearchStateMiddleware(AgentMiddleware):
     # Ensure middleware state update are validated against the standard state schema.
     state_schema = ResearchState
 
+    @staticmethod
+    def _get_current_user_message(messages: list) -> str | None:
+        for m in messages:
+            if isinstance(m, dict) and m.get("role") == "user":
+                return str(m.get("content", ""))
+            if hasattr(m, "type") and getattr(m, "type", None) == "human":
+                return str(getattr(m, "content", ""))
+        return None
+
+    @staticmethod
+    def _seed_research_request_file(user_message: str | None, state: ResearchState) -> dict[str, Any]:
+        """Make the current request available to subagents before the model decides its next step."""
+        if not user_message:
+            return {}
+
+        existing_files = state.get("files", {})
+        existing_request = existing_files.get("/research_request.md")
+        if isinstance(existing_request, dict):
+            existing_content = "\n".join(existing_request.get("content", []))
+            if existing_content == user_message:
+                return {}
+
+        return {
+            "files": {
+                "/research_request.md": create_file_data(user_message),
+            }
+        }
+
     def before_agent(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
         messages = state.get("messages", [])
+        current_user_message = self._get_current_user_message(messages)
 
         # Check if system instructions already exist
-        updates: dict[str, Any] = {}
+        updates: dict[str, Any] = self._seed_research_request_file(current_user_message, state)
         has_config = any(
             isinstance(m, SystemMessage) and m.content and "Task configurations:" in str(m.content)
             for m in messages

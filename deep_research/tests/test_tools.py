@@ -1,5 +1,8 @@
 from pathlib import Path
 
+from langchain_core.messages import HumanMessage
+
+from agent import ResearchStateMiddleware
 from research_agent import tools
 from research_agent.utils.skill_registry import get_skill_registry
 from research_agent.tools import (
@@ -481,6 +484,79 @@ def test_read_doc_folder_reports_unsupported_and_empty_cases(tmp_path: Path) -> 
     )
 
     assert "No supported document files found" in result
+
+
+def test_read_file_impl_returns_structured_preview_for_large_markdown(tmp_path: Path) -> None:
+    large_doc = tmp_path / "policy.md"
+    repeated_section = (
+        "## Liability Coverage\n"
+        "This section explains liability coverage, claim handling, deductibles, and exclusions.\n\n"
+    )
+    large_doc.write_text(
+        "# Ontario Automobile Policy\n\n"
+        + repeated_section * 600,
+        encoding="utf-8",
+    )
+
+    result = tools.read_file_impl(str(large_doc), state={})
+
+    assert "returning a structured preview" in result
+    assert "Heading outline" in result
+    assert "## Liability Coverage" in result
+    assert len(result) < 20000
+    assert "Section chunks:" in result
+
+
+def test_read_file_impl_can_target_specific_markdown_section(tmp_path: Path) -> None:
+    policy_doc = tmp_path / "policy.md"
+    policy_doc.write_text(
+        "# Ontario Automobile Policy\n\n"
+        "## Section 3 - Liability Coverage\n"
+        "Liability coverage protects you when you are at fault.\n\n"
+        "## Section 4 - Accident Benefits Coverage\n"
+        "Accident benefits may be available regardless of fault.\n",
+        encoding="utf-8",
+    )
+
+    result = tools.read_file_impl(
+        f"{policy_doc}#Section 4 - Accident Benefits Coverage",
+        state={},
+    )
+
+    assert "Section 4 - Accident Benefits Coverage" in result
+    assert "Accident benefits may be available regardless of fault." in result
+    assert "Liability coverage protects you when you are at fault." not in result
+
+
+def test_read_file_impl_reports_unknown_markdown_section(tmp_path: Path) -> None:
+    policy_doc = tmp_path / "policy.md"
+    policy_doc.write_text(
+        "# Ontario Automobile Policy\n\n"
+        "## Section 3 - Liability Coverage\n"
+        "Liability coverage protects you when you are at fault.\n",
+        encoding="utf-8",
+    )
+
+    result = tools.read_file_impl(
+        f"{policy_doc}#Section 9 - Missing Section",
+        state={},
+    )
+
+    assert "Section 'Section 9 - Missing Section' not found" in result
+    assert "Available sections:" in result
+
+
+def test_research_state_middleware_seeds_research_request_file() -> None:
+    middleware = ResearchStateMiddleware()
+
+    result = middleware.before_agent(
+        state={"messages": [HumanMessage(content="Generate 5 Q/A pairs from ./docs/policy/")]},
+        runtime=None,
+    )
+
+    assert result is not None
+    assert "/research_request.md" in result["files"]
+    assert "Generate 5 Q/A pairs" in "".join(result["files"]["/research_request.md"]["content"])
 
 
 def test_ls_lists_files_and_directories(tmp_path: Path) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import random
+import re
 from pathlib import Path
 from typing import Annotated
 
@@ -20,6 +21,10 @@ load_dotenv()
 MAX_GLOB_DEPTH = int(os.environ.get("MAX_GLOB_DEPTH", "3"))
 MAX_FILES_TO_READ = int(os.environ.get("MAX_FILES_TO_READ", "20"))
 MAX_TOTAL_SIZE_MB = int(os.environ.get("MAX_TOTAL_SIZE_MB", "50"))
+MAX_INLINE_FILE_CHARS = int(os.environ.get("MAX_INLINE_FILE_CHARS", "40000"))
+LARGE_FILE_PREVIEW_CHARS = int(os.environ.get("LARGE_FILE_PREVIEW_CHARS", "12000"))
+LARGE_FILE_HEADING_LIMIT = int(os.environ.get("LARGE_FILE_HEADING_LIMIT", "24"))
+SECTION_CHUNK_LIMIT = int(os.environ.get("SECTION_CHUNK_LIMIT", "3"))
 
 SUPPORTED_DOC_SUFFIXES = {".pdf", ".txt", ".md", ".docx", ".pptx", ".xlsx"}
 
@@ -96,6 +101,116 @@ def write_content_to_output_folder(
     with open(file_path, 'w', encoding='utf-8') as f:
         f.write(content)
     return normalize_path_for_filesystem_tools(str(file_path))
+
+
+def _build_large_file_preview(file_path: Path, file_content: str) -> str:
+    """Return a compact preview for oversized files to avoid flooding model context."""
+    normalized_name = normalize_path_for_filesystem_tools(str(file_path))
+    sections = _extract_markdown_sections(file_content)
+    heading_lines = [section["heading"] for section in sections[:LARGE_FILE_HEADING_LIMIT]]
+
+    preview_parts = [
+        (
+            f"File '{normalized_name}' is {len(file_content)} chars long; "
+            "returning a structured preview instead of the full content to keep context usable."
+        ),
+        "",
+    ]
+
+    if heading_lines:
+        preview_parts.extend([
+            "Heading outline:",
+            *heading_lines,
+            "",
+        ])
+
+    if sections:
+        preview_parts.append("Section chunks:")
+        for idx, section in enumerate(sections[:SECTION_CHUNK_LIMIT], start=1):
+            preview_parts.extend([
+                f"{idx}. {section['heading']}",
+                section["content"][:1500].rstrip(),
+                "",
+            ])
+
+    preview_parts.extend([
+        "Leading excerpt:",
+        file_content[:LARGE_FILE_PREVIEW_CHARS].rstrip(),
+    ])
+
+    if len(file_content) > LARGE_FILE_PREVIEW_CHARS:
+        preview_parts.extend([
+            "",
+            "Trailing excerpt:",
+            file_content[-2000:].lstrip(),
+        ])
+
+    return "\n".join(preview_parts)
+
+
+def _split_markdown_selector(file_path: str) -> tuple[str, str | None]:
+    if "#" not in file_path:
+        return file_path, None
+    base_path, selector = file_path.split("#", 1)
+    selector = selector.strip()
+    return base_path, selector or None
+
+
+def _normalize_heading_text(value: str) -> str:
+    value = value.strip()
+    value = re.sub(r"^#+\s*", "", value)
+    value = re.sub(r"\s+", " ", value)
+    return value.casefold()
+
+
+def _extract_markdown_sections(file_content: str) -> list[dict[str, str]]:
+    sections: list[dict[str, str]] = []
+    current_heading: str | None = None
+    current_lines: list[str] = []
+
+    for line in file_content.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            if current_heading is not None:
+                sections.append(
+                    {
+                        "heading": current_heading,
+                        "content": "\n".join(current_lines).strip(),
+                    }
+                )
+            current_heading = stripped.strip()
+            current_lines = [line]
+            continue
+
+        if current_heading is not None:
+            current_lines.append(line)
+
+    if current_heading is not None:
+        sections.append(
+            {
+                "heading": current_heading,
+                "content": "\n".join(current_lines).strip(),
+            }
+        )
+
+    return sections
+
+
+def _read_markdown_section(file_path: Path, file_content: str, selector: str) -> str:
+    sections = _extract_markdown_sections(file_content)
+    normalized_selector = _normalize_heading_text(selector)
+
+    for section in sections:
+        if _normalize_heading_text(section["heading"]) == normalized_selector:
+            return section["content"]
+
+    available_sections = "\n".join(
+        f"- {section['heading']}" for section in sections[:LARGE_FILE_HEADING_LIMIT]
+    )
+    return (
+        f"Section '{selector}' not found in '{normalize_path_for_filesystem_tools(str(file_path))}'.\n"
+        f"Available sections:\n{available_sections}"
+    )
 
 
 def _get_extracted_path(
@@ -324,15 +439,20 @@ def read_file_impl(
     Tries to read from the virtual filesystem in state first (DeepAgents backend),
     then falls back to the local filesystem if not available.
 
+    For Markdown files, you can read specific sections by appending `#` followed by
+    the heading text. Example: `report.md#Introduction` or `docs/guide.md## Installation Steps`.
+    The section selector is case-insensitive and matches the exact heading text (including # symbols).
+
     Args:
-        file_path: The path to the file to read.
+        file_path: The path to the file to read. Can include a section selector for markdown files (e.g., 'file.md#Section Title').
         state: LangGraph state containing virtual filesystem (injected automatically).
 
     Returns:
-        The content of the file or an error message if the file not found.
+        The content of the file (or specific section if selector provided), or an error message if the file not found.
     """
     # Normalize path first for consistent comparison across both filesystems
-    normalized_path = normalize_path_for_filesystem_tools(file_path)
+    raw_file_path, section_selector = _split_markdown_selector(file_path)
+    normalized_path = normalize_path_for_filesystem_tools(raw_file_path)
 
     # Try 1: Check state["files"] for virtual filesystem (DeepAgents backend)
     if state and "files" in state:
@@ -349,6 +469,8 @@ def read_file_impl(
                 try:
                     file_content = file_data_to_string(state["files"][variant])
                     logger.info(f"Read from virtual filesystem: {variant}")
+                    if section_selector:
+                        return _read_markdown_section(Path(raw_file_path), file_content, section_selector)
                     return file_content
                 except Exception:
                     continue
@@ -383,6 +505,13 @@ def read_file_impl(
     try:
         file_content = full_path.read_text(encoding="utf-8")
         logger.info(f"Read from local filesystem: {full_path}")
+        if section_selector:
+            return _read_markdown_section(full_path, file_content, section_selector)
+        if len(file_content) > MAX_INLINE_FILE_CHARS:
+            logger.info(
+                f"Returning preview for oversized file {full_path} ({len(file_content)} chars)"
+            )
+            return _build_large_file_preview(full_path, file_content)
         return file_content
     except Exception as e:
         return f"Error reading file '{file_path}': {e}"

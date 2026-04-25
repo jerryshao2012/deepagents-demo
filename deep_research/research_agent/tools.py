@@ -157,12 +157,16 @@ def read_file(
     Tries to read from the virtual filesystem in state first (DeepAgents backend),
     then falls back to the local filesystem if not available.
 
+    For Markdown files, you can read specific sections by appending `#` followed by
+    the heading text. Example: `report.md#Introduction` or `docs/guide.md## Installation Steps`.
+    The section selector is case-insensitive and matches the exact heading text (including # symbols).
+
     Args:
-        file_path: The path to the file to read.
+        file_path: The path to the file to read. Can include a section selector for markdown files (e.g., 'file.md#Section Title').
         state: LangGraph state containing virtual filesystem (injected automatically).
 
     Returns:
-        The content of the file or an error message if the file not found.
+        The content of the file (or specific section if selector provided), or an error message if the file not found.
     """
     logger.debug(f"Reading file: {file_path}")
     try:
@@ -360,7 +364,7 @@ def render_skill_output(
 
 @tool(parse_docstring=True)
 def finalize_golden_dataset_output(
-        payload_json: str,
+        payload_json: str | dict,
         state: Annotated[dict, InjectedState],
 ) -> str:
     """Export a validated golden-dataset JSON payload to CSV and run quality metrics.
@@ -372,17 +376,29 @@ def finalize_golden_dataset_output(
     - `/final_report.md`: Comprehensive report of the entire golden dataset generation process
 
     Args:
-        payload_json: A string containing the validated JSON payload.
+        payload_json: A string containing the validated JSON payload, or a dictionary object.
         state: LangGraph state (injected automatically).
 
     Returns:
         A confirmation message with paths to the generated files.
     """
     logger.info("Finalizing golden dataset output")
+
+    # Handle both string and dict inputs for flexibility
+    if isinstance(payload_json, dict):
+        logger.debug("Converting dict payload to JSON string")
+        import json as _json
+        payload_json_str = _json.dumps(payload_json)
+    elif isinstance(payload_json, str):
+        payload_json_str = payload_json
+    else:
+        logger.error(f"Invalid payload_json type: {type(payload_json)}")
+        return f"Error: payload_json must be a string or dict, got {type(payload_json).__name__}"
+
     try:
-        payload = robust_json_loads(payload_json)
+        payload = robust_json_loads(payload_json_str)
         logger.debug("Successfully parsed golden dataset JSON payload")
-    except json.JSONDecodeError as e:
+    except (json.JSONDecodeError, TypeError, ValueError) as e:
         logger.error(f"Invalid JSON in payload_json: {e}")
         return f"Error: Invalid JSON in payload_json: {e}"
 
