@@ -55,6 +55,20 @@ export MAX_CONCURRENT_RESEARCH_UNITS=3
 # Maximum number of iterations per researcher agent before stopping
 export MAX_RESEARCHER_ITERATIONS=3
 
+# =============================================================================
+# RELIABILITY & RATE LIMITING
+# =============================================================================
+
+# Proactive Rate Shaping (TPM and RPM limits)
+# Set these based on your provider's deployment quotas
+# Tokens Per Minute:
+# Represents the maximum number of tokens (input + output) you are allowed to send to the model provider within a
+# rolling 60-second window.
+export MODEL_TPM=120000
+# Requests Per Minute:
+# Represents the maximum number of individual API calls you can make per minute.
+export MODEL_RPM=500
+
 # Graph Recursion Limit
 # Controls the maximum depth of recursive graph execution in LangGraph
 # Default LangGraph recursion limit is 100, but deep research workflows often require more iterations
