@@ -399,6 +399,9 @@ research_sub_agent: SubAgent = {
 
 model = get_configured_model()
 
+# Recursion limit - configurable via environment variable (applied at graph compile time)
+RECURSION_LIMIT = int(os.environ.get("GRAPH_RECURSION_LIMIT", "200"))
+
 # Create the agent
 # Orchestrator owns document/filesystem tools and structured-output finalization.
 # Web discovery can still be delegated to `research-agent` via task().
@@ -417,4 +420,4 @@ agent = create_deep_agent(
     system_prompt=INSTRUCTIONS,
     subagents=[research_sub_agent],
     middleware=[ResearchStateMiddleware()],
-).with_config(RunnableConfig(recursion_limit=200))
+).with_config(RunnableConfig(recursion_limit=RECURSION_LIMIT))
