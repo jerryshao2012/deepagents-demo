@@ -51,19 +51,25 @@ export LANGCHAIN_PROJECT=deep-research-deepagents         # The project name to 
 
 # Research Agent Configuration
 # Maximum number of concurrent research units (sub-agents) that can run simultaneously
-MAX_CONCURRENT_RESEARCH_UNITS=3
+export MAX_CONCURRENT_RESEARCH_UNITS=3
 # Maximum number of iterations per researcher agent before stopping
-MAX_RESEARCHER_ITERATIONS=3
+export MAX_RESEARCHER_ITERATIONS=3
+
+# Graph Recursion Limit
+# Controls the maximum depth of recursive graph execution in LangGraph
+# Default LangGraph recursion limit is 100, but deep research workflows often require more iterations
+# Increase this value for complex multi-agent research tasks that involve many sub-agent delegations
+export GRAPH_RECURSION_LIMIT=200
 
 # Filesystem and Output Configuration
 # Maximum directory depth for glob pattern matching
-MAX_GLOB_DEPTH=3
+export MAX_GLOB_DEPTH=3
 # Default output folder for generated reports and documents
-REPORTS_OUTPUT_FOLDER=./output
+export REPORTS_OUTPUT_FOLDER=./output
 # Maximum number of files to read in a single operation
-MAX_FILES_TO_READ=20
+export MAX_FILES_TO_READ=20
 # Maximum total size in MB for batch file reading operations
-MAX_TOTAL_SIZE_MB=50
+export MAX_TOTAL_SIZE_MB=50
 
 ---
 
