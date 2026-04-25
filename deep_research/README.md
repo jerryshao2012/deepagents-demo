@@ -288,7 +288,7 @@ This provides a user-friendly chat interface and visualization of files in state
 
 Example:
 ```text
-Generate 20 pair of question and answer using the `golden-dataset` skill for the documents provided in this folder '.\docs\policy\'.
+Generate 20 pairs of questions and answers using the `golden-dataset` skill for the documents provided in this folder '.\docs\policy\'.
 ```
 ```text
 Give me an overview of AI Evaluation through Harness Engineering

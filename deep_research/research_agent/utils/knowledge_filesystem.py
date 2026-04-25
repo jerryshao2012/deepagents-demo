@@ -416,6 +416,7 @@ def write_file_impl(
         try:
             send_files_to_state({sandbox_file_path: create_file_data(content)})
             logger.info(f"Persisted to state: {sandbox_file_path}")
+            return f"Successfully wrote {len(content)} bytes to `{sandbox_file_path}`"
         except Exception as e:
             logger.warning(f"Could not persist {sandbox_file_path} to state: {e}")
 

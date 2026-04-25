@@ -25,6 +25,7 @@ from research_agent.utils.knowledge_filesystem import (
     glob_impl,
     read_file_impl,
     read_doc_folder_impl,
+    write_file_impl,
     write_content_to_output_folder,
     send_files_to_state,
 )
@@ -201,6 +202,30 @@ def read_doc_folder(
 
     result = read_doc_folder_impl(folder_path, specific_files, state)
     logger.info(f"Successfully processed document folder: {folder_path}")
+    return result
+
+
+@tool(parse_docstring=True)
+def write_file(
+        file_path: str,
+        content: str,
+) -> str:
+    """Write content to a file.
+
+    Use this tool to save research findings, reports, or any text content to a file.
+    This tool will overwrite existing files if they exist.
+
+    Args:
+        file_path: The path where the file should be written (e.g., 'report.md', './output/findings.txt').
+        content: The text content to write to the file.
+
+    Returns:
+        Confirmation message with the file path and size, or an error message.
+    """
+    logger.info(f"Writing file: {file_path} ({len(content)} bytes)")
+
+    result = write_file_impl(file_path, content)
+    logger.info(f"Successfully wrote file: {file_path}")
     return result
 
 

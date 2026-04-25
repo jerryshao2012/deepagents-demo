@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import SystemMessage
+from langchain_core.runnables import RunnableConfig
 
 from model_factory import get_configured_model
 from research_agent import (
@@ -28,6 +29,7 @@ from research_agent.tools import (
     glob,
     read_file,
     read_doc_folder,
+    write_file,
     tavily_search,
     fetch_webpage_content,
 )
@@ -49,9 +51,6 @@ MAX_RESEARCHER_ITERATIONS = int(os.environ.get("MAX_RESEARCHER_ITERATIONS", "3")
 
 # Get current date
 current_date = datetime.now().strftime("%Y-%m-%d")
-
-# Load recursion limit from environment. Defaults is 100.
-RECURSION_LIMIT = int(os.environ.get("GRAPH_RECURSION_LIMIT", "200"))
 
 # Initialize dynamic skill registry (use singleton to avoid duplicate initialization)
 skill_registry = get_skill_registry()
@@ -408,6 +407,7 @@ agent = create_deep_agent(
     tools=[
         think_tool,
         read_file,
+        write_file,
         ls,
         glob,
         read_doc_folder,
@@ -417,4 +417,4 @@ agent = create_deep_agent(
     system_prompt=INSTRUCTIONS,
     subagents=[research_sub_agent],
     middleware=[ResearchStateMiddleware()],
-)
+).with_config(RunnableConfig(recursion_limit=200))
