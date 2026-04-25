@@ -50,6 +50,9 @@ MAX_RESEARCHER_ITERATIONS = int(os.environ.get("MAX_RESEARCHER_ITERATIONS", "3")
 # Get current date
 current_date = datetime.now().strftime("%Y-%m-%d")
 
+# Load recursion limit from environment. Defaults is 100.
+RECURSION_LIMIT = int(os.environ.get("GRAPH_RECURSION_LIMIT", "200"))
+
 # Initialize dynamic skill registry (use singleton to avoid duplicate initialization)
 skill_registry = get_skill_registry()
 

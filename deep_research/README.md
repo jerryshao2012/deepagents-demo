@@ -252,6 +252,10 @@ You can also connect the LangGraph server to a [UI specifically designed for dee
 git clone https://github.com/langchain-ai/deep-agents-ui.git
 cd deep-agents-ui
 
+# Update a remote branch with rewritten history
+# git reset --hard <commit-hash>
+# git push --force-with-lease 
+
 # Install yarn
 npm config set "bin-links" true
 npm config set "strict-ssl" false
