@@ -82,7 +82,7 @@ def score_row(model, row: dict[str, str]) -> dict[str, float]:
     prompt = build_judge_prompt(
         question=row["Question"],
         answer=row["Answer"],
-        content=row.get("Content", ""),
+        content=row.get("Context", ""),
     )
     response = model.invoke([HumanMessage(content=prompt)])
     content = getattr(response, "content", response)
@@ -101,11 +101,11 @@ def validate_input_columns(fieldnames: Iterable[str] | None) -> None:
         )
 
 
-def build_missing_content_report(rows: Iterable[dict[str, str]]) -> str:
+def build_missing_context_report(rows: Iterable[dict[str, str]]) -> str:
     """Build a small warning report for rows that are missing grounding content."""
     missing_rows: list[str] = []
     for index, row in enumerate(rows, start=1):
-        content = (row.get("Content") or row.get("content") or "").strip()
+        content = (row.get("Context") or row.get("context") or "").strip()
         if content:
             continue
         row_id = (row.get("ID") or row.get("id") or f"row-{index}").strip()
@@ -114,11 +114,11 @@ def build_missing_content_report(rows: Iterable[dict[str, str]]) -> str:
         missing_rows.append(f"- {row_id}: {question_preview}")
 
     if not missing_rows:
-        return "All rows include Content."
+        return "All rows include Context."
 
-    header = f"Warning: {len(missing_rows)} row(s) are missing Content."
+    header = f"Warning: {len(missing_rows)} row(s) are missing Context."
     guidance = (
-        "Groundedness scoring is less reliable for these rows because the supporting RAG content is absent, "
+        "Groundedness scoring is less reliable for these rows because the supporting RAG context is absent, "
         "but scoring still runs."
     )
     return "\n".join([header, guidance, *missing_rows])

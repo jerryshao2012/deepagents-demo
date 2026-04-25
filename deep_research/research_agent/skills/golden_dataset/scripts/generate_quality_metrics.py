@@ -8,7 +8,7 @@ import csv
 from pathlib import Path
 
 from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import (
-    build_missing_content_report,
+    build_missing_context_report,
     score_dataset_file,
 )
 
@@ -57,7 +57,7 @@ def main() -> None:
     result = score_dataset_file(args.input_csv, output_csv)
     print(f"Wrote scored dataset to {result}")
     if args.report:
-        report = build_missing_content_report(load_rows(args.input_csv))
+        report = build_missing_context_report(load_rows(args.input_csv))
         print(report)
         if args.report_file:
             report_path = Path(args.report_file)

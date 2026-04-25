@@ -1,5 +1,5 @@
 from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import (
-    build_missing_content_report,
+    build_missing_context_report,
     build_judge_prompt,
     parse_metric_scores,
 )
@@ -74,7 +74,7 @@ def test_parse_metric_scores_rejects_out_of_range_values() -> None:
 
 
 def test_build_missing_content_report_flags_rows_without_content() -> None:
-    report = build_missing_content_report(
+    report = build_missing_context_report(
         [
             {"ID": "Q1", "Question": "What is parental leave?", "Content": ""},
             {"ID": "Q2", "Question": "How do I enroll in benefits?", "Content": "Benefits guide section 4"},
