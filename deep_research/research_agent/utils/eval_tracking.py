@@ -112,6 +112,149 @@ def _extract_usage_metadata(message: Any) -> dict[str, Any]:
     return usage if isinstance(usage, dict) else {}
 
 
+def _analyze_tool_call_parameters(tool_call: dict[str, Any]) -> dict[str, Any]:
+    """Analyze tool call parameters for completeness and correctness.
+    
+    Returns metadata about parameter quality including:
+    - has_arguments: whether arguments were provided
+    - argument_count: number of arguments passed
+    - has_required_params: whether required params appear present
+    - parameter_quality_score: heuristic score 0-1
+    """
+    args = tool_call.get("args", {})
+
+    if not args:
+        return {
+            "has_arguments": False,
+            "argument_count": 0,
+            "has_required_params": False,
+            "parameter_quality_score": 0.0,
+        }
+
+    # Count arguments
+    arg_count = len(args) if isinstance(args, dict) else 0
+
+    # Check for common required parameter patterns
+    tool_name = tool_call.get("name", "").lower()
+    has_required = False
+
+    # Heuristic checks based on tool type
+    if "read" in tool_name or "write" in tool_name or "file" in tool_name:
+        has_required = bool(args.get("path") or args.get("file_path"))
+    elif "search" in tool_name:
+        has_required = bool(args.get("query") or args.get("search_query"))
+    elif "think" in tool_name:
+        has_required = bool(args.get("thought") or args.get("reasoning"))
+    else:
+        # Generic check: at least one non-empty argument
+        has_required = any(v for v in args.values()) if isinstance(args, dict) else False
+
+    # Calculate quality score
+    quality_score = 0.0
+    if has_required:
+        quality_score += 0.5
+    if arg_count > 0:
+        quality_score += min(0.5, arg_count * 0.1)  # Bonus for multiple params, capped at 0.5
+
+    return {
+        "has_arguments": True,
+        "argument_count": arg_count,
+        "has_required_params": has_required,
+        "parameter_quality_score": round(quality_score, 2),
+    }
+
+
+def _detect_self_correction(messages: list[Any], current_index: int, tool_name: str) -> dict[str, Any]:
+    """Detect if agent corrected itself after a tool failure.
+    
+    Analyzes message history to identify correction patterns:
+    - Retry with different parameters
+    - Alternative tool selection
+    - Error acknowledgment and strategy change
+    
+    Args:
+        messages: Full message history
+        current_index: Index of current tool response message
+        tool_name: Name of the tool that was called
+        
+    Returns:
+        Dictionary with correction detection results
+    """
+    if current_index < 2:
+        return {
+            "self_corrected": False,
+            "correction_type": None,
+            "correction_details": {},
+        }
+
+    # Look back at previous messages to find the tool call
+    previous_tool_response = None
+    previous_tool_call = None
+
+    for i in range(current_index - 1, -1, -1):
+        msg = messages[i]
+        role, name, content = _message_role_name_content(msg)
+
+        if role == "tool" and name == tool_name:
+            previous_tool_response = content
+            break
+
+    # Find the next AI message after the previous tool response
+    for i in range(current_index + 1, len(messages)):
+        msg = messages[i]
+        role, _, content = _message_role_name_content(msg)
+
+        if role in {"ai", "assistant"}:
+            # Check if this AI message contains a new tool call to same tool
+            if isinstance(msg, dict):
+                tool_calls = msg.get("tool_calls", [])
+            else:
+                tool_calls = getattr(msg, "tool_calls", [])
+
+            for tc in tool_calls:
+                tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
+                if tc_name == tool_name:
+                    # Agent retried the same tool - potential correction
+                    new_args = tc.get("args", {})
+
+                    # Compare with previous call if available
+                    correction_detected = previous_tool_response and (
+                            previous_tool_response.startswith(_TOOL_FAILURE_PREFIXES) or
+                            not previous_tool_response.strip()
+                    )
+
+                    return {
+                        "self_corrected": correction_detected,
+                        "correction_type": "retry_same_tool" if correction_detected else None,
+                        "correction_details": {
+                            "had_previous_failure": correction_detected,
+                            "new_arguments_provided": bool(new_args),
+                        },
+                    }
+
+            # Check if agent switched to alternative tool
+            if tool_calls:
+                return {
+                    "self_corrected": True,
+                    "correction_type": "alternative_tool",
+                    "correction_details": {
+                        "switched_from": tool_name,
+                        "alternative_tools": [
+                            tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
+                            for tc in tool_calls
+                        ],
+                    },
+                }
+
+            break
+
+    return {
+        "self_corrected": False,
+        "correction_type": None,
+        "correction_details": {},
+    }
+
+
 def collect_run_metrics(result: dict[str, Any], runtime_seconds: float, stream_fallback_used: bool) -> dict[str, Any]:
     """Collect golden-dataset metrics from a run result and runtime context."""
     messages = result.get("messages", [])
@@ -121,24 +264,70 @@ def collect_run_metrics(result: dict[str, Any], runtime_seconds: float, stream_f
     successful_tool_calls = 0
     failed_tool_calls = 0
 
+    # Enhanced tracking
+    tool_call_details = []
+    parameter_validation_results = []
+    self_correction_events = []
+    retry_count = 0
+    tools_with_errors = set()
+    tools_corrected = set()
+
     prompt_tokens = 0
     completion_tokens = 0
     total_tokens = 0
     saw_token_metadata = False
 
-    for message in messages:
+    for idx, message in enumerate(messages):
         role, _name, content = _message_role_name_content(message)
 
         if role in {"ai", "assistant"}:
-            total_tool_calls += _extract_tool_call_count(message)
+            tool_calls = message.get("tool_calls") if isinstance(message, dict) else getattr(message, "tool_calls", [])
+
+            if isinstance(tool_calls, list):
+                total_tool_calls += len(tool_calls)
+
+                # Analyze each tool call's parameters
+                for tc in tool_calls:
+                    tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "unknown")
+                    param_analysis = _analyze_tool_call_parameters(
+                        tc if isinstance(tc, dict) else {"name": getattr(tc, "name", ""),
+                                                         "args": getattr(tc, "args", {})})
+
+                    tool_call_details.append({
+                        "tool_name": tc_name,
+                        "parameter_analysis": param_analysis,
+                    })
+
+                    parameter_validation_results.append({
+                        "tool_name": tc_name,
+                        "has_valid_parameters": param_analysis["has_required_params"],
+                        "quality_score": param_analysis["parameter_quality_score"],
+                    })
 
         if role == "tool":
             content_text = content.strip()
+            tool_name = _name or "unknown"
             is_failure = not content_text or content_text.startswith(_TOOL_FAILURE_PREFIXES)
+
             if is_failure:
                 failed_tool_calls += 1
+                tools_with_errors.add(tool_name)
+
+                # Check for self-correction
+                correction = _detect_self_correction(messages, idx, tool_name)
+                if correction["self_corrected"]:
+                    self_correction_events.append({
+                        "tool_name": tool_name,
+                        "correction_type": correction["correction_type"],
+                        "details": correction["correction_details"],
+                    })
+                    tools_corrected.add(tool_name)
             else:
                 successful_tool_calls += 1
+
+                # Check if this success came after a failure (recovery)
+                if tool_name in tools_with_errors:
+                    retry_count += 1
 
         usage = _extract_usage_metadata(message)
         if usage:
@@ -160,6 +349,22 @@ def collect_run_metrics(result: dict[str, Any], runtime_seconds: float, stream_f
         or failed_tool_calls > 0
     )
 
+    # Calculate enhanced metrics
+    avg_parameter_quality = (
+        sum(p["quality_score"] for p in parameter_validation_results) / len(parameter_validation_results)
+        if parameter_validation_results else 0.0
+    )
+
+    valid_parameter_rate = (
+        sum(1 for p in parameter_validation_results if p["has_valid_parameters"]) / len(parameter_validation_results)
+        if parameter_validation_results else 0.0
+    )
+
+    self_correction_rate = (
+        len(tools_corrected) / len(tools_with_errors)
+        if tools_with_errors else 0.0
+    )
+
     return {
         "completeness": {
             "pass": completeness_pass,
@@ -171,6 +376,21 @@ def collect_run_metrics(result: dict[str, Any], runtime_seconds: float, stream_f
             "successful_tool_calls": successful_tool_calls,
             "failed_tool_calls": failed_tool_calls,
             "success_rate": (successful_tool_calls / total_tool_calls) if total_tool_calls > 0 else 1.0,
+            "retry_count": retry_count,
+            "unique_tools_with_errors": len(tools_with_errors),
+            "tools_corrected_count": len(tools_corrected),
+        },
+        "parameter_validation": {
+            "average_quality_score": round(avg_parameter_quality, 3),
+            "valid_parameter_rate": round(valid_parameter_rate, 3),
+            "total_calls_analyzed": len(parameter_validation_results),
+            "calls_with_missing_params": sum(1 for p in parameter_validation_results if not p["has_valid_parameters"]),
+        },
+        "self_correction": {
+            "correction_events": len(self_correction_events),
+            "self_correction_rate": round(self_correction_rate, 3),
+            "tools_attempted_correction": list(tools_corrected),
+            "correction_types": list(set(e["correction_type"] for e in self_correction_events if e["correction_type"])),
         },
         "failure": {
             "intervention_required": intervention_required,
@@ -332,6 +552,26 @@ def compare_records(
     base_latency = float(base_metrics.get("latency", {}).get("p95_seconds") or 0.0)
     cand_latency = float(cand_metrics.get("latency", {}).get("p95_seconds") or 0.0)
     per_metric["latency"] = _metric_verdict(cand_latency, base_latency, latency_regression_threshold)
+
+    # Compare parameter validation quality
+    base_param_quality = float(base_metrics.get("parameter_validation", {}).get("average_quality_score") or 0.0)
+    cand_param_quality = float(cand_metrics.get("parameter_validation", {}).get("average_quality_score") or 0.0)
+    if cand_param_quality > base_param_quality * 1.1:
+        per_metric["parameter_validation"] = "better"
+    elif cand_param_quality < base_param_quality * 0.9:
+        per_metric["parameter_validation"] = "worse"
+    else:
+        per_metric["parameter_validation"] = "same"
+
+    # Compare self-correction capability
+    base_correction_rate = float(base_metrics.get("self_correction", {}).get("self_correction_rate") or 0.0)
+    cand_correction_rate = float(cand_metrics.get("self_correction", {}).get("self_correction_rate") or 0.0)
+    if cand_correction_rate > base_correction_rate:
+        per_metric["self_correction"] = "better"
+    elif cand_correction_rate < base_correction_rate:
+        per_metric["self_correction"] = "worse"
+    else:
+        per_metric["self_correction"] = "same"
 
     verdict_values = [v for v in per_metric.values() if v in {"better", "same", "worse"}]
     if any(v == "worse" for v in verdict_values):

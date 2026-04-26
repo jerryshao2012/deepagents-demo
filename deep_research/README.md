@@ -655,7 +655,7 @@ pytest tests/test_retry_utils.py -v
 
 ### Overview
 
-The golden-dataset skill now includes comprehensive evaluation tracking to monitor quality, efficiency, and regressions across model updates. Each run is logged as a JSONL record with rich metrics, enabling comparison between baseline and candidate implementations.
+The golden-dataset skill now includes comprehensive evaluation tracking to monitor quality, efficiency, and regressions across model updates in **multi-agent complex workflows**. Each run is logged as a JSONL record with rich metrics, enabling comparison between baseline and candidate implementations. This system tracks orchestrator agents, sub-agents, tool execution patterns, parameter validation, and self-correction behaviors across the entire multi-agent workflow.
 
 ### Key Metrics Tracked
 
@@ -673,6 +673,24 @@ The golden-dataset skill now includes comprehensive evaluation tracking to monit
 | `tool_execution.successful_tool_calls` | Count of tool calls that returned valid responses. |
 | `tool_execution.failed_tool_calls` | Count of tool calls that failed or returned error content. |
 | `tool_execution.success_rate` | Reliability of the agent in using tools (e.g., search, file editing) correctly. If the number of tool calls significantly increases, it should be considered a failure. Ratio of successful to total tool calls. (1.0 if no calls made) |
+| `tool_execution.retry_count` | Number of times a tool was retried after initial failure. |
+| `tool_execution.unique_tools_with_errors` | Count of distinct tools that encountered errors. |
+| `tool_execution.tools_corrected_count` | Count of tools where the agent successfully self-corrected after failure. |
+
+#### Parameter Validation Quality
+| Metric | Description |
+|--------|-------------|
+| `parameter_validation.average_quality_score` | Average quality score (0-1) of tool call parameters across all invocations. Higher is better. |
+| `parameter_validation.valid_parameter_rate` | Ratio of tool calls with valid/required parameters present. Measures parameter completeness. |
+| `parameter_validation.total_calls_analyzed` | Total number of tool calls analyzed for parameter quality. |
+| `parameter_validation.calls_with_missing_params` | Count of tool calls missing required parameters. Lower is better. |
+
+**Parameter Analysis Details**:
+- **File operations** (`read_file`, `write_file`): Checks for `path` or `file_path` arguments
+- **Search operations** (`tavily_search`): Checks for `query` or `search_query` arguments
+- **Thinking operations** (`think_tool`): Checks for `thought` or `reasoning` arguments
+- **Generic tools**: Validates at least one non-empty argument is provided
+- **Quality scoring**: 0.5 base for required params + up to 0.5 bonus for multiple well-formed arguments
 
 #### Error Rate/Failure Rate
 | Metric | Description |
@@ -695,6 +713,20 @@ The golden-dataset skill now includes comprehensive evaluation tracking to monit
 | `latency.runtime_seconds` | End-to-end execution time in seconds. Time taken to complete a complex task. |
 | `latency.p50_seconds` | Median latency (currently = runtime for single runs; p50/p95 aggregated across rolling history). |
 | `latency.p95_seconds` | 95th percentile latency (currently = runtime; will improve with multi-run analysis). |
+
+#### Self-Correction Behavior
+| Metric | Description |
+|--------|-------------|
+| `self_correction.correction_events` | Total number of times the agent detected and corrected a tool failure. |
+| `self_correction.self_correction_rate` | Ratio of tools with errors that were successfully corrected (0-1). Higher indicates better recovery capability. |
+| `self_correction.tools_attempted_correction` | List of tool names where the agent attempted self-correction. |
+| `self_correction.correction_types` | Types of corrections observed: `retry_same_tool` (retried with different params) or `alternative_tool` (switched to different tool). |
+
+**Self-Correction Detection Logic**:
+- **Retry detection**: Agent calls same tool again after a failure (indicates parameter adjustment)
+- **Alternative tool**: Agent switches to a different tool after failure (indicates strategy change)
+- **Success tracking**: Monitors if retry/alternative led to successful execution
+- **Recovery rate**: Measures how often the agent recovers from its own mistakes
 
 ### Run Record Structure
 
@@ -760,8 +792,17 @@ uv run python research_agent_cli.py \
 - Logs verdict summary to stdout.
 - Overall verdict combines all metrics:
   - `better` if any metric improved and none regressed.
-  - `worse` if any metric degraded (e.g., completeness dropped, failure rate increased, tool calls > baseline * 1.30).
+  - `worse` if any metric degraded (e.g., completeness dropped, failure rate increased, tool calls > baseline * 1.30, parameter quality decreased).
   - `same` if no significant change.
+
+**Compared Metrics**:
+- **Completeness**: Pass/fail status for required artifacts
+- **Tool Execution**: Total tool call count growth (>30% = worse)
+- **Failure Rate**: Intervention requirement changes
+- **Token Efficiency**: Token usage changes (>20% increase = worse)
+- **Latency**: Runtime changes (>15% increase = worse)
+- **Parameter Validation**: Average quality score changes (>10% difference = better/worse)
+- **Self-Correction**: Correction rate improvements/regressions
 
 #### Step 3: Custom History File
 ```bash
@@ -780,6 +821,8 @@ uv run python research_agent_cli.py \
 | **Tool Growth** | 30% | Candidate tool_calls > baseline * 1.30 → **worse** |
 | **Token Efficiency** | 20% | Candidate total_tokens > baseline * 1.20 → **worse** |
 | **Latency** | 15% | Candidate p95_seconds > baseline * 1.15 → **worse** |
+| **Parameter Quality** | 10% | Candidate avg_quality_score < baseline * 0.90 → **worse**; > baseline * 1.10 → **better** |
+| **Self-Correction Rate** | N/A | Any improvement → **better**; any decrease → **worse** |
 
 ### Programmatic Access
 
