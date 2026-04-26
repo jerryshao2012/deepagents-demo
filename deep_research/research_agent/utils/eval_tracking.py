@@ -629,23 +629,6 @@ def log_server_metrics(
         stream_fallback_used=False,
     )
 
-    # Create simple run record with timestamp and facts
-    record = {
-        "timestamp_utc": utc_now_iso(),
-        "model_name": model_name,
-        "context": context or {},
-        "runtime_seconds": round(runtime_seconds, 2),
-        "metrics": run_metrics,
-    }
-
-    # Append to history file
-    history_path = Path(history_file)
-    if not history_path.parent.exists():
-        history_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with open(history_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\n")
-
     # Extract summary stats for console output
     tool_calls = run_metrics.get("tool_execution", {}).get("total_tool_calls", 0)
     success_rate = run_metrics.get("tool_execution", {}).get("success_rate", 0)
@@ -660,7 +643,24 @@ def log_server_metrics(
         "total_tokens": total_tokens,
         "param_quality": param_quality,
         "corrections": corrections,
-        "history_file": str(history_path),
     }
+
+    # Create simple run record with timestamp and facts
+    record = {
+        "timestamp_utc": utc_now_iso(),
+        "model_name": model_name,
+        "context": context or {},
+        "runtime_seconds": round(runtime_seconds, 2),
+        "metrics": run_metrics,
+        "summary": summary,
+    }
+
+    # Append to history file
+    history_path = Path(history_file)
+    if not history_path.parent.exists():
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(history_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\n")
 
     return summary
