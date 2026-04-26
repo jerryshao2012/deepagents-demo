@@ -39,6 +39,12 @@ TOKEN_USAGE_KEYS = (
     "completion_tokens",
 )
 
+# Azure-specific detailed token fields
+AZURE_TOKEN_DETAILS_KEYS = (
+    "completion_tokens_details",
+    "prompt_tokens_details",
+)
+
 
 def is_rate_limit_error(error: Exception) -> bool:
     """Check if an error is related to rate limiting."""
@@ -219,25 +225,94 @@ def _coerce_usage_metadata(value: Any) -> dict[str, int]:
     return normalized
 
 
-def _normalize_message_token_usage(message: Any) -> Any:
+def _extract_azure_token_usage(response: Any) -> dict[str, Any]:
+    """
+    Extract token usage from Azure AI server response.
+    
+    Azure responses have this structure:
+    {
+        "usage": {
+            "completion_tokens": 465,
+            "prompt_tokens": 28,
+            "total_tokens": 493,
+            "completion_tokens_details": {...},
+            "prompt_tokens_details": {...}
+        }
+    }
+    
+    Args:
+        response: The raw API response object (dict or object with attributes)
+        
+    Returns:
+        Dictionary with normalized token usage data including details
+    """
+    if response is None:
+        return {}
+
+    # Try to get usage from response
+    usage_data = None
+    if isinstance(response, dict):
+        usage_data = response.get("usage")
+    else:
+        usage_data = getattr(response, "usage", None)
+
+    if not usage_data or not isinstance(usage_data, dict):
+        return {}
+
+    # Extract base token counts
+    base_usage = _coerce_usage_metadata(usage_data)
+
+    if not base_usage:
+        return {}
+
+    # Extract detailed token information if available
+    result = dict(base_usage)
+
+    # Add completion tokens details
+    completion_details = usage_data.get("completion_tokens_details")
+    if isinstance(completion_details, dict):
+        result["completion_tokens_details"] = completion_details
+
+    # Add prompt tokens details
+    prompt_details = usage_data.get("prompt_tokens_details")
+    if isinstance(prompt_details, dict):
+        result["prompt_tokens_details"] = prompt_details
+
+    return result
+
+
+def _normalize_message_token_usage(message: Any, raw_response: Any = None) -> Any:
     """
     Copy token usage onto fields that survive downstream serialization.
 
     LangGraph can strip `usage_metadata` from state messages, but `eval_tracking`
     already knows how to read `response_metadata["token_usage"]` and direct token
     attributes. This keeps token accounting available for server metrics.
+    
+    Args:
+        message: The LangChain message object
+        raw_response: Optional raw API response to extract Azure-style usage from
     """
     if message is None:
         return message
 
-    usage = _coerce_usage_metadata(getattr(message, "usage_metadata", None))
-    response_metadata = getattr(message, "response_metadata", None)
-    if not usage and isinstance(response_metadata, dict):
-        usage = _coerce_usage_metadata(
-            response_metadata.get("token_usage")
-            or response_metadata.get("usage")
-            or response_metadata.get("usage_details")
-        )
+    # First, try to extract usage from raw Azure response if provided
+    usage = {}
+    if raw_response is not None:
+        azure_usage = _extract_azure_token_usage(raw_response)
+        if azure_usage:
+            usage = azure_usage
+
+    # Fall back to existing extraction methods if no Azure usage found
+    if not usage:
+        usage = _coerce_usage_metadata(getattr(message, "usage_metadata", None))
+        response_metadata = getattr(message, "response_metadata", None)
+        if not usage and isinstance(response_metadata, dict):
+            usage = _coerce_usage_metadata(
+                response_metadata.get("token_usage")
+                or response_metadata.get("usage")
+                or response_metadata.get("usage_details")
+            )
 
     if not usage:
         direct_usage = {
@@ -250,18 +325,28 @@ def _normalize_message_token_usage(message: Any) -> Any:
     if not usage:
         return message
 
+    # Separate base token counts from detailed info
+    base_usage = {k: v for k, v in usage.items() if k in TOKEN_USAGE_KEYS and isinstance(v, int)}
+    detailed_usage = {k: v for k, v in usage.items() if k not in TOKEN_USAGE_KEYS}
+
+    # Update response_metadata with full usage info
+    response_metadata = getattr(message, "response_metadata", None)
     if not isinstance(response_metadata, dict):
         response_metadata = {}
     else:
         response_metadata = dict(response_metadata)
+
+    # Store complete usage (including details) in token_usage
     response_metadata.setdefault("token_usage", usage)
     object.__setattr__(message, "response_metadata", response_metadata)
 
+    # Set usage_metadata with base counts only (for compatibility)
     existing_usage_metadata = _coerce_usage_metadata(getattr(message, "usage_metadata", None))
     if not existing_usage_metadata:
-        object.__setattr__(message, "usage_metadata", usage)
+        object.__setattr__(message, "usage_metadata", base_usage)
 
-    for key, value in usage.items():
+    # Set direct token attributes on the message
+    for key, value in base_usage.items():
         object.__setattr__(message, key, value)
 
     return message
@@ -277,10 +362,24 @@ def wrap_model_with_rate_limiting(model: Any) -> Any:
     retry_wrapped_ainvoke = retry_on_rate_limit(model.ainvoke)
 
     def invoke_with_usage(*args, **kwargs):
-        return _normalize_message_token_usage(retry_wrapped_invoke(*args, **kwargs))
+        result = retry_wrapped_invoke(*args, **kwargs)
+        # Extract raw response if available (for Azure-style usage)
+        raw_response = None
+        if hasattr(result, 'response_metadata'):
+            raw_response = result.response_metadata
+        elif isinstance(result, dict):
+            raw_response = result
+        return _normalize_message_token_usage(result, raw_response)
 
     async def ainvoke_with_usage(*args, **kwargs):
-        return _normalize_message_token_usage(await retry_wrapped_ainvoke(*args, **kwargs))
+        result = await retry_wrapped_ainvoke(*args, **kwargs)
+        # Extract raw response if available (for Azure-style usage)
+        raw_response = None
+        if hasattr(result, 'response_metadata'):
+            raw_response = result.response_metadata
+        elif isinstance(result, dict):
+            raw_response = result
+        return _normalize_message_token_usage(result, raw_response)
 
     object.__setattr__(model, 'invoke', invoke_with_usage)
     object.__setattr__(model, 'ainvoke', ainvoke_with_usage)
