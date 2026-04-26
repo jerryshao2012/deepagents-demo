@@ -587,3 +587,79 @@ def compare_records(
         "reason": None,
         "per_metric": per_metric,
     }
+
+
+def log_dev_server_metrics(
+        *,
+        messages: list[Any],
+        files: dict[str, Any],
+        runtime_seconds: float,
+        model_name: str,
+        context: dict[str, Any] | None = None,
+        history_file: str | Path = "./output/eval_history/dev_server_runs.jsonl",
+) -> dict[str, Any]:
+    """Log operational metrics for langgraph dev/server mode.
+    
+    This function collects facts (tools called, tokens used, runtime, etc.)
+    for general tracking purposes. Unlike CLI regression testing, this does NOT
+    compare against baselines since user inputs vary each time.
+    
+    Args:
+        messages: List of conversation messages from agent state
+        files: Dictionary of files from agent state
+        runtime_seconds: Total execution time in seconds
+        model_name: Name of the LLM model used
+        git_sha: Git commit SHA for version tracking
+        context: Optional context metadata (subject, skill, doc_folder, no_web)
+        history_file: Path to JSONL history file
+        
+    Returns:
+        Dictionary with logged metrics summary for console output
+    """
+    # Build result structure similar to CLI's agent.invoke() output
+    result = {
+        "messages": messages,
+        "files": files,
+    }
+
+    # Collect metrics (tool calls, parameters, self-correction, tokens, latency)
+    run_metrics = collect_run_metrics(
+        result=result,
+        runtime_seconds=runtime_seconds,
+        stream_fallback_used=False,
+    )
+
+    # Create simple run record with timestamp and facts
+    record = {
+        "timestamp_utc": utc_now_iso(),
+        "model_name": model_name,
+        "context": context or {},
+        "runtime_seconds": round(runtime_seconds, 2),
+        "metrics": run_metrics,
+    }
+
+    # Append to history file
+    history_path = Path(history_file)
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with open(history_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\n")
+
+    # Extract summary stats for console output
+    tool_calls = run_metrics.get("tool_execution", {}).get("total_tool_calls", 0)
+    success_rate = run_metrics.get("tool_execution", {}).get("success_rate", 0)
+    total_tokens = run_metrics.get("token_efficiency", {}).get("total_tokens", 0)
+    param_quality = run_metrics.get("parameter_validation", {}).get("average_quality_score", 0)
+    corrections = run_metrics.get("self_correction", {}).get("correction_events", 0)
+
+    summary = {
+        "runtime_seconds": round(runtime_seconds, 1),
+        "tool_calls": tool_calls,
+        "success_rate": success_rate,
+        "total_tokens": total_tokens,
+        "param_quality": param_quality,
+        "corrections": corrections,
+        "history_file": str(history_path),
+    }
+
+    return summary

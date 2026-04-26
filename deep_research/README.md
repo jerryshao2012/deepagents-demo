@@ -55,6 +55,12 @@ export MAX_CONCURRENT_RESEARCH_UNITS=3
 # Maximum number of iterations per researcher agent before stopping
 export MAX_RESEARCHER_ITERATIONS=3
 
+# Evaluation Tracking (for langgraph dev server)
+# Enable automatic metrics logging during development
+export ENABLE_EVAL_TRACKING=true
+# Path to JSONL file for storing operational metrics
+export EVAL_HISTORY_FILE=./output/eval_history/server_runs.jsonl
+
 # =============================================================================
 # RELIABILITY & RATE LIMITING
 # =============================================================================
@@ -867,3 +873,65 @@ Tests verify:
 - Baseline selection (latest matching manifest).
 - Non-comparable manifest mismatches.
 - JSONL append and reload integrity.
+
+### Using with `langgraph dev` Server
+
+The evaluation tracking system also works with LangGraph Studio's development server for **operational metrics collection**. Unlike CLI regression testing (which compares same-input baselines), dev mode tracks facts across different inputs:
+
+```bash
+# Enable eval tracking for langgraph dev
+export ENABLE_EVAL_TRACKING=true
+export EVAL_HISTORY_FILE=./output/eval_history/server_runs.jsonl
+
+# Start the dev server
+langgraph dev
+```
+
+**What gets tracked** (facts only, no comparison):
+- **Tool execution**: Total calls, success rate, retries, parameter quality
+- **Self-correction**: Number of corrections, correction types
+- **Token efficiency**: Prompt/completion tokens, total cost proxy
+- **Latency**: Runtime in seconds
+- **Context**: Model name, skill used, doc folder, subject (for reference)
+
+**How it works**:
+1. The `ResearchStateMiddleware.after_model()` hook detects when final artifacts are created
+2. Metrics are automatically collected from the agent state
+3. Simple JSONL records appended to history file (one per run)
+4. Console summary printed after each completion
+
+**Example output**:
+```
+✅ Metrics logged: 45.2s | 12 tools (92% success) | 8450 tokens | param quality: 0.85 | 2 corrections
+```
+
+**JSONL record structure**:
+```json
+{
+  "timestamp_utc": "2026-04-26T10:15:30.123456+00:00",
+  "model_name": "claude-sonnet-4-5-20250929",
+  "context": {
+    "subject": "Generate question-answer pairs...",
+    "skill": "golden-dataset",
+    "doc_folder": "./docs/policy",
+    "no_web": false
+  },
+  "runtime_seconds": 45.2,
+  "metrics": {
+    "tool_execution": { ... },
+    "parameter_validation": { ... },
+    "self_correction": { ... },
+    "token_efficiency": { ... },
+    "latency": { ... }
+  }
+}
+```
+
+**Use cases**:
+- Monitor agent performance trends over time
+- Identify problematic patterns (low success rates, high retries)
+- Track token usage and costs across different tasks
+- Debug parameter quality issues
+- Analyze self-correction behavior
+
+**Note**: This is separate from CLI regression testing (`golden_dataset_runs.jsonl`). Dev mode tracks diverse inputs; CLI mode compares identical inputs.

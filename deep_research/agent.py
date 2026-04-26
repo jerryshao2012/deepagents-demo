@@ -14,6 +14,7 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
 
+from logger_utils import setup_logger
 from model_factory import get_configured_model
 from research_agent import (
     RESEARCH_WORKFLOW_INSTRUCTIONS,
@@ -37,11 +38,14 @@ from research_agent.tools import (
 from research_agent.utils.cli import (
     build_instruction,
 )
+from research_agent.utils.eval_tracking import log_dev_server_metrics
 from research_agent.utils.skill_registry import get_skill_registry
 from utils import get_ssl_verify_config, str2bool
 
 # Load environment variables
 load_dotenv()
+
+logger = setup_logger(__name__)
 
 # Create SSL verification setting - CLI flag takes precedence over env var
 verify_ssl = get_ssl_verify_config()
@@ -49,6 +53,10 @@ verify_ssl = get_ssl_verify_config()
 # Limits - configurable via environment variables
 MAX_CONCURRENT_RESEARCH_UNITS = int(os.environ.get("MAX_CONCURRENT_RESEARCH_UNITS", "3"))
 MAX_RESEARCHER_ITERATIONS = int(os.environ.get("MAX_RESEARCHER_ITERATIONS", "3"))
+
+# Evaluation tracking - configurable via environment variables
+ENABLE_EVAL_TRACKING = str2bool(os.environ.get("ENABLE_EVAL_TRACKING"), False)
+EVAL_HISTORY_FILE = os.environ.get("EVAL_HISTORY_FILE", "./output/eval_history/server_runs.jsonl")
 
 # Get current date
 current_date = datetime.now().strftime("%Y-%m-%d")
@@ -77,7 +85,7 @@ def load_skill_keywords(skills_dir: str | None = None) -> dict[str, list[str]]:
         skills_path = Path(skills_dir)
 
     if not skills_path.exists():
-        print(f"Warning: Skills directory not found: {skills_path}")
+        logger.error(f"Warning: Skills directory not found: {skills_path}")
         return {}
 
     skill_keywords = {}
@@ -114,7 +122,7 @@ def load_skill_keywords(skills_dir: str | None = None) -> dict[str, list[str]]:
                 skill_keywords[skill_name] = keywords
 
         except Exception as e:
-            print(f"Warning: Failed to load keywords from {skill_file}: {e}")
+            logger.error(f"Warning: Failed to load keywords from {skill_file}: {e}")
             continue
 
     return skill_keywords
@@ -132,6 +140,7 @@ class ResearchState(AgentState):
     chat_start_time: float | None
     chat_elapsed_seconds: float | None
     files: dict | None
+    _eval_logged: bool
 
 
 class ResearchStateMiddleware(AgentMiddleware):
@@ -212,15 +221,86 @@ class ResearchStateMiddleware(AgentMiddleware):
         return {
             "chat_start_time": chat_start_time,
             "chat_elapsed_seconds": None,
+            "_eval_logged": False,
         }
 
     def after_model(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
-        """Calculate chat_elapsed_seconds after each model response."""
+        """Calculate chat_elapsed_seconds after each model response and optionally track eval metrics."""
         chat_start_time = state.get("chat_start_time")
+        updates = {}
+
         if isinstance(chat_start_time, (int, float)):
             chat_elapsed_seconds = time.time() - chat_start_time
-            return {"chat_elapsed_seconds": chat_elapsed_seconds}
-        return None
+            updates["chat_elapsed_seconds"] = chat_elapsed_seconds
+
+        # Optional: Log eval metrics on completion (when graph is done)
+        # This checks if we're at the end of execution by looking for final artifacts
+        if ENABLE_EVAL_TRACKING and state.get("files"):
+            files = state.get("files", {})
+            if not isinstance(files, dict):
+                return updates if updates else None
+
+            has_final_output = "/final_report.md" in files
+
+            # Check if already logged (use .get() with default False since TypedDict doesn't support defaults)
+            if has_final_output and not state.get("_eval_logged", False):
+                # Mark as logged to avoid duplicate logging
+                updates["_eval_logged"] = True
+
+                # Calculate runtime
+                runtime_seconds = 0.0
+                if isinstance(chat_start_time, (int, float)):
+                    runtime_seconds = time.time() - chat_start_time
+
+                # Extract data from state
+                messages = state.get("messages", [])
+                doc_folder = state.get("doc_folder") or os.environ.get("DOC_FOLDER", "unknown")
+                skill = state.get("skill", "unknown")
+                no_web = state.get("no_web", False)
+                model_name = os.environ.get("MODEL_NAME", "unknown")
+
+                # Get user message as subject (for reference only, not for comparison)
+                user_message = None
+                for m in messages:
+                    if isinstance(m, dict) and m.get("role") == "user":
+                        user_message = m.get("content", "")
+                        break
+                    elif hasattr(m, "type") and getattr(m, "type", None) == "human":
+                        user_message = getattr(m, "content", "")
+                        break
+                subject = user_message
+
+                # Build context
+                context = {
+                    "subject": subject,
+                    "skill": skill,
+                    "doc_folder": doc_folder,
+                    "no_web": no_web,
+                }
+
+                # Call centralized logging function
+                try:
+                    summary = log_dev_server_metrics(
+                        messages=messages,
+                        files=files,
+                        runtime_seconds=runtime_seconds,
+                        model_name=model_name,
+                        context=context,
+                        history_file=EVAL_HISTORY_FILE,
+                    )
+
+                    # Log summary
+                    logger.info(
+                        f"✅ Metrics logged: {summary['runtime_seconds']}s | "
+                        f"{summary['tool_calls']} tools ({summary['success_rate']:.0%} success) | "
+                        f"{summary['total_tokens']} tokens | "
+                        f"param quality: {summary['param_quality']:.2f} | "
+                        f"{summary['corrections']} corrections"
+                    )
+                except Exception as e:
+                    logger.error(f"⚠️  Eval tracking error: {e}")
+
+        return updates if updates else None
 
     def _extract_parameters_from_user_input(self, state: ResearchState, messages: list) -> dict[str, Any]:
         """Extract doc_folder, skill, and no_web from user message patterns."""
