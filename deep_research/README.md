@@ -659,31 +659,36 @@ The golden-dataset skill now includes comprehensive evaluation tracking to monit
 
 ### Key Metrics Tracked
 
-#### Test Pass Rate (Completeness)
-| Metric | Description                                                                                                                                             |
-|--------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `completeness.pass` | Boolean flag: for the `golden-dataset` skill, `/golden_dataset_metrics.md` and `/final_report.md` are generated in the LangGraph state `files` sandbox. Percentage of code produced by the agent that passes automated tests if the `code-generator` skill is used. |
-| `completeness.has_golden_dataset_metrics_md` | Whether the quality metrics report was generated.                                                                                                       |
-| `completeness.has_final_report_md` | Whether the final report was generated.                                                                                                                 |
-
-#### Success Rate of Tool Execution
-| Metric | Description |
-|--------|-------------|
-| `tool_execution.total_tool_calls` | Total number of tool invocations across the entire run. |
-| `tool_execution.successful_tool_calls` | Count of tool calls that returned valid responses. |
-| `tool_execution.failed_tool_calls` | Count of tool calls that failed or returned error content. |
-| `tool_execution.success_rate` | Reliability of the agent in using tools (e.g., search, file editing) correctly. If the number of tool calls significantly increases, it should be considered a failure. Ratio of successful to total tool calls. (1.0 if no calls made) |
-| `tool_execution.retry_count` | Number of times a tool was retried after initial failure. |
-| `tool_execution.unique_tools_with_errors` | Count of distinct tools that encountered errors. |
-| `tool_execution.tools_corrected_count` | Count of tools where the agent successfully self-corrected after failure. |
-
-#### Parameter Validation Quality
-| Metric | Description |
-|--------|-------------|
-| `parameter_validation.average_quality_score` | Average quality score (0-1) of tool call parameters across all invocations. Higher is better. |
-| `parameter_validation.valid_parameter_rate` | Ratio of tool calls with valid/required parameters present. Measures parameter completeness. |
-| `parameter_validation.total_calls_analyzed` | Total number of tool calls analyzed for parameter quality. |
-| `parameter_validation.calls_with_missing_params` | Count of tool calls missing required parameters. Lower is better. |
+| Category | Metric | Description |
+|----------|--------|-------------|
+| **Test Pass Rate (Completeness)** | `completeness.pass` | Boolean flag: for the `golden-dataset` skill, `/golden_dataset_metrics.md` and `/final_report.md` are generated in the LangGraph state `files` sandbox. Percentage of code produced by the agent that passes automated tests if the `code-generator` skill is used. |
+| | `completeness.has_golden_dataset_metrics_md` | Whether the quality metrics report was generated. |
+| | `completeness.has_final_report_md` | Whether the final report was generated. |
+| **Success Rate of Tool Execution** | `tool_execution.total_tool_calls` | Total number of tool invocations across the entire run. |
+| | `tool_execution.successful_tool_calls` | Count of tool calls that returned valid responses. |
+| | `tool_execution.failed_tool_calls` | Count of tool calls that failed or returned error content. |
+| | `tool_execution.success_rate` | Reliability of the agent in using tools (e.g., search, file editing) correctly. If the number of tool calls significantly increases, it should be considered a failure. Ratio of successful to total tool calls. (1.0 if no calls made) |
+| | `tool_execution.retry_count` | Number of times a tool was retried after initial failure. |
+| | `tool_execution.unique_tools_with_errors` | Count of distinct tools that encountered errors. |
+| | `tool_execution.tools_corrected_count` | Count of tools where the agent successfully self-corrected after failure. |
+| **Parameter Validation Quality** | `parameter_validation.average_quality_score` | Average quality score (0-1) of tool call parameters across all invocations. Higher is better. |
+| | `parameter_validation.valid_parameter_rate` | Ratio of tool calls with valid/required parameters present. Measures parameter completeness. |
+| | `parameter_validation.total_calls_analyzed` | Total number of tool calls analyzed for parameter quality. |
+| | `parameter_validation.calls_with_missing_params` | Count of tool calls missing required parameters. Lower is better. |
+| **Error Rate/Failure Rate** | `failure.intervention_required` | Boolean. True if completeness failed, stream fallback was used, or tool failure rate > 0. Frequency of failures requiring human intervention. |
+| | `failure.failure_rate` | Ratio: 1.0 if intervention needed, 0.0 otherwise. |
+| **Token Efficiency/Cost Per Task** | `token_efficiency.available` | Boolean. Whether token usage metadata was captured. |
+| | `token_efficiency.prompt_tokens` | Total input tokens across all messages. |
+| | `token_efficiency.completion_tokens` | Total output tokens across all messages. |
+| | `token_efficiency.total_tokens` | Sum of prompt and completion tokens. Monitoring the cost effectiveness of the orchestration. |
+| | `token_efficiency.tokens_per_successful_task` | Aggregate token count if completeness passed, else null. |
+| **Latency** | `latency.runtime_seconds` | End-to-end execution time in seconds. Time taken to complete a complex task. |
+| | `latency.p50_seconds` | Median latency (currently = runtime for single runs; p50/p95 aggregated across rolling history). |
+| | `latency.p95_seconds` | 95th percentile latency (currently = runtime; will improve with multi-run analysis). |
+| **Self-Correction Behavior** | `self_correction.correction_events` | Total number of times the agent detected and corrected a tool failure. |
+| | `self_correction.self_correction_rate` | Ratio of tools with errors that were successfully corrected (0-1). Higher indicates better recovery capability. |
+| | `self_correction.tools_attempted_correction` | List of tool names where the agent attempted self-correction. |
+| | `self_correction.correction_types` | Types of corrections observed: `retry_same_tool` (retried with different params) or `alternative_tool` (switched to different tool). |
 
 **Parameter Analysis Details**:
 - **File operations** (`read_file`, `write_file`): Checks for `path` or `file_path` arguments
@@ -691,36 +696,6 @@ The golden-dataset skill now includes comprehensive evaluation tracking to monit
 - **Thinking operations** (`think_tool`): Checks for `thought` or `reasoning` arguments
 - **Generic tools**: Validates at least one non-empty argument is provided
 - **Quality scoring**: 0.5 base for required params + up to 0.5 bonus for multiple well-formed arguments
-
-#### Error Rate/Failure Rate
-| Metric | Description |
-|--------|-------------|
-| `failure.intervention_required` | Boolean. True if completeness failed, stream fallback was used, or tool failure rate > 0. Frequency of failures requiring human intervention. |
-| `failure.failure_rate` | Ratio: 1.0 if intervention needed, 0.0 otherwise. |
-
-#### Token Efficiency/Cost Per Task
-| Metric | Description |
-|--------|-------------|
-| `token_efficiency.available` | Boolean. Whether token usage metadata was captured. |
-| `token_efficiency.prompt_tokens` | Total input tokens across all messages. |
-| `token_efficiency.completion_tokens` | Total output tokens across all messages. |
-| `token_efficiency.total_tokens` | Sum of prompt and completion tokens. Monitoring the cost effectiveness of the orchestration. |
-| `token_efficiency.tokens_per_successful_task` | Aggregate token count if completeness passed, else null. |
-
-#### Latency
-| Metric | Description |
-|--------|-------------|
-| `latency.runtime_seconds` | End-to-end execution time in seconds. Time taken to complete a complex task. |
-| `latency.p50_seconds` | Median latency (currently = runtime for single runs; p50/p95 aggregated across rolling history). |
-| `latency.p95_seconds` | 95th percentile latency (currently = runtime; will improve with multi-run analysis). |
-
-#### Self-Correction Behavior
-| Metric | Description |
-|--------|-------------|
-| `self_correction.correction_events` | Total number of times the agent detected and corrected a tool failure. |
-| `self_correction.self_correction_rate` | Ratio of tools with errors that were successfully corrected (0-1). Higher indicates better recovery capability. |
-| `self_correction.tools_attempted_correction` | List of tool names where the agent attempted self-correction. |
-| `self_correction.correction_types` | Types of corrections observed: `retry_same_tool` (retried with different params) or `alternative_tool` (switched to different tool). |
 
 **Self-Correction Detection Logic**:
 - **Retry detection**: Agent calls same tool again after a failure (indicates parameter adjustment)
