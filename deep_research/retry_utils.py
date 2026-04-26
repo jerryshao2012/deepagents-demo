@@ -31,6 +31,13 @@ MODEL_TPM = int(os.getenv("MODEL_TPM", "120000"))
 MODEL_RPM = int(os.getenv("MODEL_RPM", "500"))
 
 T = TypeVar("T")
+TOKEN_USAGE_KEYS = (
+    "input_tokens",
+    "output_tokens",
+    "total_tokens",
+    "prompt_tokens",
+    "completion_tokens",
+)
 
 
 def is_rate_limit_error(error: Exception) -> bool:
@@ -189,14 +196,94 @@ def retry_on_rate_limit(
     return decorator
 
 
+def _coerce_usage_metadata(value: Any) -> dict[str, int]:
+    """Extract the token usage fields we care about from any mapping-like object."""
+    if not isinstance(value, dict):
+        return {}
+
+    usage = {key: value.get(key) for key in TOKEN_USAGE_KEYS if value.get(key) is not None}
+    if not usage:
+        return {}
+
+    normalized = {key: int(raw_value) for key, raw_value in usage.items()}
+    if "prompt_tokens" not in normalized and "input_tokens" in normalized:
+        normalized["prompt_tokens"] = normalized["input_tokens"]
+    if "input_tokens" not in normalized and "prompt_tokens" in normalized:
+        normalized["input_tokens"] = normalized["prompt_tokens"]
+    if "completion_tokens" not in normalized and "output_tokens" in normalized:
+        normalized["completion_tokens"] = normalized["output_tokens"]
+    if "output_tokens" not in normalized and "completion_tokens" in normalized:
+        normalized["output_tokens"] = normalized["completion_tokens"]
+    if "total_tokens" not in normalized:
+        normalized["total_tokens"] = normalized.get("input_tokens", 0) + normalized.get("output_tokens", 0)
+    return normalized
+
+
+def _normalize_message_token_usage(message: Any) -> Any:
+    """
+    Copy token usage onto fields that survive downstream serialization.
+
+    LangGraph can strip `usage_metadata` from state messages, but `eval_tracking`
+    already knows how to read `response_metadata["token_usage"]` and direct token
+    attributes. This keeps token accounting available for server metrics.
+    """
+    if message is None:
+        return message
+
+    usage = _coerce_usage_metadata(getattr(message, "usage_metadata", None))
+    response_metadata = getattr(message, "response_metadata", None)
+    if not usage and isinstance(response_metadata, dict):
+        usage = _coerce_usage_metadata(
+            response_metadata.get("token_usage")
+            or response_metadata.get("usage")
+            or response_metadata.get("usage_details")
+        )
+
+    if not usage:
+        direct_usage = {
+            key: getattr(message, key, None)
+            for key in TOKEN_USAGE_KEYS
+            if getattr(message, key, None) is not None
+        }
+        usage = _coerce_usage_metadata(direct_usage)
+
+    if not usage:
+        return message
+
+    if not isinstance(response_metadata, dict):
+        response_metadata = {}
+    else:
+        response_metadata = dict(response_metadata)
+    response_metadata.setdefault("token_usage", usage)
+    object.__setattr__(message, "response_metadata", response_metadata)
+
+    existing_usage_metadata = _coerce_usage_metadata(getattr(message, "usage_metadata", None))
+    if not existing_usage_metadata:
+        object.__setattr__(message, "usage_metadata", usage)
+
+    for key, value in usage.items():
+        object.__setattr__(message, key, value)
+
+    return message
+
+
 def wrap_model_with_rate_limiting(model: Any) -> Any:
     """
     Apply both proactive rate shaping and reactive retries to a model.
     """
     # 1. Reactive Retries (Decorator)
     # Wrap invoke methods with retry logic using object.__setattr__ to bypass Pydantic validation
-    object.__setattr__(model, 'invoke', retry_on_rate_limit(model.invoke))
-    object.__setattr__(model, 'ainvoke', retry_on_rate_limit(model.ainvoke))
+    retry_wrapped_invoke = retry_on_rate_limit(model.invoke)
+    retry_wrapped_ainvoke = retry_on_rate_limit(model.ainvoke)
+
+    def invoke_with_usage(*args, **kwargs):
+        return _normalize_message_token_usage(retry_wrapped_invoke(*args, **kwargs))
+
+    async def ainvoke_with_usage(*args, **kwargs):
+        return _normalize_message_token_usage(await retry_wrapped_ainvoke(*args, **kwargs))
+
+    object.__setattr__(model, 'invoke', invoke_with_usage)
+    object.__setattr__(model, 'ainvoke', ainvoke_with_usage)
 
     # 2. Proactive Rate Shaping (if limits are configured)
     if MODEL_TPM > 0 and MODEL_RPM > 0:

@@ -1,14 +1,17 @@
 """Tests for rate limit retry utilities."""
 
+import asyncio
 from unittest.mock import patch
 
 import pytest
+from langchain_core.messages import AIMessage
 
 from retry_utils import (
     RetryConfig,
     calculate_backoff,
     is_rate_limit_error,
     retry_on_rate_limit,
+    wrap_model_with_rate_limiting,
 )
 
 
@@ -128,6 +131,77 @@ class TestRetryOnRateLimit:
         result = await async_flaky()
         assert result == "async success"
         assert call_count == 2
+
+
+class TestModelUsageNormalization:
+    """Test model wrapper usage metadata normalization."""
+
+    def test_wrap_model_copies_usage_metadata_into_response_metadata(self):
+        """Wrapped invoke should preserve usage in response_metadata for downstream logging."""
+
+        class StubModel:
+            def invoke(self, *_args, **_kwargs):
+                return AIMessage(
+                    content="ok",
+                    usage_metadata={
+                        "input_tokens": 11,
+                        "output_tokens": 7,
+                        "total_tokens": 18,
+                    },
+                )
+
+            async def ainvoke(self, *_args, **_kwargs):
+                return AIMessage(content="unused")
+
+        wrapped = wrap_model_with_rate_limiting(StubModel())
+
+        message = wrapped.invoke("hello")
+
+        assert message.response_metadata["token_usage"] == {
+            "input_tokens": 11,
+            "output_tokens": 7,
+            "prompt_tokens": 11,
+            "completion_tokens": 7,
+            "total_tokens": 18,
+        }
+        assert getattr(message, "input_tokens") == 11
+        assert getattr(message, "output_tokens") == 7
+        assert getattr(message, "prompt_tokens") == 11
+        assert getattr(message, "completion_tokens") == 7
+        assert getattr(message, "total_tokens") == 18
+
+    def test_wrap_model_normalizes_async_usage_metadata(self):
+        """Wrapped ainvoke should preserve usage in response_metadata for downstream logging."""
+
+        class StubModel:
+            def invoke(self, *_args, **_kwargs):
+                return AIMessage(content="unused")
+
+            async def ainvoke(self, *_args, **_kwargs):
+                return AIMessage(
+                    content="ok",
+                    usage_metadata={
+                        "input_tokens": 5,
+                        "output_tokens": 3,
+                        "total_tokens": 8,
+                    },
+                )
+
+        wrapped = wrap_model_with_rate_limiting(StubModel())
+        message = asyncio.run(wrapped.ainvoke("hello"))
+
+        assert message.response_metadata["token_usage"] == {
+            "input_tokens": 5,
+            "output_tokens": 3,
+            "prompt_tokens": 5,
+            "completion_tokens": 3,
+            "total_tokens": 8,
+        }
+        assert getattr(message, "input_tokens") == 5
+        assert getattr(message, "output_tokens") == 3
+        assert getattr(message, "prompt_tokens") == 5
+        assert getattr(message, "completion_tokens") == 3
+        assert getattr(message, "total_tokens") == 8
 
 
 class TestRetryConfig:
