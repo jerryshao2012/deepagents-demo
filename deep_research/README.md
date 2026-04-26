@@ -693,8 +693,6 @@ The golden-dataset skill now includes comprehensive evaluation tracking to monit
 | | `token_efficiency.total_tokens` | Sum of prompt and completion tokens. Monitoring the cost effectiveness of the orchestration. |
 | | `token_efficiency.tokens_per_successful_task` | Aggregate token count if completeness passed, else null. |
 | **Latency** | `latency.runtime_seconds` | End-to-end execution time in seconds. Time taken to complete a complex task. |
-| | `latency.p50_seconds` | Median latency (currently = runtime for single runs; p50/p95 aggregated across rolling history). |
-| | `latency.p95_seconds` | 95th percentile latency (currently = runtime; will improve with multi-run analysis). |
 
 **Parameter Analysis Details**:
 - **File operations** (`read_file`, `write_file`): Checks for `path` or `file_path` arguments
@@ -801,7 +799,7 @@ uv run python research_agent_cli.py \
 |--------|-----------|-----------|
 | **Tool Growth** | 30% | Candidate tool_calls > baseline * 1.30 → **worse** |
 | **Token Efficiency** | 20% | Candidate total_tokens > baseline * 1.20 → **worse** |
-| **Latency** | 15% | Candidate p95_seconds > baseline * 1.15 → **worse** |
+| **Latency** | 15% | Candidate runtime_seconds > baseline * 1.15 → **worse** |
 | **Parameter Quality** | 10% | Candidate avg_quality_score < baseline * 0.90 → **worse**; > baseline * 1.10 → **better** |
 | **Self-Correction Rate** | N/A | Any improvement → **better**; any decrease → **worse** |
 

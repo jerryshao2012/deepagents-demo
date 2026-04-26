@@ -7,6 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from logger_utils import setup_logger
+
+logger = setup_logger(__name__)
+
 _TOOL_FAILURE_PREFIXES = (
     "Invalid JSON payload:",
     "Schema validation failed",
@@ -100,14 +104,58 @@ def _extract_tool_call_count(message: Any) -> int:
 
 
 def _extract_usage_metadata(message: Any) -> dict[str, Any]:
+    """Extract token usage metadata from a message.
+    
+    Checks multiple possible locations where LLM providers store token counts:
+    - usage_metadata (LangChain standard)
+    - response_metadata.token_usage (OpenAI/Anthropic)
+    - response_metadata.usage (some providers)
+    - Direct attributes on message objects
+    """
+    usage = {}
+
     if isinstance(message, dict):
-        usage = message.get("usage_metadata") or message.get("response_metadata", {}).get("token_usage")
+        # Check usage_metadata first (LangChain standard)
+        usage = message.get("usage_metadata")
+
+        # Check response_metadata variants
+        if not usage:
+            response_metadata = message.get("response_metadata", {})
+            if isinstance(response_metadata, dict):
+                usage = (
+                        response_metadata.get("token_usage") or
+                        response_metadata.get("usage") or
+                        response_metadata.get("usage_details")
+                )
+
+        # Check for direct token fields in the message
+        if not usage:
+            usage = {
+                k: v for k, v in message.items()
+                if k in ("input_tokens", "output_tokens", "total_tokens",
+                         "prompt_tokens", "completion_tokens") and v is not None
+            }
     else:
+        # For message objects, check attributes
         usage = getattr(message, "usage_metadata", None)
+
         if usage is None:
             response_metadata = getattr(message, "response_metadata", None)
             if isinstance(response_metadata, dict):
-                usage = response_metadata.get("token_usage")
+                usage = (
+                        response_metadata.get("token_usage") or
+                        response_metadata.get("usage") or
+                        response_metadata.get("usage_details")
+                )
+
+        # Check for direct token attributes
+        if not usage:
+            usage = {
+                k: getattr(message, k, None)
+                for k in ("input_tokens", "output_tokens", "total_tokens",
+                          "prompt_tokens", "completion_tokens")
+                if getattr(message, k, None) is not None
+            }
 
     return usage if isinstance(usage, dict) else {}
 
@@ -256,7 +304,11 @@ def _detect_self_correction(messages: list[Any], current_index: int, tool_name: 
 
 
 def collect_run_metrics(result: dict[str, Any], runtime_seconds: float, stream_fallback_used: bool) -> dict[str, Any]:
-    """Collect golden-dataset metrics from a run result and runtime context."""
+    """Collect golden-dataset metrics from a run result and runtime context.
+    
+    This is for CLI unit testing with baseline comparison. Includes completeness
+    checks for /golden_dataset_metrics.md and /final_report.md files.
+    """
     messages = result.get("messages", [])
     files = result.get("files", {}) if isinstance(result.get("files", {}), dict) else {}
 
@@ -336,6 +388,10 @@ def collect_run_metrics(result: dict[str, Any], runtime_seconds: float, stream_f
             completion_tokens += int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
             total_tokens += int(usage.get("total_tokens") or 0)
 
+            # Debug: Log token extraction for first message with usage data
+            if idx == 0 or not saw_token_metadata:
+                logger.debug(f"Token metadata extracted: {usage}")
+
     if saw_token_metadata and total_tokens == 0:
         total_tokens = prompt_tokens + completion_tokens
 
@@ -404,9 +460,147 @@ def collect_run_metrics(result: dict[str, Any], runtime_seconds: float, stream_f
             "tokens_per_successful_task": total_tokens if completeness_pass and saw_token_metadata else None,
         },
         "latency": {
-            "runtime_seconds": runtime_seconds,
-            "p50_seconds": runtime_seconds,
-            "p95_seconds": runtime_seconds,
+            "runtime_seconds": round(runtime_seconds, 3),
+        },
+    }
+
+
+def collect_server_metrics(
+        messages: list[Any],
+        runtime_seconds: float,
+) -> dict[str, Any]:
+    """Collect operational metrics for server/dev mode tracking.
+    
+    Simplified version focused on facts only (no baseline comparison).
+    Unlike CLI golden dataset evaluation, this does NOT check for specific
+    output files or compare against baselines since user inputs vary each time.
+    
+    Args:
+        messages: List of conversation messages from agent state
+        runtime_seconds: Total execution time in seconds
+        
+    Returns:
+        Dictionary with operational metrics for tracking
+    """
+    total_tool_calls = 0
+    successful_tool_calls = 0
+    failed_tool_calls = 0
+
+    # Enhanced tracking
+    parameter_validation_results = []
+    self_correction_events = []
+    retry_count = 0
+    tools_with_errors = set()
+    tools_corrected = set()
+
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    saw_token_metadata = False
+
+    for idx, message in enumerate(messages):
+        role, name, content = _message_role_name_content(message)
+
+        if role in {"ai", "assistant"}:
+            tool_calls = message.get("tool_calls") if isinstance(message, dict) else getattr(message, "tool_calls", [])
+
+            if isinstance(tool_calls, list):
+                total_tool_calls += len(tool_calls)
+
+                # Analyze each tool call's parameters
+                for tc in tool_calls:
+                    tc_name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "unknown")
+                    param_analysis = _analyze_tool_call_parameters(
+                        tc if isinstance(tc, dict) else {"name": getattr(tc, "name", ""),
+                                                         "args": getattr(tc, "args", {})})
+
+                    parameter_validation_results.append({
+                        "tool_name": tc_name,
+                        "has_valid_parameters": param_analysis["has_required_params"],
+                        "quality_score": param_analysis["parameter_quality_score"],
+                    })
+
+        if role == "tool":
+            content_text = content.strip()
+            tool_name = name or "unknown"
+            is_failure = not content_text or content_text.startswith(_TOOL_FAILURE_PREFIXES)
+
+            if is_failure:
+                failed_tool_calls += 1
+                tools_with_errors.add(tool_name)
+
+                # Check for self-correction
+                correction = _detect_self_correction(messages, idx, tool_name)
+                if correction["self_corrected"]:
+                    self_correction_events.append({
+                        "tool_name": tool_name,
+                        "correction_type": correction["correction_type"],
+                        "details": correction["correction_details"],
+                    })
+                    tools_corrected.add(tool_name)
+            else:
+                successful_tool_calls += 1
+
+                # Check if this success came after a failure (recovery)
+                if tool_name in tools_with_errors:
+                    retry_count += 1
+
+        usage = _extract_usage_metadata(message)
+        if usage:
+            saw_token_metadata = True
+            prompt_tokens += int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0)
+            completion_tokens += int(usage.get("output_tokens") or usage.get("completion_tokens") or 0)
+            total_tokens += int(usage.get("total_tokens") or 0)
+
+    if saw_token_metadata and total_tokens == 0:
+        total_tokens = prompt_tokens + completion_tokens
+
+    # Calculate enhanced metrics
+    avg_parameter_quality = (
+        sum(p["quality_score"] for p in parameter_validation_results) / len(parameter_validation_results)
+        if parameter_validation_results else 0.0
+    )
+
+    valid_parameter_rate = (
+        sum(1 for p in parameter_validation_results if p["has_valid_parameters"]) / len(parameter_validation_results)
+        if parameter_validation_results else 0.0
+    )
+
+    self_correction_rate = (
+        len(tools_corrected) / len(tools_with_errors)
+        if tools_with_errors else 0.0
+    )
+
+    return {
+        "tool_execution": {
+            "total_tool_calls": total_tool_calls,
+            "successful_tool_calls": successful_tool_calls,
+            "failed_tool_calls": failed_tool_calls,
+            "success_rate": (successful_tool_calls / total_tool_calls) if total_tool_calls > 0 else 1.0,
+            "retry_count": retry_count,
+            "unique_tools_with_errors": len(tools_with_errors),
+            "tools_corrected_count": len(tools_corrected),
+        },
+        "parameter_validation": {
+            "average_quality_score": round(avg_parameter_quality, 3),
+            "valid_parameter_rate": round(valid_parameter_rate, 3),
+            "total_calls_analyzed": len(parameter_validation_results),
+            "calls_with_missing_params": sum(1 for p in parameter_validation_results if not p["has_valid_parameters"]),
+        },
+        "self_correction": {
+            "correction_events": len(self_correction_events),
+            "self_correction_rate": round(self_correction_rate, 3),
+            "tools_attempted_correction": list(tools_corrected),
+            "correction_types": list(set(e["correction_type"] for e in self_correction_events if e["correction_type"])),
+        },
+        "token_efficiency": {
+            "available": saw_token_metadata,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+        },
+        "latency": {
+            "runtime_seconds": round(runtime_seconds, 3),
         },
     }
 
@@ -549,8 +743,8 @@ def compare_records(
     else:
         per_metric["token_efficiency"] = "unavailable"
 
-    base_latency = float(base_metrics.get("latency", {}).get("p95_seconds") or 0.0)
-    cand_latency = float(cand_metrics.get("latency", {}).get("p95_seconds") or 0.0)
+    base_latency = float(base_metrics.get("latency", {}).get("runtime_seconds") or 0.0)
+    cand_latency = float(cand_metrics.get("latency", {}).get("runtime_seconds") or 0.0)
     per_metric["latency"] = _metric_verdict(cand_latency, base_latency, latency_regression_threshold)
 
     # Compare parameter validation quality
@@ -619,17 +813,10 @@ async def log_server_metrics(
         Dictionary with logged metrics summary for console output, or None on error
     """
     try:
-        # Build result structure similar to CLI's agent.invoke() output
-        result = {
-            "messages": messages,
-            "files": files,
-        }
-
-        # Collect metrics (tool calls, parameters, self-correction, tokens, latency)
-        run_metrics = collect_run_metrics(
-            result=result,
+        # Collect metrics using server-specific collector (facts only, no baseline comparison)
+        run_metrics = collect_server_metrics(
+            messages=messages,
             runtime_seconds=runtime_seconds,
-            stream_fallback_used=False,
         )
 
         # Extract summary stats for console output
@@ -640,7 +827,7 @@ async def log_server_metrics(
         corrections = run_metrics.get("self_correction", {}).get("correction_events", 0)
 
         summary = {
-            "runtime_seconds": round(runtime_seconds, 1),
+            "runtime_seconds": round(runtime_seconds, 3),
             "tool_calls": tool_calls,
             "success_rate": success_rate,
             "total_tokens": total_tokens,
@@ -653,7 +840,7 @@ async def log_server_metrics(
             "timestamp_utc": utc_now_iso(),
             "model_name": model_name,
             "context": context or {},
-            "runtime_seconds": round(runtime_seconds, 2),
+            "runtime_seconds": round(runtime_seconds, 3),
             "metrics": run_metrics,
             "summary": summary,
         }
@@ -670,13 +857,7 @@ async def log_server_metrics(
 
     except Exception as e:
         # Log error but never propagate - this must not interrupt main chat response
-        try:
-            from logger_utils import setup_logger
-            logger = setup_logger(__name__)
-            logger.error(f"⚠️  Metrics logging failed (non-critical): {type(e).__name__}: {e}")
-        except Exception:
-            # If logging itself fails, silently ignore to avoid any interruption
-            pass
+        logger.error(f"⚠️  Metrics logging failed (non-critical): {type(e).__name__}: {e}")
         return None
 
 
@@ -684,10 +865,10 @@ async def _write_metrics_to_file(history_path: Path, record: dict) -> None:
     """Write metrics record to file using async I/O to avoid blocking."""
     import json
     import asyncio
-    
+
     # Run file I/O in a thread pool to avoid blocking the event loop
     def _write_sync():
         with open(history_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record) + "\n")
-    
+
     await asyncio.to_thread(_write_sync)
