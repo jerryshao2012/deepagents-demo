@@ -589,7 +589,7 @@ def compare_records(
     }
 
 
-def log_dev_server_metrics(
+def log_server_metrics(
         *,
         messages: list[Any],
         files: dict[str, Any],
@@ -640,7 +640,8 @@ def log_dev_server_metrics(
 
     # Append to history file
     history_path = Path(history_file)
-    history_path.parent.mkdir(parents=True, exist_ok=True)
+    if not history_path.parent.exists():
+        history_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(history_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")

@@ -38,7 +38,7 @@ from research_agent.tools import (
 from research_agent.utils.cli import (
     build_instruction,
 )
-from research_agent.utils.eval_tracking import log_dev_server_metrics
+from research_agent.utils.eval_tracking import log_server_metrics
 from research_agent.utils.skill_registry import get_skill_registry
 from utils import get_ssl_verify_config, str2bool
 
@@ -280,7 +280,7 @@ class ResearchStateMiddleware(AgentMiddleware):
 
                 # Call centralized logging function
                 try:
-                    summary = log_dev_server_metrics(
+                    summary = log_server_metrics(
                         messages=messages,
                         files=files,
                         runtime_seconds=runtime_seconds,
