@@ -677,6 +677,10 @@ The golden-dataset skill now includes comprehensive evaluation tracking to monit
 | | `parameter_validation.calls_with_missing_params` | Count of tool calls missing required parameters. Lower is better. |
 | **Error Rate/Failure Rate** | `failure.intervention_required` | Boolean. True if completeness failed, stream fallback was used, or tool failure rate > 0. Frequency of failures requiring human intervention. |
 | | `failure.failure_rate` | Ratio: 1.0 if intervention needed, 0.0 otherwise. |
+| **Self-Correction Behavior** | `self_correction.correction_events` | Total number of times the agent detected and corrected a tool failure. |
+| | `self_correction.self_correction_rate` | Ratio of tools with errors that were successfully corrected (0-1). Higher indicates better recovery capability. |
+| | `self_correction.tools_attempted_correction` | List of tool names where the agent attempted self-correction. |
+| | `self_correction.correction_types` | Types of corrections observed: `retry_same_tool` (retried with different params) or `alternative_tool` (switched to different tool). |
 | **Token Efficiency/Cost Per Task** | `token_efficiency.available` | Boolean. Whether token usage metadata was captured. |
 | | `token_efficiency.prompt_tokens` | Total input tokens across all messages. |
 | | `token_efficiency.completion_tokens` | Total output tokens across all messages. |
@@ -685,10 +689,6 @@ The golden-dataset skill now includes comprehensive evaluation tracking to monit
 | **Latency** | `latency.runtime_seconds` | End-to-end execution time in seconds. Time taken to complete a complex task. |
 | | `latency.p50_seconds` | Median latency (currently = runtime for single runs; p50/p95 aggregated across rolling history). |
 | | `latency.p95_seconds` | 95th percentile latency (currently = runtime; will improve with multi-run analysis). |
-| **Self-Correction Behavior** | `self_correction.correction_events` | Total number of times the agent detected and corrected a tool failure. |
-| | `self_correction.self_correction_rate` | Ratio of tools with errors that were successfully corrected (0-1). Higher indicates better recovery capability. |
-| | `self_correction.tools_attempted_correction` | List of tool names where the agent attempted self-correction. |
-| | `self_correction.correction_types` | Types of corrections observed: `retry_same_tool` (retried with different params) or `alternative_tool` (switched to different tool). |
 
 **Parameter Analysis Details**:
 - **File operations** (`read_file`, `write_file`): Checks for `path` or `file_path` arguments
