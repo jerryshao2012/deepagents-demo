@@ -203,6 +203,59 @@ class TestModelUsageNormalization:
         assert getattr(message, "completion_tokens") == 3
         assert getattr(message, "total_tokens") == 8
 
+    def test_wrap_model_captures_azure_style_token_usage(self):
+        """Wrapped invoke should capture Azure AI server style token usage from response_metadata."""
+
+        class StubAzureModel:
+            def invoke(self, *_args, **_kwargs):
+                # Simulate Azure AI server response structure
+                return AIMessage(
+                    content="Toronto has many attractions including CN Tower and ROM.",
+                    response_metadata={
+                        "usage": {
+                            "completion_tokens": 465,
+                            "prompt_tokens": 28,
+                            "total_tokens": 493,
+                            "completion_tokens_details": {
+                                "accepted_prediction_tokens": 0,
+                                "audio_tokens": 0,
+                                "reasoning_tokens": 0,
+                                "rejected_prediction_tokens": 0
+                            },
+                            "prompt_tokens_details": {
+                                "audio_tokens": 0,
+                                "cached_tokens": 0
+                            }
+                        }
+                    }
+                )
+
+            async def ainvoke(self, *_args, **_kwargs):
+                return AIMessage(content="unused")
+
+        wrapped = wrap_model_with_rate_limiting(StubAzureModel())
+        message = wrapped.invoke("What to see in Toronto?")
+
+        # Verify base token counts are captured
+        assert message.response_metadata["token_usage"]["prompt_tokens"] == 28
+        assert message.response_metadata["token_usage"]["completion_tokens"] == 465
+        assert message.response_metadata["token_usage"]["total_tokens"] == 493
+        
+        # Verify detailed token info is preserved
+        assert "completion_tokens_details" in message.response_metadata["token_usage"]
+        assert "prompt_tokens_details" in message.response_metadata["token_usage"]
+        assert message.response_metadata["token_usage"]["completion_tokens_details"]["reasoning_tokens"] == 0
+        
+        # Verify direct attributes are set
+        assert getattr(message, "prompt_tokens") == 28
+        assert getattr(message, "completion_tokens") == 465
+        assert getattr(message, "total_tokens") == 493
+        
+        # Verify usage_metadata is also set for compatibility
+        assert message.usage_metadata["prompt_tokens"] == 28
+        assert message.usage_metadata["completion_tokens"] == 465
+        assert message.usage_metadata["total_tokens"] == 493
+
 
 class TestRetryConfig:
     """Test configuration class."""
