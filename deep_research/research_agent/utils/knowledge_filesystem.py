@@ -28,9 +28,6 @@ SECTION_CHUNK_LIMIT = int(os.environ.get("SECTION_CHUNK_LIMIT", "3"))
 
 SUPPORTED_DOC_SUFFIXES = {".pdf", ".txt", ".md", ".docx", ".pptx", ".xlsx"}
 
-# Global in‑memory cache for folder listings (path → list of Path objects)
-_folder_listing_cache: dict[str, list[Path]] = {}
-
 logger = setup_logger(__name__)
 
 
@@ -623,19 +620,14 @@ def read_doc_folder_impl(
 
     specific_set = set(specific_files) if specific_files else None
 
-    # Cached folder listing
-    cache_key = str(folder.resolve())
-    if cache_key in _folder_listing_cache:
-        supported_files = _folder_listing_cache[cache_key]
-    else:
-        all_candidates: list[Path] = []
-        for file_path in folder.rglob("*"):
-            if len(file_path.relative_to(folder).parts) > MAX_GLOB_DEPTH:
-                continue
-            if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_DOC_SUFFIXES:
-                all_candidates.append(file_path)
-        supported_files = sorted(all_candidates)
-        _folder_listing_cache[cache_key] = supported_files
+    # Build folder listing
+    all_candidates: list[Path] = []
+    for file_path in folder.rglob("*"):
+        if len(file_path.relative_to(folder).parts) > MAX_GLOB_DEPTH:
+            continue
+        if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_DOC_SUFFIXES:
+            all_candidates.append(file_path)
+    supported_files = sorted(all_candidates)
 
     if not supported_files:
         return f"No supported document files found in {folder_path}. Supported types: .pdf, .txt, .md, .docx, .pptx, .xlsx."
