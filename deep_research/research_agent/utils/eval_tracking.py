@@ -589,7 +589,7 @@ def compare_records(
     }
 
 
-def log_server_metrics(
+async def log_server_metrics(
         *,
         messages: list[Any],
         files: dict[str, Any],
@@ -597,70 +597,97 @@ def log_server_metrics(
         model_name: str,
         context: dict[str, Any] | None = None,
         history_file: str | Path = "./output/eval_history/dev_server_runs.jsonl",
-) -> dict[str, Any]:
-    """Log operational metrics for langgraph dev/server mode.
+) -> dict[str, Any] | None:
+    """Log operational metrics for langgraph dev/server mode (async, non-blocking).
     
     This function collects facts (tools called, tokens used, runtime, etc.)
     for general tracking purposes. Unlike CLI regression testing, this does NOT
     compare against baselines since user inputs vary each time.
+    
+    This async version runs in the background and catches all exceptions to avoid
+    interrupting the main chat response flow.
     
     Args:
         messages: List of conversation messages from agent state
         files: Dictionary of files from agent state
         runtime_seconds: Total execution time in seconds
         model_name: Name of the LLM model used
-        git_sha: Git commit SHA for version tracking
         context: Optional context metadata (subject, skill, doc_folder, no_web)
         history_file: Path to JSONL history file
         
     Returns:
-        Dictionary with logged metrics summary for console output
+        Dictionary with logged metrics summary for console output, or None on error
     """
-    # Build result structure similar to CLI's agent.invoke() output
-    result = {
-        "messages": messages,
-        "files": files,
-    }
+    try:
+        # Build result structure similar to CLI's agent.invoke() output
+        result = {
+            "messages": messages,
+            "files": files,
+        }
 
-    # Collect metrics (tool calls, parameters, self-correction, tokens, latency)
-    run_metrics = collect_run_metrics(
-        result=result,
-        runtime_seconds=runtime_seconds,
-        stream_fallback_used=False,
-    )
+        # Collect metrics (tool calls, parameters, self-correction, tokens, latency)
+        run_metrics = collect_run_metrics(
+            result=result,
+            runtime_seconds=runtime_seconds,
+            stream_fallback_used=False,
+        )
 
-    # Extract summary stats for console output
-    tool_calls = run_metrics.get("tool_execution", {}).get("total_tool_calls", 0)
-    success_rate = run_metrics.get("tool_execution", {}).get("success_rate", 0)
-    total_tokens = run_metrics.get("token_efficiency", {}).get("total_tokens", 0)
-    param_quality = run_metrics.get("parameter_validation", {}).get("average_quality_score", 0)
-    corrections = run_metrics.get("self_correction", {}).get("correction_events", 0)
+        # Extract summary stats for console output
+        tool_calls = run_metrics.get("tool_execution", {}).get("total_tool_calls", 0)
+        success_rate = run_metrics.get("tool_execution", {}).get("success_rate", 0)
+        total_tokens = run_metrics.get("token_efficiency", {}).get("total_tokens", 0)
+        param_quality = run_metrics.get("parameter_validation", {}).get("average_quality_score", 0)
+        corrections = run_metrics.get("self_correction", {}).get("correction_events", 0)
 
-    summary = {
-        "runtime_seconds": round(runtime_seconds, 1),
-        "tool_calls": tool_calls,
-        "success_rate": success_rate,
-        "total_tokens": total_tokens,
-        "param_quality": param_quality,
-        "corrections": corrections,
-    }
+        summary = {
+            "runtime_seconds": round(runtime_seconds, 1),
+            "tool_calls": tool_calls,
+            "success_rate": success_rate,
+            "total_tokens": total_tokens,
+            "param_quality": param_quality,
+            "corrections": corrections,
+        }
 
-    # Create simple run record with timestamp and facts
-    record = {
-        "timestamp_utc": utc_now_iso(),
-        "model_name": model_name,
-        "context": context or {},
-        "runtime_seconds": round(runtime_seconds, 2),
-        "metrics": run_metrics,
-        "summary": summary,
-    }
+        # Create simple run record with timestamp and facts
+        record = {
+            "timestamp_utc": utc_now_iso(),
+            "model_name": model_name,
+            "context": context or {},
+            "runtime_seconds": round(runtime_seconds, 2),
+            "metrics": run_metrics,
+            "summary": summary,
+        }
 
-    # Append to history file
-    history_path = Path(history_file)
-    if not history_path.parent.exists():
-        history_path.parent.mkdir(parents=True, exist_ok=True)
+        # Append to history file (use async file I/O if available, otherwise sync)
+        history_path = Path(history_file)
+        if not history_path.parent.exists():
+            history_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(history_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record) + "\n")
+        # Use asyncio.to_thread for file I/O to avoid blocking the event loop
+        await _write_metrics_to_file(history_path, record)
 
-    return summary
+        return summary
+
+    except Exception as e:
+        # Log error but never propagate - this must not interrupt main chat response
+        try:
+            from logger_utils import setup_logger
+            logger = setup_logger(__name__)
+            logger.error(f"⚠️  Metrics logging failed (non-critical): {type(e).__name__}: {e}")
+        except Exception:
+            # If logging itself fails, silently ignore to avoid any interruption
+            pass
+        return None
+
+
+async def _write_metrics_to_file(history_path: Path, record: dict) -> None:
+    """Write metrics record to file using async I/O to avoid blocking."""
+    import json
+    import asyncio
+    
+    # Run file I/O in a thread pool to avoid blocking the event loop
+    def _write_sync():
+        with open(history_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    
+    await asyncio.to_thread(_write_sync)

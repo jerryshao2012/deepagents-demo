@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 import time
@@ -278,27 +279,22 @@ class ResearchStateMiddleware(AgentMiddleware):
                     "no_web": no_web,
                 }
 
-                # Call centralized logging function
+                # Call centralized logging function asynchronously (non-blocking)
                 try:
-                    summary = log_server_metrics(
-                        messages=messages,
-                        files=files,
-                        runtime_seconds=runtime_seconds,
-                        model_name=model_name,
-                        context=context,
-                        history_file=EVAL_HISTORY_FILE,
+                    # Create background task that won't block the main response
+                    asyncio.create_task(
+                        log_server_metrics(
+                            messages=messages,
+                            files=files,
+                            runtime_seconds=runtime_seconds,
+                            model_name=model_name,
+                            context=context,
+                            history_file=EVAL_HISTORY_FILE,
+                        )
                     )
-
-                    # Log summary
-                    logger.info(
-                        f"✅ Metrics logged: {summary['runtime_seconds']}s | "
-                        f"{summary['tool_calls']} tools ({summary['success_rate']:.0%} success) | "
-                        f"{summary['total_tokens']} tokens | "
-                        f"param quality: {summary['param_quality']:.2f} | "
-                        f"{summary['corrections']} corrections"
-                    )
+                    logger.info("✅ Metrics logging started in background")
                 except Exception as e:
-                    logger.error(f"⚠️  Eval tracking error: {e}")
+                    logger.error(f"⚠️  Failed to start metrics logging: {e}")
 
         return updates if updates else None
 
