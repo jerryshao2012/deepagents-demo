@@ -935,3 +935,30 @@ langgraph dev
 - Analyze self-correction behavior
 
 **Note**: This is separate from CLI regression testing (`golden_dataset_runs.jsonl`). Dev mode tracks diverse inputs; CLI mode compares identical inputs.
+
+### Next Steps & Backlog
+
+The following advanced metrics are planned for future implementation to further enhance the evaluation system:
+
+#### 1. Orchestration & Planning Metrics
+- **Plan Quality Score**: Measures the logic, completeness, and feasibility of the initial `write_todos` output.
+- **Plan Adherence Rate**: How often the agents actually follow the generated plan versus deviating into irrelevant sub-tasks.
+- **Step Efficiency**: The ratio of the "optimal path" (minimum steps required) to the "actual path" taken.
+- **Task Decomposition Accuracy**: Specifically for `task()` tools—did the orchestrator correctly isolate context and parameters for the sub-agent?
+
+#### 2. Interaction & Coordination Metrics
+- **Handoff Success Rate**: Measures the percentage of context preserved when data moves from an Orchestrator to a Sub-agent or between specialized skills.
+- **Action Redundancy**: Frequency of duplicate tool calls (e.g., two agents calling `read_doc_folder` on the same file).
+- **Inter-Agent Consistency**: Do different agents analyzing the same source material arrive at non-contradictory "Source of Truth" cached data?
+- **Infinite Loop Detection**: Identifying recursive reasoning loops (e.g., two agents passing the same task back and forth).
+
+#### 3. "Skill" Execution Metrics (Golden Dataset Specific)
+- **Grounding Rate**: The percentage of claims in the final dataset that can be directly traced back to a source in the `read_doc_folder`.
+- **Schema Compliance**: Percentage of outputs that pass the `render_target_output` validation without formatting errors.
+- **Negative Constraint Adherence**: How well the agent avoids using `tavily_search` (or other web tools) when the instruction is to remain "local-only."
+- **Finalization Latency**: Total time from `write_todos` to `finalize_golden_dataset_output`.
+
+#### 4. Technical Efficiency & Cost
+- **Cost per Success**: Total token/compute spend divided by the number of validated, unique golden data points generated.
+- **Token Efficiency (Compression)**: The ratio of raw input tokens (PDFs/Spreadsheets) to the final structured output tokens.
+- **Time-to-First-Action (TTFA)**: How fast the system moves from the user prompt to the first logical `think_tool` or `write_todos` step.
