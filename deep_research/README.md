@@ -582,7 +582,7 @@ MODEL_RETRY_JITTER=true
 ### Tuning Recommendations
 
 #### For Strict Rate Limits (e.g., free tier APIs)
-```bash
+```properties
 MODEL_MAX_RETRIES=10
 MODEL_INITIAL_BACKOFF=2.0
 MODEL_MAX_BACKOFF=120.0
@@ -590,7 +590,7 @@ MODEL_BACKOFF_MULTIPLIER=2.0
 ```
 
 #### For Lenient Rate Limits (e.g., paid tiers)
-```bash
+```properties
 MODEL_MAX_RETRIES=3
 MODEL_INITIAL_BACKOFF=0.5
 MODEL_MAX_BACKOFF=30.0
@@ -598,7 +598,7 @@ MODEL_BACKOFF_MULTIPLIER=1.5
 ```
 
 #### For Local Models (Ollama)
-```bash
+```properties
 MODEL_MAX_RETRIES=2
 MODEL_INITIAL_BACKOFF=0.5
 MODEL_MAX_BACKOFF=10.0
