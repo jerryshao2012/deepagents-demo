@@ -112,8 +112,6 @@ def _extract_usage_metadata(message: Any) -> dict[str, Any]:
     - response_metadata.usage (some providers)
     - Direct attributes on message objects
     """
-    usage = {}
-
     if isinstance(message, dict):
         # Check usage_metadata first (LangChain standard)
         usage = message.get("usage_metadata")
@@ -184,7 +182,6 @@ def _analyze_tool_call_parameters(tool_call: dict[str, Any]) -> dict[str, Any]:
 
     # Check for common required parameter patterns
     tool_name = tool_call.get("name", "").lower()
-    has_required = False
 
     # Heuristic checks based on tool type
     if "read" in tool_name or "write" in tool_name or "file" in tool_name:
@@ -237,7 +234,6 @@ def _detect_self_correction(messages: list[Any], current_index: int, tool_name: 
 
     # Look back at previous messages to find the tool call
     previous_tool_response = None
-    previous_tool_call = None
 
     for i in range(current_index - 1, -1, -1):
         msg = messages[i]
@@ -843,6 +839,7 @@ async def log_server_metrics(
             "runtime_seconds": round(runtime_seconds, 3),
             "metrics": run_metrics,
             "summary": summary,
+            "files": list(files.keys()) if files else [],
         }
 
         # Append to history file (use async file I/O if available, otherwise sync)

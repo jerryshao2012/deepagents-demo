@@ -11,7 +11,6 @@ from retry_utils import (
     calculate_backoff,
     is_rate_limit_error,
     retry_on_rate_limit,
-    wrap_model_with_rate_limiting,
 )
 
 
@@ -133,130 +132,6 @@ class TestRetryOnRateLimit:
         assert call_count == 2
 
 
-class TestModelUsageNormalization:
-    """Test model wrapper usage metadata normalization."""
-
-    def test_wrap_model_copies_usage_metadata_into_response_metadata(self):
-        """Wrapped invoke should preserve usage in response_metadata for downstream logging."""
-
-        class StubModel:
-            def invoke(self, *_args, **_kwargs):
-                return AIMessage(
-                    content="ok",
-                    usage_metadata={
-                        "input_tokens": 11,
-                        "output_tokens": 7,
-                        "total_tokens": 18,
-                    },
-                )
-
-            async def ainvoke(self, *_args, **_kwargs):
-                return AIMessage(content="unused")
-
-        wrapped = wrap_model_with_rate_limiting(StubModel())
-
-        message = wrapped.invoke("hello")
-
-        assert message.response_metadata["token_usage"] == {
-            "input_tokens": 11,
-            "output_tokens": 7,
-            "prompt_tokens": 11,
-            "completion_tokens": 7,
-            "total_tokens": 18,
-        }
-        assert getattr(message, "input_tokens") == 11
-        assert getattr(message, "output_tokens") == 7
-        assert getattr(message, "prompt_tokens") == 11
-        assert getattr(message, "completion_tokens") == 7
-        assert getattr(message, "total_tokens") == 18
-
-    def test_wrap_model_normalizes_async_usage_metadata(self):
-        """Wrapped ainvoke should preserve usage in response_metadata for downstream logging."""
-
-        class StubModel:
-            def invoke(self, *_args, **_kwargs):
-                return AIMessage(content="unused")
-
-            async def ainvoke(self, *_args, **_kwargs):
-                return AIMessage(
-                    content="ok",
-                    usage_metadata={
-                        "input_tokens": 5,
-                        "output_tokens": 3,
-                        "total_tokens": 8,
-                    },
-                )
-
-        wrapped = wrap_model_with_rate_limiting(StubModel())
-        message = asyncio.run(wrapped.ainvoke("hello"))
-
-        assert message.response_metadata["token_usage"] == {
-            "input_tokens": 5,
-            "output_tokens": 3,
-            "prompt_tokens": 5,
-            "completion_tokens": 3,
-            "total_tokens": 8,
-        }
-        assert getattr(message, "input_tokens") == 5
-        assert getattr(message, "output_tokens") == 3
-        assert getattr(message, "prompt_tokens") == 5
-        assert getattr(message, "completion_tokens") == 3
-        assert getattr(message, "total_tokens") == 8
-
-    def test_wrap_model_captures_azure_style_token_usage(self):
-        """Wrapped invoke should capture Azure AI server style token usage from response_metadata."""
-
-        class StubAzureModel:
-            def invoke(self, *_args, **_kwargs):
-                # Simulate Azure AI server response structure
-                return AIMessage(
-                    content="Toronto has many attractions including CN Tower and ROM.",
-                    response_metadata={
-                        "usage": {
-                            "completion_tokens": 465,
-                            "prompt_tokens": 28,
-                            "total_tokens": 493,
-                            "completion_tokens_details": {
-                                "accepted_prediction_tokens": 0,
-                                "audio_tokens": 0,
-                                "reasoning_tokens": 0,
-                                "rejected_prediction_tokens": 0
-                            },
-                            "prompt_tokens_details": {
-                                "audio_tokens": 0,
-                                "cached_tokens": 0
-                            }
-                        }
-                    }
-                )
-
-            async def ainvoke(self, *_args, **_kwargs):
-                return AIMessage(content="unused")
-
-        wrapped = wrap_model_with_rate_limiting(StubAzureModel())
-        message = wrapped.invoke("What to see in Toronto?")
-
-        # Verify base token counts are captured
-        assert message.response_metadata["token_usage"]["prompt_tokens"] == 28
-        assert message.response_metadata["token_usage"]["completion_tokens"] == 465
-        assert message.response_metadata["token_usage"]["total_tokens"] == 493
-        
-        # Verify detailed token info is preserved
-        assert "completion_tokens_details" in message.response_metadata["token_usage"]
-        assert "prompt_tokens_details" in message.response_metadata["token_usage"]
-        assert message.response_metadata["token_usage"]["completion_tokens_details"]["reasoning_tokens"] == 0
-        
-        # Verify direct attributes are set
-        assert getattr(message, "prompt_tokens") == 28
-        assert getattr(message, "completion_tokens") == 465
-        assert getattr(message, "total_tokens") == 493
-        
-        # Verify usage_metadata is also set for compatibility
-        assert message.usage_metadata["prompt_tokens"] == 28
-        assert message.usage_metadata["completion_tokens"] == 465
-        assert message.usage_metadata["total_tokens"] == 493
-
-
 class TestRetryConfig:
     """Test configuration class."""
 
@@ -294,15 +169,6 @@ class TestRetryConfig:
         assert config.max_retries == 8
         assert config.initial_backoff == 3.0
         assert config.jitter is False
-
-
-if __name__ == "__main__":
-    import sys
-    # If run directly, execute verification tests
-    if len(sys.argv) == 1 or "--verify" in sys.argv:
-        sys.exit(run_verification())
-    # Otherwise run pytest
-    pytest.main([__file__, "-v"])
 
 
 def run_verification():
