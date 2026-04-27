@@ -874,7 +874,7 @@ Tests verify:
 - Non-comparable manifest mismatches.
 - JSONL append and reload integrity.
 
-### Using with `langgraph dev` Server
+### Server Operational Metrics Tracking
 
 The evaluation tracking system also works with LangGraph Studio's development server for **operational metrics collection**. Unlike CLI regression testing (which compares same-input baselines), dev mode tracks facts across different inputs:
 
