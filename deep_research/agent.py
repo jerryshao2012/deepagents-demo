@@ -255,10 +255,10 @@ class ResearchStateMiddleware(AgentMiddleware):
 
                 # Extract data from state
                 messages = state.get("messages", [])
-                doc_folder = state.get("doc_folder") or os.environ.get("DOC_FOLDER", "unknown")
-                skill = state.get("skill", "unknown")
+                doc_folder = state.get("doc_folder") or os.environ.get("DOC_FOLDER", "N/A")
+                skill = state.get("skill", "research")
                 no_web = state.get("no_web", False)
-                model_name = os.environ.get("MODEL_NAME", "unknown")
+                model_name = os.environ.get("MODEL_NAME", os.environ.get("AZURE_OPENAI_DEPLOYMENT", "N/A"))
 
                 # Get user message as subject (for reference only, not for comparison)
                 user_message = None
