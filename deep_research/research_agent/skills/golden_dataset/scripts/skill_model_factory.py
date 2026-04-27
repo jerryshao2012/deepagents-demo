@@ -64,6 +64,7 @@ def get_configured_model():
             api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
             api_key=SecretStr(os.getenv("AZURE_OPENAI_API_KEY", "")),
             http_client=httpx.Client(verify=verify_ssl),
+            stream_usage=True,
         )
         return wrap_model_with_rate_limiting(model)
 
