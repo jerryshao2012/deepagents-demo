@@ -657,13 +657,15 @@ pytest tests/test_retry_utils.py -v
 
 ---
 
-## 📊 Golden Dataset Evaluation & Regression Tracking
+## Multi-Agent Complex Workflows Evaluation & Regression Tracking
 
-### Overview
+### 📊 Golden Dataset Evaluation & Regression Tracking
+
+#### Overview
 
 The golden-dataset skill now includes comprehensive evaluation tracking to monitor quality, efficiency, and regressions across model updates in **multi-agent complex workflows**. Each run is logged as a JSONL record with rich metrics, enabling comparison between baseline and candidate implementations. This system tracks orchestrator agents, sub-agents, tool execution patterns, parameter validation, and self-correction behaviors across the entire multi-agent workflow.
 
-### Key Metrics Tracked
+#### Key Metrics Tracked
 
 | Category | Metric | Description |
 |----------|--------|-------------|
@@ -707,7 +709,7 @@ The golden-dataset skill now includes comprehensive evaluation tracking to monit
 - **Success tracking**: Monitors if retry/alternative led to successful execution
 - **Recovery rate**: Measures how often the agent recovers from its own mistakes
 
-### Run Record Structure
+#### Run Record Structure
 
 Each JSONL entry contains:
 ```json
@@ -732,7 +734,7 @@ Each JSONL entry contains:
 }
 ```
 
-### Manifest & Comparison Logic
+#### Manifest & Comparison Logic
 
 **Manifest Hash**: Canonical SHA256 hash of the test case (subject, skill, doc_folder, model, etc.). Used for **same-input comparisons only**.
 
@@ -741,9 +743,9 @@ Each JSONL entry contains:
 - Only runs with identical manifests are compared.
 - Prevents false regressions when comparing different test cases.
 
-### Usage: Create Baseline & Evaluate Candidate
+#### Usage: Create Baseline & Evaluate Candidate
 
-#### Step 1: Record a Baseline
+##### Step 1: Record a Baseline
 ```bash
 uv run python research_agent_cli.py \
   "Generate 5 question-answer pairs for the documents provided" \
@@ -755,7 +757,7 @@ uv run python research_agent_cli.py \
 
 Output: JSONL entry appended to `./output/eval_history/golden_dataset_runs.jsonl`
 
-#### Step 2: Run a Candidate (Same Input)
+##### Step 2: Run a Candidate (Same Input)
 ```bash
 uv run python research_agent_cli.py \
   "Generate 5 question-answer pairs for the documents provided" \
@@ -783,7 +785,7 @@ uv run python research_agent_cli.py \
 - **Parameter Validation**: Average quality score changes (>10% difference = better/worse)
 - **Self-Correction**: Correction rate improvements/regressions
 
-#### Step 3: Custom History File
+##### Step 3: Custom History File
 ```bash
 uv run python research_agent_cli.py \
   "Generate 5 question-answer pairs for the documents provided" \
@@ -793,7 +795,7 @@ uv run python research_agent_cli.py \
   --eval-history-file ./output/my_eval_runs.jsonl
 ```
 
-### Regression Thresholds (Built-In)
+#### Regression Thresholds (Built-In)
 
 | Metric | Threshold | Condition |
 |--------|-----------|-----------|
@@ -803,7 +805,7 @@ uv run python research_agent_cli.py \
 | **Parameter Quality** | 10% | Candidate avg_quality_score < baseline * 0.90 → **worse**; > baseline * 1.10 → **better** |
 | **Self-Correction Rate** | N/A | Any improvement → **better**; any decrease → **worse** |
 
-### Programmatic Access
+#### Programmatic Access
 
 ```python
 from research_agent.utils.eval_tracking import (
@@ -857,7 +859,7 @@ print(f"Overall verdict: {comparison['overall_verdict']}")
 print(f"Per-metric: {comparison['per_metric']}")
 ```
 
-### Testing
+#### Testing
 
 Run the evaluation tracking tests:
 ```bash
