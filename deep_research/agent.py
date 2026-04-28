@@ -6,7 +6,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import yaml
 from deepagents import create_deep_agent, SubAgent
 from deepagents.backends.utils import create_file_data
 from dotenv import load_dotenv
@@ -64,73 +63,6 @@ current_date = datetime.now().strftime("%Y-%m-%d")
 
 # Initialize dynamic skill registry (use singleton to avoid duplicate initialization)
 skill_registry = get_skill_registry()
-
-
-def load_skill_keywords(skills_dir: str | None = None) -> dict[str, list[str]]:
-    """Load skill keywords from SKILL.md frontmatter.
-    
-    Scans all SKILL.md files in the skills directory and extracts keywords
-    from the YAML frontmatter. This externalizes keyword configuration from
-    code to skill definition files.
-    
-    Args:
-        skills_dir: Path to skills directory. Defaults to research_agent/skills/
-        
-    Returns:
-        Dictionary mapping skill names to their keyword lists
-    """
-    if skills_dir is None:
-        # Default to the skills directory relative to this file
-        skills_path = Path(__file__).parent / "research_agent" / "skills"
-    else:
-        skills_path = Path(skills_dir)
-
-    if not skills_path.exists():
-        logger.error(f"Warning: Skills directory not found: {skills_path}")
-        return {}
-
-    skill_keywords = {}
-
-    # Scan all subdirectories for SKILL.md files
-    for skill_dir in skills_path.iterdir():
-        if not skill_dir.is_dir():
-            continue
-
-        skill_file = skill_dir / "SKILL.md"
-        if not skill_file.exists():
-            continue
-
-        try:
-            content = skill_file.read_text(encoding="utf-8")
-
-            # Extract YAML frontmatter (between --- markers)
-            if not content.startswith("---"):
-                continue
-
-            # Find the end of frontmatter
-            end_marker = content.find("\n---", 3)
-            if end_marker == -1:
-                continue
-
-            frontmatter_text = content[3:end_marker]
-            frontmatter = yaml.safe_load(frontmatter_text)
-
-            # Extract skill name and keywords
-            skill_name = frontmatter.get("name")
-            keywords = frontmatter.get("keywords", [])
-
-            if skill_name and keywords:
-                skill_keywords[skill_name] = keywords
-
-        except Exception as e:
-            logger.error(f"Warning: Failed to load keywords from {skill_file}: {e}")
-            continue
-
-    return skill_keywords
-
-
-# Load skill keywords from SKILL.md files
-SKILL_KEYWORDS = load_skill_keywords()
 
 
 class ResearchState(AgentState):
@@ -527,4 +459,6 @@ agent = create_deep_agent(
     system_prompt=INSTRUCTIONS,
     subagents=[research_sub_agent],
     middleware=[ResearchStateMiddleware()],
-).with_config(RunnableConfig(recursion_limit=RECURSION_LIMIT))
+).with_config(
+    RunnableConfig(recursion_limit=RECURSION_LIMIT)
+)
