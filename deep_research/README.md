@@ -659,6 +659,41 @@ pytest tests/test_retry_utils.py -v
 
 ## Multi-Agent Complex Workflows Evaluation & Regression Tracking
 
+📄 Paper Reference: A Trace-Based Assurance Framework for Agentic AI Orchestration
+
+**Paper**: [A Trace-Based Assurance Framework for Agentic AI Orchestration: Contracts, Testing, and Governance](https://arxiv.org/abs/2603.18096)  
+**Authors**: Ciprian Paduraru, Petru-Liviu Bouruc, Alin Stefanescu  
+**Submitted**: March 18, 2026  
+**Subjects**: Multiagent Systems (cs.MA), Artificial Intelligence (cs.AI)
+
+This paper presents a comprehensive assurance framework for Agentic AI systems where Large Language Models (LLMs) orchestrate multiple agents and interact with external services, retrieval components, and shared memory. The framework addresses failures beyond incorrect outputs, including:
+
+- **Long-horizon interaction failures**: Non-termination, role drift across extended workflows
+- **Stochastic decision propagation**: Unsupported claims spreading through agent interactions
+- **External side effects**: API calls, database writes, and message sends causing unintended consequences
+- **Security vulnerabilities**: Attacks via untrusted context or external channels
+
+**Key Components**
+
+1. **Message-Action Traces (MAT)**: Executions are instrumented as traces with explicit step and trace contracts that provide:
+   - Machine-checkable verdicts on execution correctness
+   - Localization of the first violating step for debugging
+   - Deterministic replay capabilities for testing and reproduction
+
+2. **Stress Testing Framework**: Formulated as budgeted counterexample search over bounded perturbations to identify failure modes systematically.
+
+3. **Structured Fault Injection**: Tests system resilience by injecting faults at service, retrieval, and memory boundaries to assess containment under realistic operational faults and degraded conditions.
+
+4. **Runtime Governance**: Enforces per-agent capability limits and action mediation (allow, rewrite, block) at the language-to-action boundary as a runtime component.
+
+5. **Trace-Based Metrics**: Defines standardized metrics for comparative evaluations across stochastic seeds, models, and orchestration configurations:
+   - Task success rates
+   - Termination reliability
+   - Contract compliance
+   - Factuality indicators
+   - Containment rate
+   - Governance outcome distributions
+
 ### 📊 Golden Dataset Evaluation & Regression Tracking
 
 #### Overview
