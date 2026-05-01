@@ -93,7 +93,7 @@ docker --version
 
 ```bash
 # Login to Azure
-$env:AZURE_CLI_DISABLE_CONNECTION_VERIFICATION=1
+$env:REQUESTS_CA_BUNDLE="C:\path\to\your\cert.pem"
 az login
 
 # Set your subscription
