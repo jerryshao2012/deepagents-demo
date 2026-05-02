@@ -119,10 +119,11 @@ cd deepagents-demo/deep_research
 
 # 1. Build and push Docker image
 export ACR_NAME="acrdeepagents"
-az acr create --resource-group $RESOURCE_GROUP --name $ACR_NAME --sku Basic
+az acr create --resource-group $RESOURCE_GROUP --name $ACR_NAME --sku Basic --admin-enabled true
+az acr login -n $ACR_NAME --expose-token
 az acr login --name $ACR_NAME
 
-docker build -t $ACR_NAME.azurecr.io/deep-research-agent:latest .
+docker build --platform linux/amd64 -t $ACR_NAME.azurecr.io/deep-research-agent:latest .
 docker push $ACR_NAME.azurecr.io/deep-research-agent:latest
 
 # 2. Create Container Apps environment
@@ -134,11 +135,17 @@ az containerapp env create \
 
 # 3. Deploy agent
 export AGENT_NAME="deep-research-agent"
+export ACR_USERNAME=$(az acr credential show --name $ACR_NAME --query username -o tsv)
+export ACR_PASSWORD=$(az acr credential show --name $ACR_NAME --query 'passwords[0].value' -o tsv)
+
 az containerapp create \
   --name $AGENT_NAME \
   --resource-group $RESOURCE_GROUP \
   --environment $ENV_NAME \
   --image $ACR_NAME.azurecr.io/deep-research-agent:latest \
+  --registry-server $ACR_NAME.azurecr.io \
+  --registry-username $ACR_USERNAME \
+  --registry-password $ACR_PASSWORD \
   --target-port 2024 \
   --ingress internal \
   --min-replicas 1 \
@@ -232,7 +239,7 @@ az acr login --name $ACR_NAME
 
 # Build image (from deep_research directory)
 cd deepagents-demo/deep_research
-docker build -t $ACR_NAME.azurecr.io/deep-research-agent:latest .
+docker build --platform linux/amd64 -t $ACR_NAME.azurecr.io/deep-research-agent:latest .
 
 # Push image
 docker push $ACR_NAME.azurecr.io/deep-research-agent:latest
@@ -275,6 +282,11 @@ az containerapp env telemetry application-insights set \
     --app ai-deep-agents \
     --resource-group $RESOURCE_GROUP \
     --query instrumentationKey -o tsv)
+    
+# az containerapp update \
+#  --name "$APP_NAME" \
+#  --resource-group "$RESOURCE_GROUP" \
+#  --set properties.template.metadata.annotations.'containerapps.azure.com/monitoring'='{"application-insights": {"connection-string": "'$(az monitor app-insights component show --app ai-deep-agents --resource-group "$RESOURCE_GROUP" --query connectionString -o tsv)'"}}'
 ```
 
 ### Step 3: Configure Secrets in Azure Key Vault
@@ -316,6 +328,9 @@ az containerapp create \
   --resource-group $RESOURCE_GROUP \
   --environment $ENV_NAME \
   --image $ACR_NAME.azurecr.io/deep-research-agent:latest \
+  --registry-server $ACR_NAME.azurecr.io \
+  --registry-username $ACR_USERNAME \
+  --registry-password $ACR_PASSWORD \
   --target-port 2024 \
   --ingress internal \
   --transport auto \
@@ -345,20 +360,20 @@ az containerapp create \
     MODEL_MAX_BACKOFF=60.0 \
     MODEL_BACKOFF_MULTIPLIER=2.0 \
     MODEL_RETRY_JITTER=true \
+    UPLOAD_API_KEY=secretref:upload-api-key \
+    TAVILY_API_KEY=secretref:tavily-api-key \
+    LANGCHAIN_API_KEY=secretref:langchain-api-key \
+    AZURE_OPENAI_ENDPOINT=secretref:azure-openai-endpoint \
+    AZURE_OPENAI_DEPLOYMENT=secretref:azure-openai-deployment \
+    AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key \
+  --system-assigned \
   --secrets \
-    anthropic-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/ANTHROPIC-API-KEY \
-    tavily-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/TAVILY-API-KEY \
-    langchain-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/LANGCHAIN-API-KEY \
-    azure-openai-endpoint=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/AZURE-OPENAI-ENDPOINT \
-    azure-openai-deployment=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/AZURE-OPENAI-DEPLOYMENT \
-    azure-openai-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/AZURE-OPENAI-API-KEY \
-  --secret-env-vars \
-    ANTHROPIC_API_KEY=anthropic-api-key \
-    TAVILY_API_KEY=tavily-api-key \
-    LANGCHAIN_API_KEY=langchain-api-key \
-    AZURE_OPENAI_ENDPOINT=azure-openai-endpoint \
-    AZURE_OPENAI_DEPLOYMENT=azure-openai-deployment \
-    AZURE_OPENAI_API_KEY=azure-openai-api-key
+    upload-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/UPLOAD-API-KEY,identityref:system \
+    tavily-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/TAVILY-API-KEY,identityref:system \
+    langchain-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/LANGCHAIN-API-KEY,identityref:system \
+    azure-openai-endpoint=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/AZURE-OPENAI-ENDPOINT,identityref:system \
+    azure-openai-deployment=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/AZURE-OPENAI-DEPLOYMENT,identityref:system \
+    azure-openai-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/AZURE-OPENAI-API-KEY,identityref:system
 ```
 
 **Important Notes:**
@@ -424,6 +439,7 @@ az containerapp create \
   --resource-group $RESOURCE_GROUP \
   --environment $ENV_NAME \
   --image $UI_IMAGE \
+  --registry-server $ACR_NAME.azurecr.io \
   --target-port 3000 \
   --ingress external \
   --transport http \
@@ -1145,6 +1161,43 @@ az containerapp update \
     langchain-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/LANGCHAIN-API-KEY
 ```
 
+#### 7. Key Vault 403 Forbidden Error
+
+```bash
+# Error: Failed to sync secret 'upload-api-key' from Azure Key Vault... returned error status: 403.
+```
+
+**Root Cause**: The system-assigned managed identity used by the Container App does not have the required access policies or RBAC role assignments on the Key Vault. If you created the container app with secrets in a single step, the identity was created simultaneously and hasn't been granted access yet.
+
+**Solution**:
+```bash
+# 1. Get the principal ID of the Container App's system-assigned identity
+PRINCIPAL_ID=$(az containerapp identity show \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --query principalId -o tsv)
+
+# 2. Grant the identity access to the Key Vault
+# Use this if you are using Access Policies (default in the script above):
+az keyvault set-policy \
+  --name $KV_NAME \
+  --object-id $PRINCIPAL_ID \
+  --secret-permissions get list
+
+# OR, use this if your Key Vault is using Azure RBAC (--enable-rbac-authorization true):
+# az role assignment create \
+#   --assignee $PRINCIPAL_ID \
+#   --role "Key Vault Secrets User" \
+#   --scope $(az keyvault show --name $KV_NAME --query id -o tsv)
+
+# 3. Restart the container app to retry syncing secrets
+REVISION=$(az containerapp revision list --name $AGENT_NAME --resource-group $RESOURCE_GROUP --query '[0].name' -o tsv)
+az containerapp revision restart \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --revision $REVISION
+```
+
 ### Debugging Checklist
 
 ```bash
@@ -1341,7 +1394,7 @@ jobs:
     - name: Build and Push Docker Image
       working-directory: ./deep_research
       run: |
-        docker build -t ${{ env.ACR_NAME }}.azurecr.io/deep-research-agent:${{ github.sha }} .
+        docker build --platform linux/amd64 -t ${{ env.ACR_NAME }}.azurecr.io/deep-research-agent:${{ github.sha }} .
         docker push ${{ env.ACR_NAME }}.azurecr.io/deep-research-agent:${{ github.sha }}
     
     - name: Deploy to Container Apps
@@ -1387,12 +1440,12 @@ az group create --name $RESOURCE_GROUP --location $LOCATION
 
 # 2. Create ACR
 echo "🐳 Creating Container Registry..."
-az acr create --resource-group $RESOURCE_GROUP --name $ACR_NAME --sku Standard
+az acr create --resource-group $RESOURCE_GROUP --name $ACR_NAME --sku Standard --admin-enabled true
 
 # 3. Build and push image
 echo "🔨 Building Docker image..."
 cd deep_research
-docker build -t $ACR_NAME.azurecr.io/deep-research-agent:latest .
+docker build --platform linux/amd64 -t $ACR_NAME.azurecr.io/deep-research-agent:latest .
 az acr login --name $ACR_NAME
 docker push $ACR_NAME.azurecr.io/deep-research-agent:latest
 
@@ -1415,6 +1468,7 @@ az containerapp create \
   --resource-group $RESOURCE_GROUP \
   --environment $ENV_NAME \
   --image $ACR_NAME.azurecr.io/deep-research-agent:latest \
+  --registry-server $ACR_NAME.azurecr.io \
   --target-port 2024 \
   --ingress internal \
   --min-replicas 1 \
@@ -1436,7 +1490,8 @@ az containerapp list --resource-group $RESOURCE_GROUP --output table
 az containerapp revision list --name $AGENT_NAME --resource-group $RESOURCE_GROUP --output table
 
 # Restart app
-az containerapp restart --name $AGENT_NAME --resource-group $RESOURCE_GROUP
+REVISION=$(az containerapp revision list --name $AGENT_NAME --resource-group $RESOURCE_GROUP --query '[0].name' -o tsv)
+az containerapp revision restart --name $AGENT_NAME --resource-group $RESOURCE_GROUP --revision $REVISION
 
 # Delete app
 az containerapp delete --name $AGENT_NAME --resource-group $RESOURCE_GROUP --yes
@@ -1458,7 +1513,7 @@ langgraph dev  # Runs on http://localhost:2024
 
 # Production deployment
 # 1. Build Docker image (uses same langgraph.json configuration)
-docker build -t <acr>.azurecr.io/deep-research-agent:latest .
+docker build --platform linux/amd64 -t <acr>.azurecr.io/deep-research-agent:latest .
 
 # 2. Deploy to Azure Container Apps
 # The Dockerfile preserves the LANGSERVE_GRAPHS configuration

@@ -1,7 +1,12 @@
 {
-  "dependencies": ["."],
+  "dependencies": [
+    "."
+  ],
   "graphs": {
     "research": "./agent.py:agent"
   },
-  "env": ".env"
+  "env": ".env",
+  "http": {
+    "app": "./webapp.py:app"
+  }
 }

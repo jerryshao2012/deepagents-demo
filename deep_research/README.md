@@ -320,6 +320,215 @@ Generate 20 pairs of questions and answers using the `golden-dataset` skill for 
 Give me an overview of AI Evaluation through Harness Engineering
 ```
 
+### Option 3: Document Upload API
+
+The project includes a FastAPI-based document upload service that allows you to programmatically upload documents to the research agent's docs folder via HTTP API.
+
+#### Starting the Upload API Server
+
+Set your API key and start the server:
+
+```bash
+# Set environment variables (or add to .env file)
+export UPLOAD_API_KEY=your_secure_api_key_here
+export UPLOAD_HOST=0.0.0.0  # Listen on all interfaces for public access
+export UPLOAD_PORT=8000
+
+# Start the server
+uv run python webapp.py
+```
+
+Or use uvicorn directly:
+
+```bash
+uv run uvicorn webapp:app --host 0.0.0.0 --port 8000
+```
+
+#### API Endpoints
+
+**1. Upload Documents** (`POST /documents/upload`)
+
+Upload one or more files to a specified folder within the `docs` directory.
+
+**Headers:**
+- `X-API-Key`: Your API key for authentication
+
+**Form Data:**
+- `folder`: Target folder path relative to `docs/` (default: `policy`)
+- `files`: One or more files to upload
+
+**Example with curl:**
+
+```bash
+curl -X POST http://localhost:8000/documents/upload \
+  -H 'X-API-Key: your_secure_api_key_here' \
+  -F 'folder=policy' \
+  -F 'files=@document1.pdf' \
+  -F 'files=@document2.pdf'
+```
+
+**Example with Python requests:**
+
+```python
+import requests
+
+api_key = "your_secure_api_key_here"
+url = "http://localhost:8000/documents/upload"
+
+files = [
+    ('files', ('document1.pdf', open('document1.pdf', 'rb'), 'application/pdf')),
+    ('files', ('document2.pdf', open('document2.pdf', 'rb'), 'application/pdf')),
+]
+data = {'folder': 'policy'}
+headers = {'X-API-Key': api_key}
+
+response = requests.post(url, files=files, data=data, headers=headers)
+print(response.json())
+```
+
+**Response:**
+
+```json
+{
+  "folder": "policy",
+  "count": 2,
+  "saved": [
+    {
+      "filename": "document1.pdf",
+      "path": "docs/policy/document1.pdf",
+      "size": 642000
+    },
+    {
+      "filename": "document2.pdf",
+      "path": "docs/policy/document2.pdf",
+      "size": 523000
+    }
+  ],
+  "total_uploaded_bytes": 1165000,
+  "free_space_bytes": 98765432100,
+  "free_space_human": "92.00 GB"
+}
+```
+
+**3. List Files** (`GET /documents/list`)
+
+List all files in a folder with their names and sizes.
+
+```bash
+curl -H 'X-API-Key: your_secure_api_key_here' \
+  'http://localhost:8000/documents/list?folder=policy'
+```
+
+**Response:**
+
+```json
+{
+  "folder": "policy",
+  "count": 2,
+  "files": [
+    {
+      "name": "document1.pdf",
+      "size": 642000
+    },
+    {
+      "name": "document2.pdf",
+      "size": 523000
+    }
+  ]
+}
+```
+
+**4. Download File** (`GET /documents/download/{filename}`)
+
+Download a specific file from a folder.
+
+```bash
+curl -H 'X-API-Key: your_secure_api_key_here' \
+  'http://localhost:8000/documents/download/document1.pdf?folder=policy' \
+  -o downloaded_document.pdf
+```
+
+**5. Health Check** (`GET /health`)
+
+Check if the API is running and get basic storage info (no authentication required).
+
+```bash
+curl http://localhost:8000/health
+```
+
+**Response:**
+
+```json
+{
+  "status": "healthy",
+  "docs_root": "/path/to/deep_research/docs",
+  "free_space_bytes": 98765432100,
+  "free_space_human": "92.00 GB"
+}
+```
+
+**6. Storage Information** (`GET /storage/info`)
+
+Get detailed storage usage information (requires API key).
+
+```bash
+curl -H 'X-API-Key: your_secure_api_key_here' http://localhost:8000/storage/info
+```
+
+**Response:**
+
+```json
+{
+  "total_space_bytes": 500000000000,
+  "used_space_bytes": 401234567900,
+  "free_space_bytes": 98765432100,
+  "total_space_human": "465.66 GB",
+  "used_space_human": "373.66 GB",
+  "free_space_human": "92.00 GB",
+  "usage_percentage": 80.25
+}
+```
+
+#### Security
+
+- **API Key Authentication**: All upload and storage endpoints require a valid API key in the `X-API-Key` header
+- **Path Validation**: Folder paths are validated to prevent directory traversal attacks
+- **Filename Sanitization**: Uploaded filenames are sanitized to prevent security issues
+
+#### Configuration
+
+Add these variables to your `.env` file:
+
+```properties
+# API Key for document upload endpoint authentication
+UPLOAD_API_KEY=your_secure_api_key_here
+
+# Host and port for the document upload API server
+UPLOAD_HOST=0.0.0.0
+UPLOAD_PORT=8000
+```
+
+To generate a secure API key:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+#### Public Access
+
+To expose the API publicly:
+
+1. Set `UPLOAD_HOST=0.0.0.0` to listen on all network interfaces
+2. Configure your firewall/router to forward port 8000 (or your chosen port)
+3. Use a reverse proxy (nginx, Apache) for production deployments with SSL/TLS
+4. Consider using a strong API key and rate limiting for public deployments
+
+**⚠️ Security Warning**: When exposing publicly, ensure you:
+- Use a strong, randomly generated API key
+- Enable HTTPS/SSL in production
+- Implement rate limiting
+- Monitor access logs
+
 ## 🧩 Deep Research Agent Components
 
 What is used in the deep research agent?
