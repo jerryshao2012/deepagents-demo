@@ -422,7 +422,7 @@ az containerapp update \
     REDIS_URI_CUSTOM=""
 
 # Restart that specific revision
-az containerapp update \                                  
+az containerapp update \
   --name $AGENT_NAME \
   --resource-group $RESOURCE_GROUP \
   --set-env-vars RESTART_TRIGGER="$(date +%s)"
@@ -1497,7 +1497,7 @@ set -e
 
 # Configuration
 RESOURCE_GROUP="rg-deep-agents"
-LOCATION="eastus"
+LOCATION="canadacentral"
 ACR_NAME="acrdeepagents"
 ENV_NAME="env-deep-agents"
 AGENT_NAME="deep-research-agent"
@@ -1611,5 +1611,5 @@ docker build --platform linux/amd64 -t <acr>.azurecr.io/deep-research-agent:late
 
 ---
 
-**Last Updated**: May 1, 2026
+**Last Updated**: May 11, 2026
 **Maintainer**: AI Evals Team

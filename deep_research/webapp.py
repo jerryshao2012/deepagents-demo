@@ -12,6 +12,9 @@ load_dotenv()
 
 DOCS_ROOT = Path(__file__).resolve().parent / "docs"
 
+# API version - increment this with each new build
+API_VERSION = "1.1.0"
+
 # API Key for authentication (from environment variable)
 API_KEY = os.environ.get("UPLOAD_API_KEY", "")
 if not API_KEY:
@@ -25,7 +28,7 @@ if not API_KEY:
 app = FastAPI(
     title="Document Upload API",
     description="Upload documents to the deep research agent docs folder",
-    version="1.0.0"
+    version=API_VERSION
 )
 
 
@@ -138,6 +141,7 @@ async def health_check():
     free_space = await asyncio.to_thread(_get_free_space, DOCS_ROOT.parent)
     return {
         "status": "healthy",
+        "version": API_VERSION,
         "docs_root": str(DOCS_ROOT),
         "free_space_bytes": free_space,
         "free_space_human": _format_bytes(free_space),
@@ -294,6 +298,112 @@ async def download_document(
     )
 
 
+@app.delete("/documents/{filename}", status_code=status.HTTP_200_OK)
+async def delete_document(
+        filename: str,
+        folder: str = "policy",
+        x_api_key: str | None = Header(None),
+) -> dict:
+    """Delete a specific file from a folder.
+    
+    Requires API key authentication via X-API-Key header.
+    Returns confirmation of deletion.
+    """
+    # Validate API key
+    if not x_api_key or x_api_key != API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key. Provide X-API-Key header.",
+        )
+
+    # Validate filename
+    safe_name = _safe_filename(filename)
+
+    relative_folder = _safe_relative_folder(folder)
+    file_path = DOCS_ROOT.joinpath(*relative_folder.parts, safe_name)
+    
+    def _check_exists():
+        return file_path.exists()
+        
+    def _check_is_file():
+        return file_path.is_file()
+
+    if not (await asyncio.to_thread(_check_exists)):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File '{filename}' not found in folder '{folder}'",
+        )
+
+    if not (await asyncio.to_thread(_check_is_file)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"'{filename}' is not a file",
+        )
+
+    # Delete the file
+    def _delete_file():
+        file_path.unlink()
+        return True
+        
+    await asyncio.to_thread(_delete_file)
+
+    return {
+        "message": f"File '{filename}' deleted successfully",
+        "folder": str(relative_folder),
+        "filename": safe_name,
+    }
+
+
+@app.delete("/documents/folder/{folder}", status_code=status.HTTP_200_OK)
+async def delete_folder_contents(
+        folder: str,
+        x_api_key: str | None = Header(None),
+) -> dict:
+    """Delete all files in a specified folder.
+    
+    Requires API key authentication via X-API-Key header.
+    Returns count of deleted files.
+    """
+    # Validate API key
+    if not x_api_key or x_api_key != API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key. Provide X-API-Key header.",
+        )
+
+    relative_folder = _safe_relative_folder(folder)
+    target_dir = DOCS_ROOT.joinpath(*relative_folder.parts)
+
+    if not target_dir.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Folder '{folder}' does not exist",
+        )
+
+    if not target_dir.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"'{folder}' is not a directory",
+        )
+
+    # Delete all files in the directory (non-recursive)
+    def _delete_files():
+        deleted_count = 0
+        for item in target_dir.iterdir():
+            if item.is_file():
+                item.unlink()
+                deleted_count += 1
+        return deleted_count
+        
+    deleted_count = await asyncio.to_thread(_delete_files)
+
+    return {
+        "message": f"All files deleted from folder '{folder}'",
+        "folder": str(relative_folder),
+        "deleted_count": deleted_count,
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
 
@@ -304,6 +414,7 @@ if __name__ == "__main__":
     print(f"🚀 Starting Document Upload API on {host}:{port}")
     print(f"📁 Documents root: {DOCS_ROOT}")
     print(f"🔑 API Key authentication: {'Enabled' if API_KEY else 'Disabled'}")
+    print(f"📦 API Version: {API_VERSION}")
     print(f"\n💡 Usage example:")
     print(f"   curl -X POST http://{host}:{port}/documents/upload \\")
     print(f"     -H 'X-API-Key: {API_KEY}' \\")
