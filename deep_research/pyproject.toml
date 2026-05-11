@@ -38,6 +38,7 @@ dependencies = [
     "langgraph>=1.1.8",
     "azure-identity>=1.25.3",
     "langgraph-checkpoint-cosmosdb>=0.2.5",
+    "pathspec>=1.1.0",
 ]
 
 [tool.uv]

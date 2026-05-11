@@ -1,32 +1,28 @@
-FROM langchain/langgraph-api:3.12
+FROM python:3.12-slim
 
-# Add local package
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install a specific, stable version of uv
+RUN curl -LsSf https://astral.sh/uv/0.5.0/install.sh | env UV_UNMANAGED_INSTALL="/usr/local/bin" sh
+
+# Set up working directory
+WORKDIR /deps/deep_research
+
+# Copy the local package
 ADD . /deps/deep_research
 
-# Install dependencies
-RUN for dep in /deps/*; do \
-      echo "Installing $dep"; \
-      if [ -d "$dep" ]; then \
-        (cd "$dep" && PYTHONDONTWRITEBYTECODE=1 uv pip install \
-          --system --no-cache-dir -c /api/constraints.txt -e .); \
-      fi; \
-    done
+# Use pip directly instead of uv sync to avoid segfault
+RUN pip install --no-cache-dir -e .
 
-# Configure LangGraph graphs
-ENV LANGSERVE_GRAPHS='{"research": "/deps/deep_research/agent.py:agent"}'
+# Set the host for the dev server
+ENV HOST=0.0.0.0
+ENV PORT=2024
 
-# Ensure langgraph-api is preserved
-RUN mkdir -p /api/langgraph_api /api/langgraph_runtime /api/langgraph_license && \
-    touch /api/langgraph_api/__init__.py /api/langgraph_runtime/__init__.py \
-          /api/langgraph_license/__init__.py
-RUN PYTHONDONTWRITEBYTECODE=1 uv pip install --system --no-cache-dir \
-    --no-deps -e /api
+EXPOSE 2024
 
-# Clean up build dependencies
-RUN pip uninstall -y pip setuptools wheel && \
-    rm -rf /usr/local/lib/python*/site-packages/pip* \
-           /usr/local/lib/python*/site-packages/setuptools* \
-           /usr/local/lib/python*/site-packages/wheel* && \
-    find /usr/local/bin -name "pip*" -delete || true
-
-WORKDIR /deps/deep_research
+# Launch using langgraph dev
+CMD ["langgraph", "dev", "--host", "0.0.0.0", "--port", "2024"]

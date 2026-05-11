@@ -192,51 +192,58 @@ echo "Test: curl https://$INTERNAL_URL/research/invoke"
 The project includes a production-ready `Dockerfile` based on `langchain/langgraph-api:3.11`:
 
 ```dockerfile
-FROM langchain/langgraph-api:3.11
+FROM python:3.12-slim
 
-# Add local package
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install a specific, stable version of uv
+RUN curl -LsSf https://astral.sh/uv/0.5.0/install.sh | env UV_UNMANAGED_INSTALL="/usr/local/bin" sh
+
+# Set up working directory
+WORKDIR /deps/deep_research
+
+# Copy the local package
 ADD . /deps/deep_research
 
-# Install dependencies
-RUN for dep in /deps/*; do \
-      echo "Installing $dep"; \
-      if [ -d "$dep" ]; then \
-        (cd "$dep" && PYTHONDONTWRITEBYTECODE=1 uv pip install \
-          --system --no-cache-dir -c /api/constraints.txt -e .); \
-      fi; \
-    done
+# Use pip directly instead of uv sync to avoid segfault
+RUN pip install --no-cache-dir -e .
 
-# Configure LangGraph graphs
-ENV LANGSERVE_GRAPHS='{"research": "/deps/deep_research/agent.py:agent"}'
+# Set the host for the dev server
+ENV HOST=0.0.0.0
+ENV PORT=2024
 
-# Ensure langgraph-api is preserved
-RUN mkdir -p /api/langgraph_api /api/langgraph_runtime /api/langgraph_license && \
-    touch /api/langgraph_api/__init__.py /api/langgraph_runtime/__init__.py \
-          /api/langgraph_license/__init__.py
-RUN PYTHONDONTWRITEBYTECODE=1 uv pip install --system --no-cache-dir \
-    --no-deps -e /api
+EXPOSE 2024
 
-# Clean up build dependencies
-RUN pip uninstall -y pip setuptools wheel && \
-    rm -rf /usr/local/lib/python*/site-packages/pip* \
-           /usr/local/lib/python*/site-packages/setuptools* \
-           /usr/local/lib/python*/site-packages/wheel* && \
-    find /usr/local/bin -name "pip*" -delete || true
-
-WORKDIR /deps/deep_research
+# Launch using langgraph dev
+CMD ["langgraph", "dev", "--host", "0.0.0.0", "--port", "2024"]
 ```
 
 #### Build and Push to Azure Container Registry
 
 ```bash
 # Create Container Registry
-export ACR_NAME="acrdeepagents$(openssl rand -hex 4)"
+export ACR_NAME="acrdeepagents" # $(openssl rand -hex 4)
 az acr create \
   --resource-group $RESOURCE_GROUP \
   --name $ACR_NAME \
   --sku Standard \
   --admin-enabled true
+  
+# List all ACRs in your resource group
+az acr list \
+  --resource-group $RESOURCE_GROUP \
+  --query "[].name" -o tsv
+  
+# Or get a specific ACR by filtering
+az acr list \
+  --resource-group $RESOURCE_GROUP \
+  --query "[?contains(name, 'acrdeepagents')].name" -o tsv
 
+source ./env.sh
 # Login to ACR
 az acr login --name $ACR_NAME
 
@@ -286,30 +293,26 @@ az containerapp env telemetry application-insights set \
     --resource-group $RESOURCE_GROUP \
     --query instrumentationKey -o tsv)
     
-# az containerapp update \
-#  --name "$APP_NAME" \
-#  --resource-group "$RESOURCE_GROUP" \
-#  --set properties.template.metadata.annotations.'containerapps.azure.com/monitoring'='{"application-insights": {"connection-string": "'$(az monitor app-insights component show --app ai-deep-agents --resource-group "$RESOURCE_GROUP" --query connectionString -o tsv)'"}}'
 ```
 
 ### Step 3: Configure Secrets in Azure Key Vault
 
 ```bash
 # Create Key Vault
-export KV_NAME="kv-deep-agents-$(openssl rand -hex 3)"
+export KV_NAME="kv-deep-agents" #-$(openssl rand -hex 3)
 az keyvault create \
   --name $KV_NAME \
   --resource-group $RESOURCE_GROUP \
   --location $LOCATION \
-  --enable-rbac-authorization true
+  --enable-rbac-authorization false
 
 # Store secrets
-az keyvault secret set --vault-name $KV_NAME --name ANTHROPIC-API-KEY --value "<your-anthropic-key>"
 az keyvault secret set --vault-name $KV_NAME --name TAVILY-API-KEY --value "<your-tavily-key>"
 az keyvault secret set --vault-name $KV_NAME --name LANGCHAIN-API-KEY --value "<your-langsmith-key>"
 az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-ENDPOINT --value "<your-azure-endpoint>"
 az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-DEPLOYMENT --value "<your-deployment>"
 az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-API-KEY --value "<your-azure-key>"
+az keyvault secret set --vault-name $KV_NAME --name UPLOAD-API-KEY --value "<your-azure-key>"
 
 ```
 
@@ -356,54 +359,79 @@ az containerapp create \
     MODEL_MAX_BACKOFF=60.0 \
     MODEL_BACKOFF_MULTIPLIER=2.0 \
     MODEL_RETRY_JITTER=true \
-  --system-assigned
-
-```
-
-### Step 4b: Grant Key Vault Access and Set Secrets
-
-If you used the System-Assigned Managed Identity, you must assign the role *after* the Container App is created, and then update the app with the secrets.
-
-**Note:** The account running the following `az role assignment create` command MUST have `Microsoft.Authorization/roleAssignments/write` permissions over the Key Vault scope. This typically requires being a "Role Based Access Control Administrator" or "Owner" on the subscription or resource group.
-
-```bash
-# 1. Grant the Container App's system-assigned identity access to the Key Vault
-az role assignment create \
-  --assignee $(az containerapp identity show \
-    --name $AGENT_NAME \
-    --resource-group $RESOURCE_GROUP \
-    --query principalId -o tsv) \
-  --role "Key Vault Secrets User" \
-  --scope $(az keyvault show --name $KV_NAME --query id -o tsv)
-
-# Wait a moment for role assignment propagation
-sleep 30
-
-# 2. Update the Container App with Key Vault secrets
-az containerapp update \
-  --name $AGENT_NAME \
-  --resource-group $RESOURCE_GROUP \
-  --set-env-vars \
-    UPLOAD_API_KEY=secretref:upload-api-key \
     TAVILY_API_KEY=secretref:tavily-api-key \
     LANGCHAIN_API_KEY=secretref:langchain-api-key \
     AZURE_OPENAI_ENDPOINT=secretref:azure-openai-endpoint \
     AZURE_OPENAI_DEPLOYMENT=secretref:azure-openai-deployment \
     AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key \
-  --set-secrets \
-    upload-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/UPLOAD-API-KEY,identityref:system \
+    UPLOAD_API_KEY=secretref:upload-api-key \
+  --secrets \
     tavily-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/TAVILY-API-KEY,identityref:system \
     langchain-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/LANGCHAIN-API-KEY,identityref:system \
     azure-openai-endpoint=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/AZURE-OPENAI-ENDPOINT,identityref:system \
     azure-openai-deployment=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/AZURE-OPENAI-DEPLOYMENT,identityref:system \
-    azure-openai-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/AZURE-OPENAI-API-KEY,identityref:system
-```
+    azure-openai-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/AZURE-OPENAI-API-KEY,identityref:system \
+    upload-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/UPLOAD-API-KEY,identityref:system \
+  --system-assigned
 
-**Important Notes:**
-- `--target-port 2024`: Matches the default LangGraph dev server port
-- `--ingress internal`: Only accessible within the Container Apps environment
-- `--transport auto`: Automatically detects HTTP/1 or HTTP/2
-- Secrets are referenced from Key Vault using `keyvaultref:` syntax
+# Update secrets and environment variable references
+az containerapp update \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --set "properties.configuration.secrets=[
+    {
+      \"name\": \"tavily-api-key\",
+      \"keyVaultUrl\": \"https://$KV_NAME.vault.azure.net/secrets/TAVILY-API-KEY\",
+      \"identity\": \"system\"
+    },
+    {
+      \"name\": \"langchain-api-key\",
+      \"keyVaultUrl\": \"https://$KV_NAME.vault.azure.net/secrets/LANGCHAIN-API-KEY\",
+      \"identity\": \"system\"
+    },
+    {
+      \"name\": \"azure-openai-endpoint\",
+      \"keyVaultUrl\": \"https://$KV_NAME.vault.azure.net/secrets/AZURE-OPENAI-ENDPOINT\",
+      \"identity\": \"system\"
+    },
+    {
+      \"name\": \"azure-openai-deployment\",
+      \"keyVaultUrl\": \"https://$KV_NAME.vault.azure.net/secrets/AZURE-OPENAI-DEPLOYMENT\",
+      \"identity\": \"system\"
+    },
+    {
+      \"name\": \"azure-openai-api-key\",
+      \"keyVaultUrl\": \"https://$KV_NAME.vault.azure.net/secrets/AZURE-OPENAI-API-KEY\",
+      \"identity\": \"system\"
+    },
+    {
+      \"name\": \"upload-api-key\",
+      \"keyVaultUrl\": \"https://$KV_NAME.vault.azure.net/secrets/UPLOAD-API-KEY\",
+      \"identity\": \"system\"
+    }
+  ]"
+
+
+# Update Container App to use SQLite instead of PostgreSQL
+az containerapp update \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars \
+    DATABASE_URI="sqlite:///./langgraph.db" \
+    REDIS_URI="" \
+    REDIS_URI_CUSTOM=""
+
+# Restart that specific revision
+az containerapp update \                                  
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars RESTART_TRIGGER="$(date +%s)"
+  
+az containerapp logs show \                                                              
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --tail 50
+```
 
 ### Step 5: Verify Deployment
 
@@ -432,6 +460,26 @@ az containerapp logs show \
   --name $AGENT_NAME \
   --resource-group $RESOURCE_GROUP \
   --follow
+  
+# Update the agent to use external ingress
+az containerapp update \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --set properties.configuration.ingress.external=true \
+          properties.configuration.ingress.targetPort=2024 \
+          properties.configuration.ingress.transport="auto"
+
+# Get the external FQDN
+EXTERNAL_URL=$(az containerapp show \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --query properties.configuration.ingress.fqdn \
+  -o tsv)
+
+echo "External URL: https://$EXTERNAL_URL"
+
+# Test health endpoint
+curl -s "https://$EXTERNAL_URL/health" | head -10
 ```
 
 ---
