@@ -79,6 +79,9 @@ az --version
 docker --version
 ```
 
+[Troubleshooting Azure CLI | Microsoft Learn](https://learn.microsoft.com/en-us/cli/azure/use-azure-cli-successfully-troubleshooting?view=azure-cli-latest#work-behind-a-proxy)
+[Azure CLI Setup - Branch Technology Modernization](https://bmo.atlassian.net/wiki/spaces/PR034742/pages/595441403/Azure+CLI+setup)
+
 ### Azure Subscription Requirements
 
 - Active Azure subscription with permissions to create:
@@ -298,7 +301,7 @@ az keyvault create \
   --name $KV_NAME \
   --resource-group $RESOURCE_GROUP \
   --location $LOCATION \
-  --enable-rbac-authorization false
+  --enable-rbac-authorization true
 
 # Store secrets
 az keyvault secret set --vault-name $KV_NAME --name ANTHROPIC-API-KEY --value "<your-anthropic-key>"
@@ -308,14 +311,6 @@ az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-ENDPOINT --valu
 az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-DEPLOYMENT --value "<your-deployment>"
 az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-API-KEY --value "<your-azure-key>"
 
-# Grant Container Apps permission to read secrets
-az role assignment create \
-  --assignee $(az identity show \
-    --resource-group $RESOURCE_GROUP \
-    --name "${ENV_NAME}-identity" \
-    --query principalId -o tsv 2>/dev/null || echo "skip") \
-  --role "Key Vault Secrets User" \
-  --scope $(az keyvault show --name $KV_NAME --query id -o tsv)
 ```
 
 ### Step 4: Deploy Deep Research Agent
@@ -323,6 +318,7 @@ az role assignment create \
 ```bash
 export AGENT_NAME="deep-research-agent"
 
+# Option 1: Using System-Assigned Identity (Follow this if you used Option 1 in Step 3)
 az containerapp create \
   --name $AGENT_NAME \
   --resource-group $RESOURCE_GROUP \
@@ -360,14 +356,41 @@ az containerapp create \
     MODEL_MAX_BACKOFF=60.0 \
     MODEL_BACKOFF_MULTIPLIER=2.0 \
     MODEL_RETRY_JITTER=true \
+  --system-assigned
+
+```
+
+### Step 4b: Grant Key Vault Access and Set Secrets
+
+If you used the System-Assigned Managed Identity, you must assign the role *after* the Container App is created, and then update the app with the secrets.
+
+**Note:** The account running the following `az role assignment create` command MUST have `Microsoft.Authorization/roleAssignments/write` permissions over the Key Vault scope. This typically requires being a "Role Based Access Control Administrator" or "Owner" on the subscription or resource group.
+
+```bash
+# 1. Grant the Container App's system-assigned identity access to the Key Vault
+az role assignment create \
+  --assignee $(az containerapp identity show \
+    --name $AGENT_NAME \
+    --resource-group $RESOURCE_GROUP \
+    --query principalId -o tsv) \
+  --role "Key Vault Secrets User" \
+  --scope $(az keyvault show --name $KV_NAME --query id -o tsv)
+
+# Wait a moment for role assignment propagation
+sleep 30
+
+# 2. Update the Container App with Key Vault secrets
+az containerapp update \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars \
     UPLOAD_API_KEY=secretref:upload-api-key \
     TAVILY_API_KEY=secretref:tavily-api-key \
     LANGCHAIN_API_KEY=secretref:langchain-api-key \
     AZURE_OPENAI_ENDPOINT=secretref:azure-openai-endpoint \
     AZURE_OPENAI_DEPLOYMENT=secretref:azure-openai-deployment \
     AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key \
-  --system-assigned \
-  --secrets \
+  --set-secrets \
     upload-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/UPLOAD-API-KEY,identityref:system \
     tavily-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/TAVILY-API-KEY,identityref:system \
     langchain-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/LANGCHAIN-API-KEY,identityref:system \
