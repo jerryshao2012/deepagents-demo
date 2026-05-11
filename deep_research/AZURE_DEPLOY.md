@@ -97,7 +97,7 @@ docker --version
 ```bash
 # Login to Azure
 $env:REQUESTS_CA_BUNDLE="C:\path\to\your\cert.pem"
-az login
+az login --use-device-code
 
 # Set your subscription
 az account set --subscription 9d831a41-d092-4625-8861-89341d476f2d
