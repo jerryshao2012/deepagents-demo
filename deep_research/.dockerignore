@@ -30,9 +30,9 @@ deep_research_example.egg-info
 .ruff_cache/
 
 # Environment and secrets
-#.env
+.env
 #.env.*
-#!.env.example
+!.env.example
 secrets.sh
 
 # Deployment scripts

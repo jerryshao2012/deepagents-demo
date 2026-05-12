@@ -133,7 +133,6 @@ def get_configured_model():
             api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
             http_client=httpx.Client(verify=verify_ssl),
             stream_usage=True,
-            temperature=0.0,
             **get_openai_auth_kwargs(),
         )
         return wrap_model_with_rate_limiting(model)
