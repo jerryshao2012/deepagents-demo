@@ -14,6 +14,7 @@ WORKDIR /deps/deep_research
 
 # Copy the local package
 ADD . /deps/deep_research
+RUN mkdir docs | mkdir docs/policy | mkdir output | mkdir input
 
 # Use pip directly instead of uv sync to avoid segfault
 RUN pip install --no-cache-dir -e .
