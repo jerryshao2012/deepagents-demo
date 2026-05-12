@@ -1,0 +1,57 @@
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Package management (uv)
+.venv
+uv.lock
+
+# Testing
+.pytest_cache/
+.deepeval/
+tests/
+*.ipynb
+
+# Development tools
+.ruff_cache/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+secrets.sh
+
+# Deployment scripts
+deploy.sh
+env.sh
+
+# Documentation
+README.md
+
+# Azure deployment configs
+AZURE_DEPLOY.md
+POSTMAN_README.md
+UPLOAD_API_GUIDE.md
+
+# Postman collections
+postman_collection.json
+postman_environment.json
+
+# Resources and screenshots
+resources/
+
+# Version control
+.git/
+.gitignore
+
+# Docker
+.dockerignore
+Dockerfile

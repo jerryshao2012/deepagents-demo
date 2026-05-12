@@ -15,6 +15,3 @@ export AGENT_NAME="deep-research-agent"
 
 # Create Key Vault
 export KV_NAME="kv-deep-agents"
-
-
-

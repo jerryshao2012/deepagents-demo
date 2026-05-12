@@ -359,6 +359,7 @@ az containerapp create \
     MODEL_MAX_BACKOFF=60.0 \
     MODEL_BACKOFF_MULTIPLIER=2.0 \
     MODEL_RETRY_JITTER=true \
+    AZURE_OPENAI_API_VERSION=2025-04-01-preview \
     TAVILY_API_KEY=secretref:tavily-api-key \
     LANGCHAIN_API_KEY=secretref:langchain-api-key \
     AZURE_OPENAI_ENDPOINT=secretref:azure-openai-endpoint \
@@ -374,6 +375,12 @@ az containerapp create \
     upload-api-key=keyvaultref:https://$KV_NAME.vault.azure.net/secrets/UPLOAD-API-KEY,identityref:system \
   --system-assigned
 
+az containerapp update \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars \
+    AZURE_OPENAI_API_VERSION="2025-04-01-preview"
+    
 # Update secrets and environment variable references
 az containerapp update \
   --name $AGENT_NAME \
@@ -427,7 +434,7 @@ az containerapp update \
   --resource-group $RESOURCE_GROUP \
   --set-env-vars RESTART_TRIGGER="$(date +%s)"
   
-az containerapp logs show \                                                              
+az containerapp logs show \
   --name $AGENT_NAME \
   --resource-group $RESOURCE_GROUP \
   --tail 50
