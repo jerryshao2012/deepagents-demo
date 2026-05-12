@@ -521,6 +521,7 @@ az containerapp create \
   --env-vars \
     NEXT_PUBLIC_LANGGRAPH_URL=https://$AGENT_FQDN \
     NEXT_PUBLIC_ASSISTANT_ID=research \
+    NEXT_PUBLIC_LANGSMITH_API_KEY=<your_key> \
     NODE_ENV=production \
     PORT=3000
 

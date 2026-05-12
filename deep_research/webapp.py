@@ -13,7 +13,7 @@ load_dotenv()
 DOCS_ROOT = Path(__file__).resolve().parent / "docs"
 
 # API version - increment this with each new build
-API_VERSION = "1.1.0"
+API_VERSION = "1.2.0"
 
 # API Key for authentication (from environment variable)
 API_KEY = os.environ.get("UPLOAD_API_KEY", "")
@@ -84,7 +84,7 @@ async def upload_documents(
 
     relative_folder = _safe_relative_folder(folder)
     destination_dir = DOCS_ROOT.joinpath(*relative_folder.parts)
-    destination_dir.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(destination_dir.mkdir, parents=True, exist_ok=True)
 
     saved = []
     total_uploaded_size = 0
@@ -202,28 +202,35 @@ async def list_documents(
             detail=f"'{folder}' is not a directory",
         )
 
-    # List all files in the directory (non-recursive)
-    files = []
-    
-    def _list_files():
+    # List all files and folders in the directory (non-recursive)
+    items = []
+
+    def _list_items():
         res = []
         for item in target_dir.iterdir():
             if item.is_file():
                 res.append({
                     "name": item.name,
+                    "type": "file",
                     "size": item.stat().st_size,
                 })
+            elif item.is_dir():
+                res.append({
+                    "name": item.name,
+                    "type": "folder",
+                    "size": None,
+                })
         return res
-        
-    files = await asyncio.to_thread(_list_files)
+
+    items = await asyncio.to_thread(_list_items)
 
     # Sort by name for consistent ordering
-    files.sort(key=lambda x: x["name"])
+    items.sort(key=lambda x: x["name"])
 
     return {
         "folder": str(relative_folder),
-        "count": len(files),
-        "files": files,
+        "count": len(items),
+        "items": items,
     }
 
 
@@ -250,10 +257,10 @@ async def download_document(
 
     relative_folder = _safe_relative_folder(folder)
     file_path = DOCS_ROOT.joinpath(*relative_folder.parts, safe_name)
-    
+
     def _check_exists():
         return file_path.exists()
-        
+
     def _check_is_file():
         return file_path.is_file()
 
@@ -321,10 +328,10 @@ async def delete_document(
 
     relative_folder = _safe_relative_folder(folder)
     file_path = DOCS_ROOT.joinpath(*relative_folder.parts, safe_name)
-    
+
     def _check_exists():
         return file_path.exists()
-        
+
     def _check_is_file():
         return file_path.is_file()
 
@@ -344,7 +351,7 @@ async def delete_document(
     def _delete_file():
         file_path.unlink()
         return True
-        
+
     await asyncio.to_thread(_delete_file)
 
     return {
@@ -394,7 +401,7 @@ async def delete_folder_contents(
                 item.unlink()
                 deleted_count += 1
         return deleted_count
-        
+
     deleted_count = await asyncio.to_thread(_delete_files)
 
     return {

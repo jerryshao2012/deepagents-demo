@@ -24,7 +24,9 @@ fi
 
 # 3. Build and push image
 echo "🔨 Building Docker image..."
-cd deep_research
+# Ensure we're in the correct directory (where Dockerfile is located)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 docker build --platform linux/amd64 -t $ACR_NAME.azurecr.io/deep-research-agent:latest .
 az acr login --name $ACR_NAME
 docker push $ACR_NAME.azurecr.io/deep-research-agent:latest
@@ -60,8 +62,7 @@ if az containerapp show --name $AGENT_NAME --resource-group $RESOURCE_GROUP &> /
   az containerapp update \
     --name $AGENT_NAME \
     --resource-group $RESOURCE_GROUP \
-    --image $ACR_NAME.azurecr.io/deep-research-agent:latest \
-    --registry-server $ACR_NAME.azurecr.io
+    --image $ACR_NAME.azurecr.io/deep-research-agent:latest
   
   # Restart the container to pick up the new image
   echo "🔄 Restarting container to apply new image..."
