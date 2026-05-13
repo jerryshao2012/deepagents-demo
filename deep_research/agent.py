@@ -10,6 +10,7 @@ from deepagents import create_deep_agent, SubAgent
 from deepagents.backends.utils import create_file_data
 from dotenv import load_dotenv
 from langchain.agents import AgentState
+from deepagents.middleware.filesystem import FilesystemState
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -65,14 +66,13 @@ current_date = datetime.now().strftime("%Y-%m-%d")
 skill_registry = get_skill_registry()
 
 
-class ResearchState(AgentState):
+class ResearchState(FilesystemState):
     """Runtime state for the research agent."""
     doc_folder: str | None
     skill: str | None
     no_web: bool | None
     chat_start_time: float | None
     chat_elapsed_seconds: float | None
-    files: dict | None
     _eval_logged: bool
 
 
