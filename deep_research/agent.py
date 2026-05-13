@@ -84,12 +84,14 @@ class ResearchStateMiddleware(AgentMiddleware):
 
     @staticmethod
     def _get_current_user_message(messages: list) -> str | None:
+        """Return the content of the **last** user/human message in the list."""
+        last_user_content: str | None = None
         for m in messages:
             if isinstance(m, dict) and m.get("role") == "user":
-                return str(m.get("content", ""))
-            if hasattr(m, "type") and getattr(m, "type", None) == "human":
-                return str(getattr(m, "content", ""))
-        return None
+                last_user_content = str(m.get("content", ""))
+            elif hasattr(m, "type") and getattr(m, "type", None) == "human":
+                last_user_content = str(getattr(m, "content", ""))
+        return last_user_content
 
     @staticmethod
     def _seed_research_request_file(user_message: str | None, state: ResearchState) -> dict[str, Any]:
@@ -114,27 +116,24 @@ class ResearchStateMiddleware(AgentMiddleware):
         messages = state.get("messages", [])
         current_user_message = self._get_current_user_message(messages)
 
-        # Check if system instructions already exist
+        # Seed the research request file with the latest user message
         updates: dict[str, Any] = self._seed_research_request_file(current_user_message, state)
-        has_config = any(
-            isinstance(m, SystemMessage) and m.content and "Task configurations:" in str(m.content)
-            for m in messages
-        )
-        if has_config:
-            return updates if updates else None
 
-        # Step 1: Extract doc_folder and skill from user message if not already set
+        # Always re-extract parameters from the latest user message so that
+        # follow-up requests (e.g. "use humanizer skill") are picked up even
+        # when a Task-configurations SystemMessage already exists from a
+        # previous turn.
         extracted_updates = self._extract_parameters_from_user_input(state, messages)
         updates.update(extracted_updates)
 
-        # Step 2: Configure OUTPUT_FOLDER based on extracted doc_folder
+        # Configure OUTPUT_FOLDER based on extracted doc_folder
         if updates.get("doc_folder") or (state.get("doc_folder") and not extracted_updates):
             doc_folder = updates.get("doc_folder") or state.get("doc_folder")
             self._configure_output_folder(doc_folder)
         else:
             self._configure_output_folder(None)
 
-        # Step 3: Build instruction based on full state (including extracted parameters)
+        # Build instruction based on full state (including extracted parameters)
         merged_state: ResearchState = {**state, **updates}  # type: ignore[assignment]
         instruction = self._build_system_instruction(merged_state)
 
@@ -231,24 +230,26 @@ class ResearchStateMiddleware(AgentMiddleware):
         return updates if updates else None
 
     def _extract_parameters_from_user_input(self, state: ResearchState, messages: list) -> dict[str, Any]:
-        """Extract doc_folder, skill, and no_web from user message patterns."""
+        """Extract doc_folder, skill, and no_web from the **latest** user message.
+
+        Parameters are always re-extracted from the most recent user message so
+        that follow-up requests (e.g. switching skills mid-conversation) are
+        honoured.  If the latest message does not mention a parameter, the
+        existing state value is preserved (we simply omit it from ``updates``).
+        """
+        # Find the LAST user message (not the first) so follow-ups are picked up.
         user_message = None
         for m in messages:
             # Handle dictionary messages
             if isinstance(m, dict):
                 if m.get("role") == "user":
                     user_message = m.get("content")
-                    break
             # Handle LangChain message objects (not SystemMessage)
             elif hasattr(m, "content") and not isinstance(m, SystemMessage):
-                # Check if it's a HumanMessage or similar user message type
                 if hasattr(m, "type") and m.type == "human":
                     user_message = m.content
-                    break
-                # Fallback: if it has content and isn't a SystemMessage, treat as user message
                 elif not hasattr(m, "type"):
                     user_message = m.content
-                    break
 
         if not user_message:
             return {}
@@ -256,13 +257,15 @@ class ResearchStateMiddleware(AgentMiddleware):
         user_message = str(user_message)
         updates = {}
 
-        # Extract doc_folder if not already set
+        # Extract doc_folder — only if not already set (doc_folder rarely changes)
         if not state.get("doc_folder"):
             updates["doc_folder"] = self._extract_doc_folder(user_message)
 
-        # Extract skill if not already set
-        if not state.get("skill"):
-            updates["skill"] = self._extract_skill(user_message)
+        # Always attempt skill extraction from the latest message so users can
+        # switch skills mid-conversation (e.g. "use humanizer skill").
+        extracted_skill = self._extract_skill(user_message)
+        if extracted_skill:
+            updates["skill"] = extracted_skill
 
         # Extract no_web if not already set
         if state.get("no_web") is None:
@@ -348,8 +351,16 @@ class ResearchStateMiddleware(AgentMiddleware):
         if skill_match:
             return skill_match.group(1)
 
-        # Use skill registry to find matching skills by keyword
         message_lower = user_message.lower()
+
+        # Direct skill-id match: check if any registered skill ID appears in
+        # the user message (e.g. "use humanizer skill" contains "humanizer").
+        # Prefer longer IDs first to avoid partial matches.
+        for sid in sorted(skill_registry.skill_ids, key=len, reverse=True):
+            if sid in message_lower:
+                return sid
+
+        # Fallback: use skill registry keyword / description matching
         matches = skill_registry.find_skills_by_keyword(message_lower)
         if matches:
             # Return the first match (most relevant based on keyword priority)
