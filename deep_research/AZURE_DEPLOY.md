@@ -8,6 +8,7 @@ This guide provides step-by-step instructions for deploying the Deep Research Ag
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
 - [Detailed Deployment Steps](#detailed-deployment-steps)
+- [Persistent Storage with Azure Files](#persistent-storage-with-azure-files)
 - [Container-to-Container Communication](#container-to-container-communication)
 - [Configuration Management](#configuration-management)
 - [Monitoring & Observability](#monitoring--observability)
@@ -488,6 +489,1119 @@ echo "External URL: https://$EXTERNAL_URL"
 # Test health endpoint
 curl -s "https://$EXTERNAL_URL/health" | head -10
 ```
+
+---
+
+## Persistent Storage with Azure Files
+
+### Problem Statement
+
+By default, Azure Container Apps containers are ephemeral - any files written to the container's filesystem are lost when the container restarts or is redeployed. The Deep Research Agent needs to persist:
+
+- **`docs/`** - Document storage (policy docs, research materials)
+- **`output/`** - Generated reports, evaluation history JSONL files
+- **`input/`** - Input files for processing
+- **`.langgraph_api/`** - LangGraph checkpoint/state data (if using SQLite)
+
+### Solution: Azure Files Volume Mount
+
+Azure Files provides SMB/CIFS network file shares that can be mounted into Container Apps, providing persistent storage that survives container restarts and redeployments.
+
+### Architecture
+
+```mermaid
+graph TB
+    subgraph "Azure Container Apps"
+        ACA[Deep Research Agent Container]
+    end
+    
+    subgraph "Azure Storage Services"
+        FileShare[Azure File Share<br/>SMB/CIFS Mount]
+    end
+    
+    subgraph "Database"
+        CosmosDB[Cosmos DB<br/>Checkpoint Storage]
+    end
+    
+    ACA -->|Mount via SMB| FileShare
+    ACA -.->|State storage| CosmosDB
+    
+    FileShare -->|Persistent dirs| Docs[docs/]
+    FileShare -->|Persistent dirs| Output[output/]
+    FileShare -->|Persistent dirs| Input[input/]
+    
+    style FileShare fill:#e1f5ff
+    style CosmosDB fill:#fff4e1
+```
+
+### Step 1: Update Dockerfile
+
+The Dockerfile no longer needs to create runtime directories since they will be provided by the volume mount:
+
+```dockerfile
+FROM python:3.12-slim
+
+# Install system dependencies including cifs-utils for SMB support
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    git \
+    cifs-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install a specific, stable version of uv
+RUN curl -LsSf https://astral.sh/uv/0.5.0/install.sh | env UV_UNMANAGED_INSTALL="/usr/local/bin" sh
+
+# Set up working directory
+WORKDIR /deps/deep_research
+
+# Copy the local package
+ADD . /deps/deep_research
+RUN cp /deps/deep_research/.env.docker /deps/deep_research/.env
+
+# Note: Runtime directories (docs/, output/, input/) are mounted via Azure Files at runtime
+# No need to create them in the Docker image - they will be provided by the volume mount
+
+# Use pip directly instead of uv sync to avoid segfault
+RUN pip install --no-cache-dir -e .
+
+# Set the host for the dev server
+ENV HOST=0.0.0.0
+ENV PORT=2024
+
+EXPOSE 2024
+
+# Launch using langgraph dev
+CMD ["langgraph", "dev", "--host", "0.0.0.0", "--port", "2024"]
+```
+
+**Key Changes:**
+- Added `cifs-utils` package for SMB/CIFS mounting support
+- Removed `RUN mkdir docs | mkdir docs/policy | mkdir output | mkdir input` line
+- Added comment explaining runtime directory mounting
+
+### Step 2: Create Azure Storage Account and File Share
+
+```bash
+# Set variables
+export RESOURCE_GROUP="rg-deep-agents"
+export LOCATION="canadacentral"
+export STORAGE_ACCOUNT_NAME="stdeepagents$(openssl rand -hex 4)"
+export FILE_SHARE_NAME="deep-research-files"
+
+# Create Storage Account
+az storage account create \
+  --name $STORAGE_ACCOUNT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --location $LOCATION \
+  --sku Standard_LRS \
+  --kind StorageV2 \
+  --allow-blob-public-access false
+
+# Get storage account key
+export STORAGE_KEY=$(az storage account keys list \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --query '[0].value' -o tsv)
+
+# Create File Share with 100GB quota
+az storage share create \
+  --name $FILE_SHARE_NAME \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY \
+  --quota 100
+
+echo "Storage Account: $STORAGE_ACCOUNT_NAME"
+echo "File Share: $FILE_SHARE_NAME"
+```
+
+### Step 3: Create Directory Structure in File Share
+
+```bash
+# Create directory structure in Azure File Share
+az storage directory create \
+  --share-name $FILE_SHARE_NAME \
+  --name "docs" \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY
+
+az storage directory create \
+  --share-name $FILE_SHARE_NAME \
+  --name "docs/policy" \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY
+
+az storage directory create \
+  --share-name $FILE_SHARE_NAME \
+  --name "output" \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY
+
+az storage directory create \
+  --share-name $FILE_SHARE_NAME \
+  --name "output/eval_history" \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY
+
+az storage directory create \
+  --share-name $FILE_SHARE_NAME \
+  --name "input" \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY
+
+# Verify structure
+az storage directory list \
+  --share-name $FILE_SHARE_NAME \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY \
+  --output table
+```
+
+### Step 4: Store Credentials in Key Vault (Recommended)
+
+For production deployments, store storage credentials in Azure Key Vault:
+
+```bash
+export KV_NAME="kv-deep-agents"
+
+# Store storage credentials
+az keyvault secret set \
+  --vault-name $KV_NAME \
+  --name STORAGE-ACCOUNT-NAME \
+  --value $STORAGE_ACCOUNT_NAME
+
+az keyvault secret set \
+  --vault-name $KV_NAME \
+  --name STORAGE-ACCOUNT-KEY \
+  --value $STORAGE_KEY
+
+az keyvault secret set \
+  --vault-name $KV_NAME \
+  --name FILE-SHARE-NAME \
+  --value $FILE_SHARE_NAME
+```
+
+### Step 5: Deploy Container App with Volume Mount
+
+#### Option A: Direct Storage Credentials (Simpler)
+
+```bash
+export AGENT_NAME="deep-research-agent"
+export ENV_NAME="env-deep-agents"
+export ACR_NAME="acrdeepagents"
+
+ACR_USERNAME=$(az acr credential show --name $ACR_NAME --query username -o tsv)
+ACR_PASSWORD=$(az acr credential show --name $ACR_NAME --query 'passwords[0].value' -o tsv)
+
+# Deploy with volume mount
+az containerapp create \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --environment $ENV_NAME \
+  --image $ACR_NAME.azurecr.io/deep-research-agent:latest \
+  --registry-server $ACR_NAME.azurecr.io \
+  --registry-username $ACR_USERNAME \
+  --registry-password $ACR_PASSWORD \
+  --target-port 2024 \
+  --ingress internal \
+  --transport auto \
+  --min-replicas 1 \
+  --max-replicas 5 \
+  --cpu 2.0 \
+  --memory 4Gi \
+  --volume persistent-storage \
+  --storage-type AzureFile \
+  --storage-account-name $STORAGE_ACCOUNT_NAME \
+  --storage-account-key $STORAGE_KEY \
+  --share-name $FILE_SHARE_NAME \
+  --mount-path /deps/deep_research/mnt \
+  --env-vars \
+    VERIFY_SSL=false \
+    LOG_LEVEL=INFO \
+    LANGCHAIN_TRACING_V2=true \
+    LANGSMITH_ENDPOINT=https://api.smith.langchain.com \
+    LANGCHAIN_PROJECT=deep-research-production \
+    ENABLE_EVAL_TRACKING=true \
+    EVAL_HISTORY_FILE=/deps/deep_research/mnt/output/eval_history/server_runs.jsonl \
+    MODEL_TPM=120000 \
+    MODEL_RPM=500 \
+    GRAPH_RECURSION_LIMIT=200 \
+    MAX_CONCURRENT_RESEARCH_UNITS=3 \
+    MAX_RESEARCHER_ITERATIONS=3 \
+    MAX_GLOB_DEPTH=3 \
+    REPORTS_OUTPUT_FOLDER=/deps/deep_research/mnt/output \
+    MAX_FILES_TO_READ=20 \
+    MAX_TOTAL_SIZE_MB=50 \
+    DOC_FOLDER=/deps/deep_research/mnt/docs \
+    INPUT_FOLDER=/deps/deep_research/mnt/input \
+    MEMORY_TYPE=cosmosdb \
+    COSMOSDB_DB_NAME=deep-research-checkpoints \
+    COSMOSDB_CONTAINER_NAME=checkpoints
+```
+
+#### Option B: Key Vault Secret References (More Secure)
+
+```bash
+# Deploy with secret references
+az containerapp create \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --environment $ENV_NAME \
+  --image $ACR_NAME.azurecr.io/deep-research-agent:latest \
+  --registry-server $ACR_NAME.azurecr.io \
+  --registry-username $ACR_USERNAME \
+  --registry-password $ACR_PASSWORD \
+  --target-port 2024 \
+  --ingress internal \
+  --transport auto \
+  --min-replicas 1 \
+  --max-replicas 5 \
+  --cpu 2.0 \
+  --memory 4Gi \
+  --set "properties.template.volumes=[{
+    \"name\": \"persistent-storage\",
+    \"storageType\": \"AzureFile\",
+    \"storageName\": \"azure-file-storage\",
+    \"mountPath\": \"/deps/deep_research/mnt\"
+  }]" \
+  --set "properties.configuration.secrets=[
+    {
+      \"name\": \"storage-account-name\",
+      \"keyVaultUrl\": \"https://$KV_NAME.vault.azure.net/secrets/STORAGE-ACCOUNT-NAME\",
+      \"identity\": \"system\"
+    },
+    {
+      \"name\": \"storage-account-key\",
+      \"keyVaultUrl\": \"https://$KV_NAME.vault.azure.net/secrets/STORAGE-ACCOUNT-KEY\",
+      \"identity\": \"system\"
+    },
+    {
+      \"name\": \"file-share-name\",
+      \"keyVaultUrl\": \"https://$KV_NAME.vault.azure.net/secrets/FILE-SHARE-NAME\",
+      \"identity\": \"system\"
+    }
+  ]" \
+  --set "properties.template.storages=[{
+    \"name\": \"azure-file-storage\",
+    \"azureFile\": {
+      \"accountName\": \"secretref:storage-account-name\",
+      \"accountKey\": \"secretref:storage-account-key\",
+      \"shareName\": \"secretref:file-share-name\"
+    }
+  }]" \
+  --env-vars \
+    REPORTS_OUTPUT_FOLDER=/deps/deep_research/mnt/output \
+    EVAL_HISTORY_FILE=/deps/deep_research/mnt/output/eval_history/server_runs.jsonl \
+    DOC_FOLDER=/deps/deep_research/mnt/docs \
+    INPUT_FOLDER=/deps/deep_research/mnt/input \
+    MEMORY_TYPE=cosmosdb \
+    COSMOSDB_DB_NAME=deep-research-checkpoints \
+    COSMOSDB_CONTAINER_NAME=checkpoints \
+  --system-assigned
+```
+
+### Step 6: Update Existing Deployment
+
+If you already have a deployed Container App, update it to add persistent storage:
+
+```bash
+# Add volume mount
+az containerapp update \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --volume persistent-storage \
+  --storage-type AzureFile \
+  --storage-account-name $STORAGE_ACCOUNT_NAME \
+  --storage-account-key $STORAGE_KEY \
+  --share-name $FILE_SHARE_NAME \
+  --mount-path /deps/deep_research/mnt
+
+# Update environment variables to use mounted paths
+az containerapp update \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars \
+    REPORTS_OUTPUT_FOLDER=/deps/deep_research/mnt/output \
+    EVAL_HISTORY_FILE=/deps/deep_research/mnt/output/eval_history/server_runs.jsonl \
+    DOC_FOLDER=/deps/deep_research/mnt/docs \
+    INPUT_FOLDER=/deps/deep_research/mnt/input \
+    RESTART_TRIGGER="$(date +%s)"
+```
+
+### Step 7: Verify Persistent Storage
+
+```bash
+# Exec into container to verify mounts
+az containerapp exec \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --command "/bin/sh"
+
+# Inside the container, run:
+# ls -la /deps/deep_research/mnt/
+# Should see: docs/ output/ input/
+#
+# echo "Test persistence" > /deps/deep_research/mnt/output/test.txt
+# cat /deps/deep_research/mnt/output/test.txt
+#
+# exit
+
+# Verify files exist in Azure File Share
+az storage file list \
+  --share-name $FILE_SHARE_NAME \
+  --path output \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY \
+  --output table
+```
+
+### Step 8: Automated Deployment Script
+
+The `deploy.sh` script supports persistent storage deployment by default:
+
+```bash
+cd deep_research
+chmod +x deploy.sh
+./deploy.sh
+```
+
+This single command automates all steps including:
+- Creating storage account and file share (if not exists)
+- Setting up directory structure
+- Storing credentials in Key Vault
+- Building and pushing Docker image
+- Deploying Container App with volume mount
+- Configuring environment variables for persistent paths
+
+The script intelligently checks if storage resources already exist before creating them, making it safe to run multiple times.
+
+#### Syncing Local Files (Optional)
+
+By default, the deployment script does NOT sync local files to Azure File Share. To upload your local files during deployment:
+
+```bash
+./deploy.sh --sync-files
+```
+
+This will upload all files from `docs/`, `output/`, and `input/` directories to Azure File Share before deploying.
+
+#### Manual File Sync
+
+For manual file synchronization without redeployment:
+
+```bash
+chmod +x sync-files.sh
+./sync-files.sh
+```
+
+Or use the `--sync-files` flag on next deployment:
+
+```bash
+./deploy.sh --sync-files
+```
+
+#### Help
+
+```bash
+./deploy.sh --help
+```
+
+Shows available options and usage examples.
+
+**Note:** Use this command to list all mounted links in the container:
+
+```bash
+az containerapp exec --name deep-research-agent --resource-group rg-deep-agents --command "ls -la /deps/deep_research/"
+```
+
+### Version Management
+
+The deployment script includes automatic version management to ensure you're always running the latest build:
+
+#### Automatic Version Increment
+
+Each time you run `./deploy.sh`, the API version is automatically incremented:
+- **Before**: `API_VERSION = "1.8.0"`
+- **After**: `API_VERSION = "1.8.1"`
+
+This happens in Step 3 of the deployment process, before building the Docker image.
+
+#### Health Check with Version Verification
+
+After deployment, the script performs intelligent health checking:
+
+1. **Waits for container startup** - Azure Container Apps can take 30-60 seconds to start
+2. **Retries up to 30 times** (5 minutes total) with 10-second intervals
+3. **Verifies version match** - Compares deployed version with expected version
+4. **Displays health response** - Shows full JSON health check on success
+
+**Example output:**
+```
+🔍 Testing health endpoint (waiting for container to start)...
+   Attempt 1/30... ❌ No response (container may still be starting)
+   Waiting 10s before next attempt...
+   Attempt 2/30... ⚠️  Version mismatch (expected: 1.8.1, got: 1.8.0)
+   Waiting 10s before next attempt...
+   Attempt 3/30... ✅ Version 1.8.1 matched!
+
+📊 Health Check Response:
+{
+    "status": "healthy",
+    "version": "1.8.1",
+    "docs_root": "/deps/deep_research/mnt/docs",
+    "free_space_bytes": 107374182400,
+    "free_space_human": "100.00 GB"
+}
+
+✅ Deployment verified successfully!
+```
+
+#### Manual Version Check
+
+You can manually verify the deployed version:
+
+```bash
+# Get the current API version from webapp.py
+grep 'API_VERSION = ' webapp.py
+
+# Check deployed version via health endpoint
+curl -s https://$EXTERNAL_URL/health | python3 -m json.tool
+
+# List all revisions to see deployment history
+az containerapp revision list \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --output table
+```
+
+#### Troubleshooting Version Mismatches
+
+If the health check shows a version mismatch after multiple retries:
+
+```bash
+# Check which revision is active
+az containerapp revision list \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --query "[].{Name:name, Active:properties.active, CreatedTime:properties.createdTime}" \
+  --output table
+
+# View recent logs
+az containerapp logs show \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --tail 50
+
+# Force restart to pick up new image
+az containerapp update \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars RESTART_TRIGGER="$(date +%s)"
+```
+
+### Environment Variables for Persistent Storage
+
+| Variable | Value | Description |
+|----------|-------|-------------|
+| `REPORTS_OUTPUT_FOLDER` | `/deps/deep_research/mnt/output` | Path for generated reports |
+| `EVAL_HISTORY_FILE` | `/deps/deep_research/mnt/output/eval_history/server_runs.jsonl` | Evaluation metrics file |
+| `DOC_FOLDER` | `/deps/deep_research/mnt/docs` | Document storage path |
+| `INPUT_FOLDER` | `/deps/deep_research/mnt/input` | Input files path |
+| `OUTPUT_FOLDER` | Auto-set by middleware | Derived from REPORTS_OUTPUT_FOLDER |
+
+### Checkpoint Storage Options
+
+#### Option A: CosmosDB (Recommended)
+
+The application already supports CosmosDB for checkpoint storage via `CosmosDBSaver`. This is the recommended approach as it doesn't require file system persistence for checkpoints.
+
+Ensure these environment variables are set:
+```bash
+MEMORY_TYPE=cosmosdb
+COSMOSDB_DB_NAME=deep-research-checkpoints
+COSMOSDB_CONTAINER_NAME=checkpoints
+```
+
+#### Option B: SQLite with Persistent Volume
+
+If you must use SQLite, the `.langgraph_api` folder will be persisted automatically since it's inside the container's working directory which is part of the mounted volume.
+
+Set:
+```bash
+DATABASE_URI="sqlite:///./deps/deep_research/.langgraph_api/langgraph.db"
+```
+
+### Benefits
+
+✅ **Persistence**: Files survive container restarts and redeployments  
+✅ **No Image Bloat**: Runtime files not stored in container image  
+✅ **Scalability**: Multiple replicas can share the same storage  
+✅ **Cost-Effective**: ~$0.07/GB/month for Standard LRS  
+✅ **Backup**: Azure Files supports snapshots and geo-redundancy  
+✅ **Flexibility**: Easy to adjust quota and performance tiers  
+
+### Cost Estimation
+
+For 100GB Standard LRS storage in Canada Central:
+- Storage: ~$7/month (100GB × $0.07/GB)
+- Operations: Minimal cost for read/write operations
+- Total: ~$7-10/month depending on usage
+
+### Monitoring Storage Usage
+
+```bash
+# View storage quota and usage
+az storage share show \
+  --name $FILE_SHARE_NAME \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY \
+  --query "{Quota: properties.quota, Usage: properties.usage}"
+
+# List files in output directory
+az storage file list \
+  --share-name $FILE_SHARE_NAME \
+  --path output \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY \
+  --output table
+
+# Download eval history file locally
+az storage file download \
+  --share-name $FILE_SHARE_NAME \
+  --path "output/eval_history/server_runs.jsonl" \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY \
+  --dest ./downloaded_eval_history.jsonl
+
+# Set up alerts for storage quota
+az monitor metrics alert create \
+  --name high-storage-usage \
+  --resource-group $RESOURCE_GROUP \
+  --scopes $(az storage account show \
+    --name $STORAGE_ACCOUNT_NAME \
+    --resource-group $RESOURCE_GROUP \
+    --query id -o tsv) \
+  --condition "avg UsedCapacity > 85931646976" \
+  --window-size 1h \
+  --evaluation-frequency 1h \
+  --description "Alert when storage exceeds 80GB (80% of 100GB quota)"
+```
+
+### Troubleshooting
+
+**Issue: Permission denied when writing to mounted directory**
+- Ensure the container runs as a user with write permissions
+- Azure Files mounts are typically writable by default
+
+**Issue: Files not appearing in File Share**
+- Verify the mount path is correct: `/deps/deep_research/mnt`
+- Check container logs: `az containerapp logs show --name $AGENT_NAME --resource-group $RESOURCE_GROUP`
+- Exec into container and verify: `ls -la /deps/deep_research/mnt/`
+
+**Issue: Local files disappear after deployment**
+
+**Root Cause:** Files uploaded to your local `docs/`, `output/`, or `input/` directories are NOT automatically synced to Azure File Share. The deploy.sh script now includes automatic sync, but if you added files after deployment, you need to manually upload them.
+
+**Solution:** Manually sync local files to Azure File Share:
+
+```bash
+# Set your storage variables (from deploy.sh output or Key Vault)
+export STORAGE_ACCOUNT_NAME="stdeepagentsXXXX"
+export FILE_SHARE_NAME="deep-research-files"
+export STORAGE_KEY=$(az keyvault secret show \
+  --vault-name $KV_NAME \
+  --name STORAGE-ACCOUNT-KEY \
+  --query value -o tsv)
+
+# Upload docs directory
+az storage file upload-batch \
+  --source docs \
+  --destination docs \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY \
+  --share-name $FILE_SHARE_NAME \
+  --overwrite
+
+# Upload output directory
+az storage file upload-batch \
+  --source output \
+  --destination output \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY \
+  --share-name $FILE_SHARE_NAME \
+  --overwrite
+
+# Upload input directory
+az storage file upload-batch \
+  --source input \
+  --destination input \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY \
+  --share-name $FILE_SHARE_NAME \
+  --overwrite
+```
+
+**Verify files were uploaded:**
+```bash
+# List files in Azure File Share
+az storage file list \
+  --share-name $FILE_SHARE_NAME \
+  --path docs/policy \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY \
+  --output table
+
+# Or check from inside the container
+az containerapp exec \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --command "ls -la /deps/deep_research/mnt/docs/policy/"
+```
+
+**Best Practice:** 
+- Use `./deploy.sh --sync-files` when you have new local files to upload
+- Use `./sync-files.sh` for quick syncs without full deployment
+- Files written by the app (reports, outputs) are automatically persisted since they're written directly to the mounted volume
+- Local files need explicit sync - they don't automatically appear in cloud storage
+
+**Quick Sync Script:** For manual file synchronization without redeployment, use:
+```bash
+cd deep_research
+chmod +x sync-files.sh
+./sync-files.sh
+```
+
+This script retrieves credentials from Key Vault and uploads all local files to Azure File Share.
+
+**Issue: Slow file operations**
+- Consider upgrading to Premium file share for better performance
+- Use `--sku Premium_LRS` when creating storage account
+
+### Security Considerations
+
+#### Option A: Direct Credentials (Simpler)
+- Storage account key passed directly to Container App
+- Suitable for development/testing
+- Key visible in Azure CLI commands
+- Easier to set up but less secure
+
+#### Option B: Key Vault References (Recommended for Production)
+- Credentials stored in Azure Key Vault
+- Container App uses system-assigned identity to access secrets
+- Better security posture
+- Automatic secret rotation support
+- Audit trail for secret access
+
+### Migration Path
+
+#### For Existing Deployments
+
+If you have an existing Container App deployment without persistent storage:
+
+```bash
+# 1. Create storage resources
+export STORAGE_ACCOUNT_NAME="stdeepagents$(openssl rand -hex 4)"
+export FILE_SHARE_NAME="deep-research-files"
+
+az storage account create \
+  --name $STORAGE_ACCOUNT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --location $LOCATION \
+  --sku Standard_LRS
+
+STORAGE_KEY=$(az storage account keys list \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --query '[0].value' -o tsv)
+
+az storage share create \
+  --name $FILE_SHARE_NAME \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY \
+  --quota 100
+
+# 2. Create directories
+for dir in "docs" "docs/policy" "output" "output/eval_history" "input"; do
+  az storage directory create \
+    --share-name $FILE_SHARE_NAME \
+    --name "$dir" \
+    --account-name $STORAGE_ACCOUNT_NAME \
+    --account-key $STORAGE_KEY
+done
+
+# 3. Update Container App with volume mount
+az containerapp update \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --volume persistent-storage \
+  --storage-type AzureFile \
+  --storage-account-name $STORAGE_ACCOUNT_NAME \
+  --storage-account-key $STORAGE_KEY \
+  --share-name $FILE_SHARE_NAME \
+  --mount-path /deps/deep_research/mnt
+
+# 4. Update environment variables to use mounted paths
+az containerapp update \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars \
+    REPORTS_OUTPUT_FOLDER=/deps/deep_research/mnt/output \
+    EVAL_HISTORY_FILE=/deps/deep_research/mnt/output/eval_history/server_runs.jsonl \
+    DOC_FOLDER=/deps/deep_research/mnt/docs \
+    INPUT_FOLDER=/deps/deep_research/mnt/input \
+    RESTART_TRIGGER="$(date +%s)"
+```
+
+#### For New Deployments
+
+Simply use the unified deployment script:
+```bash
+cd deep_research
+./deploy.sh
+```
+
+The script automatically sets up persistent storage by default.
+
+### Rollback Plan
+
+If you need to revert to non-persistent storage:
+
+```bash
+# Remove volume mount
+az containerapp update \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --remove properties.template.volumes[?name=='persistent-storage']
+
+# Reset environment variables to local paths
+az containerapp update \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars \
+    REPORTS_OUTPUT_FOLDER=./output \
+    EVAL_HISTORY_FILE=./output/eval_history/server_runs.jsonl \
+    DOC_FOLDER=./docs \
+    INPUT_FOLDER=./input \
+    RESTART_TRIGGER="$(date +%s)"
+```
+
+⚠️ **Warning:** Rolling back will lose any files stored in Azure Files that weren't backed up.
+
+### Performance Benchmarks
+
+After deployment, you can benchmark file I/O performance:
+
+```bash
+az containerapp exec \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --command "/bin/sh"
+
+# Inside container:
+# Write test
+$ time dd if=/dev/zero of=/deps/deep_research/mnt/output/test-write bs=1M count=10
+
+# Read test
+$ time dd if=/deps/deep_research/mnt/output/test-write of=/dev/null bs=1M
+
+# Clean up
+$ rm /deps/deep_research/mnt/output/test-write
+$ exit
+```
+
+**Expected Performance (Standard LRS):**
+- Write: ~50-100 MB/s
+- Read: ~100-200 MB/s
+
+**For higher performance**, consider Premium LRS:
+```bash
+az storage account update \
+  --name $STORAGE_ACCOUNT_NAME \
+  --sku Premium_LRS
+```
+
+Premium performance expectations:
+- Write: ~200-400 MB/s
+- Read: ~400-800 MB/s
+
+### Verification Checklist
+
+Use this checklist to verify the Azure Files persistent storage implementation is working correctly.
+
+#### Pre-Deployment Checks
+
+- [ ] Azure CLI installed and logged in (`az login`)
+- [ ] Docker installed and running
+- [ ] Resource group exists: `$RESOURCE_GROUP`
+- [ ] Container Registry exists: `$ACR_NAME`
+- [ ] Container Apps Environment exists: `$ENV_NAME`
+- [ ] Key Vault exists: `$KV_NAME` (if using secret references)
+
+#### Post-Deployment Verification
+
+**1. Check Resources Created**
+
+```bash
+# Verify Storage Account
+az storage account show \
+  --name $STORAGE_ACCOUNT_NAME \
+  --resource-group $RESOURCE_GROUP
+
+# Verify File Share
+az storage share show \
+  --name $FILE_SHARE_NAME \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY
+
+# Verify Directory Structure
+az storage directory list \
+  --share-name $FILE_SHARE_NAME \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY
+```
+
+Expected output should show:
+- ✅ docs/
+- ✅ docs/policy/
+- ✅ output/
+- ✅ output/eval_history/
+- ✅ input/
+
+**2. Verify Container App Configuration**
+
+```bash
+# Check volume mounts
+az containerapp show \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --query "properties.template.volumes"
+
+# Check environment variables
+az containerapp show \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --query "properties.template.containers[0].env[?name=='REPORTS_OUTPUT_FOLDER']"
+```
+
+Expected values:
+- ✅ Volume mounted at `/deps/deep_research/mnt`
+- ✅ `REPORTS_OUTPUT_FOLDER=/deps/deep_research/mnt/output`
+- ✅ `EVAL_HISTORY_FILE=/deps/deep_research/mnt/output/eval_history/server_runs.jsonl`
+- ✅ `DOC_FOLDER=/deps/deep_research/mnt/docs`
+- ✅ `INPUT_FOLDER=/deps/deep_research/mnt/input`
+
+**3. Test File Persistence**
+
+*Step 1: Write Test File*
+
+```bash
+az containerapp exec \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --command "/bin/sh"
+
+# Inside container, run:
+echo "Persistence test - $(date)" > /deps/deep_research/mnt/output/test-persistence.txt
+cat /deps/deep_research/mnt/output/test-persistence.txt
+exit
+```
+
+*Step 2: Restart Container*
+
+```bash
+# Trigger a new revision (restarts the container)
+az containerapp update \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --set-env-vars RESTART_TRIGGER="$(date +%s)"
+
+# Wait for deployment to complete
+az containerapp revision list \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --output table
+```
+
+*Step 3: Verify File Still Exists*
+
+```bash
+az containerapp exec \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --command "cat /deps/deep_research/mnt/output/test-persistence.txt"
+```
+
+✅ **Success Criteria:** The test file content should be displayed, proving persistence across restarts.
+
+**4. Verify in Azure File Share**
+
+```bash
+# List files in output directory
+az storage file list \
+  --share-name $FILE_SHARE_NAME \
+  --path output \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY \
+  --output table
+```
+
+✅ **Success Criteria:** You should see `test-persistence.txt` in the output.
+
+**5. Test Agent Functionality**
+
+```bash
+# Get internal FQDN
+INTERNAL_FQDN=$(az containerapp show \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --query properties.configuration.ingress.fqdn \
+  -o tsv)
+
+# Test API endpoint
+curl -X POST "https://$INTERNAL_FQDN/research/invoke" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": {
+      "messages": [{
+        "role": "user",
+        "content": "Research AI agents briefly"
+      }]
+    }
+  }' | jq .
+```
+
+✅ **Success Criteria:** API responds successfully without errors.
+
+**6. Check Logs**
+
+```bash
+# View recent logs
+az containerapp logs show \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --tail 50
+```
+
+✅ **Success Criteria:** No errors related to file permissions or missing directories.
+
+Look for these indicators:
+- ✅ No "Permission denied" errors
+- ✅ No "Directory not found" errors
+- ✅ Successful file write operations logged
+
+**7. Verify Checkpoint Storage**
+
+If using CosmosDB:
+```bash
+# Check CosmosDB connection
+az containerapp show \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --query "properties.template.containers[0].env[?name=='MEMORY_TYPE']"
+```
+
+✅ **Success Criteria:** `MEMORY_TYPE=cosmosdb` is set.
+
+**8. Monitor Storage Usage**
+
+```bash
+# Check current storage usage
+az storage share show \
+  --name $FILE_SHARE_NAME \
+  --account-name $STORAGE_ACCOUNT_NAME \
+  --account-key $STORAGE_KEY \
+  --query "{Quota: properties.quota, Usage: properties.usage}"
+```
+
+✅ **Success Criteria:** Usage is greater than 0 after creating test files.
+
+#### Common Issues & Solutions
+
+**Issue 1: Permission Denied**
+
+*Symptom:* Cannot write to mounted directory
+
+*Solution:*
+```bash
+# Check mount point permissions
+az containerapp exec \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --command "ls -la /deps/deep_research/mnt/"
+
+# Ensure cifs-utils is installed in Docker image
+docker run --rm \
+  $ACR_NAME.azurecr.io/deep-research-agent:latest \
+  dpkg -l | grep cifs
+```
+
+**Issue 2: Files Not Persisting**
+
+*Symptom:* Files disappear after restart
+
+*Checklist:*
+- [ ] Volume is mounted at correct path
+- [ ] Environment variables point to mounted paths
+- [ ] Container app was restarted after config changes
+- [ ] File Share exists and is accessible
+
+*Debug:*
+```bash
+# Verify mount inside container
+az containerapp exec \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --command "mount | grep mnt"
+
+# Should show SMB mount like:
+# //stxxxxxx.file.core.windows.net/deep-research-files on /deps/deep_research/mnt type cifs
+```
+
+**Issue 3: Slow File Operations**
+
+*Symptom:* File reads/writes are slow
+
+*Solution:*
+- Consider upgrading to Premium LRS storage
+- Check network latency between Container Apps and Storage
+- Monitor storage metrics in Azure Portal
+
+**Issue 4: Container Won't Start**
+
+*Symptom:* Container fails to start after adding volume mount
+
+*Check:*
+```bash
+# Check container status
+az containerapp revision list \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --output table
+
+# Check logs for errors
+az containerapp logs show \
+  --name $AGENT_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --tail 100
+```
+
+*Common causes:*
+- Invalid storage account name or key
+- File share doesn't exist
+- Incorrect mount path syntax
+
+#### Success Criteria Summary
+
+All of the following must pass:
+
+- [ ] ✅ Storage Account and File Share created
+- [ ] ✅ Directory structure exists in File Share
+- [ ] ✅ Container App has volume mount configured
+- [ ] ✅ Environment variables point to mounted paths
+- [ ] ✅ Test file persists across container restart
+- [ ] ✅ File visible in Azure File Share
+- [ ] ✅ Agent API responds successfully
+- [ ] ✅ No permission errors in logs
+- [ ] ✅ Checkpoint storage configured (CosmosDB recommended)
 
 ---
 
