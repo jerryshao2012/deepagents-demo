@@ -541,6 +541,14 @@ UI_URL=$(az containerapp show \
 
 echo "UI Public URL: https://$UI_URL"
 echo "Agent Internal URL: https://$AGENT_FQDN"
+
+# Enable CORS
+az containerapp ingress cors enable \
+  --name $APP_NAME \
+  --resource-group $RESOURCE_GROUP \
+  --allowed-origins "http://localhost:3000" "https://deepagent-ui.calmsmoke-0bc2dc70.canadacentral.azurecontainerapps.io" \
+  --allowed-methods "GET" "POST" "PUT" "DELETE" "PATCH" "OPTIONS" "HEAD" \
+  --allowed-headers "*"
 ```
 
 ### Option 2: Custom Domain with SSL
