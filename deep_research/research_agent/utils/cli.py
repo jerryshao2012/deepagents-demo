@@ -141,8 +141,9 @@ def build_instruction(
             )
         else:
             instruction += (
-                "\nAfter researching, use the `write_file` tool to save your final output directly "
-                "to `/final_report.md` as Markdown text. Do NOT use `render_skill_output` since this is an unstructured skill. "
+                "\nFollow the skill instructions above precisely. "
+                "Use the `write_file` tool to save your output to `/final_report.md`. "
+                "Do NOT use `render_skill_output` since this is an unstructured skill. "
                 "Do NOT just say you will write it; you must actually call the `write_file` tool with the text."
             )
         if skill == "golden-dataset":

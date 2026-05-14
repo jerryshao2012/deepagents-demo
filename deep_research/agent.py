@@ -406,14 +406,37 @@ class ResearchStateMiddleware(AgentMiddleware):
 
     @staticmethod
     def _build_system_instruction(state: ResearchState) -> str:
-        """Build system instruction from ResearchState parameters."""
+        """Build system instruction from ResearchState parameters.
+
+        Appends a *State Context* block so the agent knows what files are
+        already available.  This is the general mechanism that lets any skill
+        work correctly in follow-up turns — the agent can see existing
+        artifacts and decide whether to post-process them, extend them, or
+        start fresh, based on the user's message and the skill instructions.
+        """
         instruction = build_instruction(
             subject="",
             doc_folder=state.get("doc_folder"),
             skill=state.get("skill"),
-            no_web=str2bool(state.get("no_web"), False)
+            no_web=str2bool(state.get("no_web"), False),
         )
         instruction = instruction.replace("Research the following subject: ", "").strip()
+
+        # --- General state context ---
+        # Tell the agent what files already exist so it can decide the right
+        # workflow for any skill (post-process, extend, or start fresh).
+        files = state.get("files") or {}
+        if files:
+            file_list = ", ".join(f"`{f}`" for f in sorted(files.keys()))
+            instruction += (
+                "\n\n<State Context>"
+                f"\nFiles already available from prior turns: {file_list}"
+                "\nIf the user's request refers to existing content (e.g. 'review', "
+                "'rewrite', 'improve', 'humanize'), use `read_file` to load the "
+                "relevant file first, then apply the requested skill or changes, "
+                "then use `write_file` to save the result."
+                "\n</State Context>"
+            )
 
         return instruction
 
