@@ -22,22 +22,22 @@ tests/
 docs/
 output/
 input/
-deep_research_example.egg-info
-.deepeval
-.langgraph_api
+deep_research_example.egg-info/
+.langgraph_api/
 
 # Development tools
 .ruff_cache/
+.DS_Store
 
 # Environment and secrets
 .env
-#.env.*
-!.env.example
+.env.example
 secrets.sh
 
 # Deployment scripts
 deploy.sh
 env.sh
+sync-files.sh
 
 # Documentation
 README.md

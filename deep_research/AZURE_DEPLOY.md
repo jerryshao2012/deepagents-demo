@@ -911,6 +911,38 @@ Shows available options and usage examples.
 
 ```bash
 az containerapp exec --name deep-research-agent --resource-group rg-deep-agents --command "ls -la /deps/deep_research/"
+INFO: Connecting to the container 'deep-research-agent'...
+Use ctrl + D to exit.
+INFO: Successfully connected to container: 'deep-research-agent'. [ Revision: 'deep-research-agent--0000039', Replica: 'deep-research-agent--0000039-57cc94f9ff-gnbgz'].
+total 176
+drwxr-xr-x 1 root root  4096 May 13 22:34 .
+drwxr-xr-x 1 root root  4096 May 13 12:22 ..
+-rw-r--r-- 1 root root 10244 May 11 17:16 .DS_Store
+-rw-r--r-- 1 root root  5105 May 13 22:28 .env
+-rw-r--r-- 1 root root  5105 May 12 22:40 .env.docker
+-rw-r--r-- 1 root root  3748 May  2 02:13 .env.example
+lrwxrwxrwx 1 root root    38 May 13 22:34 .langgraph_api -> /deps/deep_research/mnt/.langgraph_api
+drwxr-xr-x 2 root root  4096 May 13 22:34 __pycache__
+-rw-r--r-- 1 root root 19007 May 13 22:24 agent.py
+drwxr-xr-x 2 root root  4096 May 13 22:28 deep_research_example.egg-info
+lrwxrwxrwx 1 root root    28 May 13 22:34 docs -> /deps/deep_research/mnt/docs
+-rw-r--r-- 1 root root  2951 May 13 14:01 entrypoint.sh
+-rw-r--r-- 1 root root  1270 May 13 13:34 increment_version.py
+lrwxrwxrwx 1 root root    29 May 13 22:34 input -> /deps/deep_research/mnt/input
+-rw-rw-r-- 1 root root   153 May  2 02:15 langgraph.json
+-rw-r--r-- 1 root root  2028 Apr 21 04:17 logger_utils.py
+drwxrwxrwx 2 root root     0 May 13 15:07 mnt
+-rw-r--r-- 1 root root  5239 May 12 22:35 model_factory.py
+lrwxrwxrwx 1 root root    30 May 13 22:34 output -> /deps/deep_research/mnt/output
+-rw-r--r-- 1 root root  2096 May 11 20:12 pyproject.toml
+drwxr-xr-x 1 root root  4096 Apr 30 08:42 research_agent
+-rw-r--r-- 1 root root 19929 Apr 23 15:38 research_agent_cli.py
+-rw-r--r-- 1 root root 12499 Apr 27 00:54 retry_utils.py
+-rw-r--r-- 1 root root  3181 May 13 12:53 sync-files.sh
+-rw-rw-r-- 1 root root  5078 Apr 18 11:23 utils.py
+-rw-r--r-- 1 root root 13585 May 13 22:28 webapp.py
+INFO: received success status from cluster
+Disconnecting...
 ```
 
 ### Version Management
