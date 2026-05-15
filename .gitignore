@@ -29,7 +29,6 @@ venv/
 ENV/
 env/
 .env
-.env.docker
 
 # IDE
 .idea/
