@@ -1,5 +1,15 @@
 # 🚀 Deep Research
 
+## Contents
+
+- [🚀 Quickstart](#-quickstart)
+- [Usage Options](#usage-options)
+- [🧩 Deep Research Agent Components](#-deep-research-agent-components)
+- [📚 Resources](#-resources)
+- [🛡️ Reliability & Rate Limiting](#-reliability--rate-limiting)
+- [🛡️ Rate Limit Handling](#-rate-limit-handling)
+- [Multi-Agent Complex Workflows Evaluation & Regression Tracking](#multi-agent-complex-workflows-evaluation--regression-tracking)
+
 ## 🚀 Quickstart
 
 **Prerequisites**: Install [uv](https://docs.astral.sh/uv/) package manager:
@@ -25,7 +35,7 @@ Install packages:
 uv sync
 ```
 
-* If `uv` is not available on your system path, you can ry: 
+* If `uv` is not available on your system path, you can try:
 ```bash
 # In Windows if PATH is not setup properly
 python -m uv sync
@@ -90,50 +100,13 @@ export REPORTS_OUTPUT_FOLDER=./output
 export MAX_FILES_TO_READ=20
 # Maximum total size in MB for batch file reading operations
 export MAX_TOTAL_SIZE_MB=50
-
----
-
-## 🛡️ Reliability & Rate Limiting
-
-When building high-throughput agents, treating LLM providers as finite-capacity systems is critical. This project implements a dual-layer approach to ensure reliability:
-
-### 1. Proactive Rate Shaping
-Instead of waiting for `429 Too Many Requests` errors, the harness proactively controls the flow of tokens and requests. This is handled by the `AsyncRateLimiter` in `deep_research/retry_utils.py`.
-
-- **TPM (Tokens Per Minute) Control**: Tracks a rolling 60-second window of estimated tokens to stay under deployment quotas.
-- **RPM (Requests Per Minute) Pacing**: Ensures requests are evenly spaced to avoid triggering micro-burst limits (often 1–10 seconds).
-- **Safe Margins**: Operates at ~80% of hard limits to absorb jitter and shared usage.
-
-To enable, set these environment variables:
-```properties
-# Proactive Rate Shaping (TPM and RPM limits)
-# Set these based on your provider's deployment quotas
-# Tokens Per Minute:
-# Represents the maximum number of tokens (input + output) you are allowed to send to the model provider within a
-# rolling 60-second window.
-MODEL_TPM=120000
-# Requests Per Minute:
-# Represents the maximum number of individual API calls you can make per minute.
-MODEL_RPM=500
 ```
-
-### 2. Reactive Retries
-For unpredictable server-side issues or shared capacity drops, a reactive layer handles retries with **Exponential Backoff and Jitter**.
-
-- **Jitter**: Prevents "thundering herd" problems by randomizing retry delays.
-- **Header Respect**: Logic can be extended to respect `Retry-After` headers from providers.
-- **Configurable**: Adjust `MODEL_MAX_RETRIES` and `MODEL_INITIAL_BACKOFF` as needed.
-
-### Strategic Recommendations
-1. **Estimate accurately**: Use `tiktoken` (integrated in `AsyncRateLimiter`) for precise token counting.
-2. **Layer your defenses**: Always use proactive shaping *with* reactive retries.
-3. **Deployment-specific limits**: Configure unique limits for different models or regions to maximize throughput.
 
 ---
 
 ## Usage Options
 
-You can run this example in two ways:
+You can run this example in three ways:
 
 ### Option 1: Command Line Script
 
@@ -750,6 +723,42 @@ The deep research agent adds the following custom tools beyond the built-in deep
     <td>Extracts content and images from PowerPoint (.pptx) files. Runs <code>scripts/extract-pptx.py</code> which returns JSON structures containing slides, text, and embedded images. Facilitates conversion of existing presentations to HTML format. Outputs extracted data to a specified directory for further processing.</td>
   </tr>
 </table>
+
+## 🛡️ Reliability & Rate Limiting
+
+When building high-throughput agents, treating LLM providers as finite-capacity systems is critical. This project implements a dual-layer approach to ensure reliability:
+
+### 1. Proactive Rate Shaping
+Instead of waiting for `429 Too Many Requests` errors, the harness proactively controls the flow of tokens and requests. This is handled by the `AsyncRateLimiter` in `deep_research/retry_utils.py`.
+
+- **TPM (Tokens Per Minute) Control**: Tracks a rolling 60-second window of estimated tokens to stay under deployment quotas.
+- **RPM (Requests Per Minute) Pacing**: Ensures requests are evenly spaced to avoid triggering micro-burst limits (often 1–10 seconds).
+- **Safe Margins**: Operates at ~80% of hard limits to absorb jitter and shared usage.
+
+To enable, set these environment variables:
+```properties
+# Proactive Rate Shaping (TPM and RPM limits)
+# Set these based on your provider's deployment quotas
+# Tokens Per Minute:
+# Represents the maximum number of tokens (input + output) you are allowed to send to the model provider within a
+# rolling 60-second window.
+MODEL_TPM=120000
+# Requests Per Minute:
+# Represents the maximum number of individual API calls you can make per minute.
+MODEL_RPM=500
+```
+
+### 2. Reactive Retries
+For unpredictable server-side issues or shared capacity drops, a reactive layer handles retries with **Exponential Backoff and Jitter**.
+
+- **Jitter**: Prevents "thundering herd" problems by randomizing retry delays.
+- **Header Respect**: Logic can be extended to respect `Retry-After` headers from providers.
+- **Configurable**: Adjust `MODEL_MAX_RETRIES` and `MODEL_INITIAL_BACKOFF` as needed.
+
+### Strategic Recommendations
+1. **Estimate accurately**: Use `tiktoken` (integrated in `AsyncRateLimiter`) for precise token counting.
+2. **Layer your defenses**: Always use proactive shaping *with* reactive retries.
+3. **Deployment-specific limits**: Configure unique limits for different models or regions to maximize throughput.
 
 ## 🛡️ Rate Limit Handling
 

@@ -42,6 +42,7 @@ env/
 # Configuration (keep examples, ignore actual configs)
 # config.yaml is kept for demo purposes
 !.env.example
+secrets.sh
 
 # Temporary files
 *.tmp

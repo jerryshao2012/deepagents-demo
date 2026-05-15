@@ -3,6 +3,7 @@ set -e
 
 # Parse command-line arguments
 SYNC_FILES=false
+SKIP_BUILD=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -10,16 +11,23 @@ while [[ $# -gt 0 ]]; do
       SYNC_FILES=true
       shift
       ;;
+    --skip-build)
+      SKIP_BUILD=true
+      shift
+      ;;
     --help|-h)
       echo "Usage: ./deploy.sh [OPTIONS]"
       echo ""
       echo "Options:"
       echo "  --sync-files    Sync local files (docs/, output/, input/) to Azure File Share"
+      echo "  --skip-build    Skip Docker build and use existing image in ACR"
       echo "  --help, -h      Show this help message"
       echo ""
       echo "Examples:"
-      echo "  ./deploy.sh                  # Deploy without syncing local files"
-      echo "  ./deploy.sh --sync-files     # Deploy and sync local files"
+      echo "  ./deploy.sh                  # Full deployment with build"
+      echo "  ./deploy.sh --sync-files     # Deploy with build and sync files"
+      echo "  ./deploy.sh --skip-build     # Deploy existing image without rebuild"
+      echo "  ./deploy.sh --skip-build --sync-files  # Deploy existing image and sync files"
       echo ""
       echo "Note: For manual file sync after deployment, use:"
       echo "  ./sync-files.sh"
@@ -36,7 +44,11 @@ done
 # Configuration
 source ./env.sh
 
-echo "🚀 Starting Deep Research Agent deployment with persistent storage..."
+if [ "$SKIP_BUILD" = true ]; then
+  echo "🚀 Starting Deep Research Agent deployment (using existing image)..."
+else
+  echo "🚀 Starting Deep Research Agent deployment with persistent storage..."
+fi
 
 # 1. Create resource group
 echo "📦 Creating resource group..."
@@ -54,20 +66,40 @@ else
   az acr create --resource-group $RESOURCE_GROUP --name $ACR_NAME --sku Standard --admin-enabled true
 fi
 
-# 3. Increment API version
-echo "🔢 Incrementing API version..."
-python3 ./increment_version.py
-NEW_VERSION=$(grep 'API_VERSION = ' webapp.py | grep -o '"[^"]*"' | tr -d '"')
-echo "✅ New API version: $NEW_VERSION"
+# 3. Increment API version (only if building)
+if [ "$SKIP_BUILD" = false ]; then
+  echo "🔢 Incrementing API version..."
+  python3 ./increment_version.py
+  NEW_VERSION=$(grep 'API_VERSION = ' webapp.py | grep -o '"[^"]*"' | tr -d '"')
+  echo "✅ New API version: $NEW_VERSION"
+else
+  echo "⏭️  Skipping API version increment (--skip-build)"
+  NEW_VERSION=$(grep 'API_VERSION = ' webapp.py | grep -o '"[^"]*"' | tr -d '"')
+  echo "ℹ️  Current API version: $NEW_VERSION"
+fi
 
-# 4. Build and push image
-echo "🔨 Building Docker image..."
-# Ensure we're in the correct directory (where Dockerfile is located)
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
-docker build --platform linux/amd64 -t $ACR_NAME.azurecr.io/deep-research-agent:latest .
-az acr login --name $ACR_NAME
-docker push $ACR_NAME.azurecr.io/deep-research-agent:latest
+# 4. Build and push image (optional)
+if [ "$SKIP_BUILD" = false ]; then
+  echo "🔨 Building Docker image..."
+  # Ensure we're in the correct directory (where Dockerfile is located)
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  cd "$SCRIPT_DIR"
+  docker build --platform linux/amd64 -t $ACR_NAME.azurecr.io/deep-research-agent:latest .
+  az acr login --name $ACR_NAME
+  docker push $ACR_NAME.azurecr.io/deep-research-agent:latest
+  echo "✅ Image built and pushed successfully"
+else
+  echo "⏭️  Skipping Docker build (--skip-build)"
+  echo "ℹ️  Using existing image: $ACR_NAME.azurecr.io/deep-research-agent:latest"
+  
+  # Verify image exists in ACR
+  if ! az acr repository show-tags --name $ACR_NAME --repository deep-research-agent --query "contains(@, 'latest')" -o tsv 2>/dev/null | grep -q "true"; then
+    echo "⚠️  WARNING: Image 'deep-research-agent:latest' not found in ACR!"
+    echo "   Please run './deploy.sh' without --skip-build first to build and push the image."
+    exit 1
+  fi
+  echo "✅ Verified image exists in ACR"
+fi
 
 # 5. Create environment
 echo "🌍 Creating Container Apps environment..."
@@ -88,15 +120,81 @@ else
   az keyvault create --name $KV_NAME --resource-group $RESOURCE_GROUP --location $LOCATION
 fi
 
-# Store secrets in Key Vault
-echo "🔑 Storing secrets in Key Vault..."
-az keyvault secret set --vault-name $KV_NAME --name TAVILY-API-KEY --value "${TAVILY_API_KEY:-placeholder}" --only-show-errors || true
-az keyvault secret set --vault-name $KV_NAME --name LANGCHAIN-API-KEY --value "${LANGCHAIN_API_KEY:-placeholder}" --only-show-errors || true
-az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-ENDPOINT --value "${AZURE_OPENAI_ENDPOINT:-placeholder}" --only-show-errors || true
-az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-DEPLOYMENT --value "${AZURE_OPENAI_DEPLOYMENT:-placeholder}" --only-show-errors || true
-az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-API-KEY --value "${AZURE_OPENAI_API_KEY:-placeholder}" --only-show-errors || true
-az keyvault secret set --vault-name $KV_NAME --name UPLOAD-API-KEY --value "${UPLOAD_API_KEY:-placeholder}" --only-show-errors || true
-echo "✅ Secrets stored in Key Vault"
+# Enable RBAC authorization for Key Vault (if possible)
+echo "🔑 Ensuring Key Vault access configuration..."
+# Try to enable RBAC, but don't fail if it's already set or if we lack permissions
+az keyvault update --name $KV_NAME --resource-group $RESOURCE_GROUP --enable-rbac-authorization true 2>/dev/null || true
+
+# Function to grant Key Vault access to an identity
+grant_kv_access() {
+  local kv_name=$1
+  local principal_id=$2
+  
+  echo "🔐 Ensuring identity '$principal_id' has access to Key Vault '$kv_name'..."
+  
+  # Check if RBAC is enabled
+  local rbac_enabled=$(az keyvault show --name "$kv_name" --query "properties.enableRbacAuthorization" -o tsv 2>/dev/null || echo "false")
+  
+  if [ "$rbac_enabled" = "true" ]; then
+    echo "   Using RBAC for authorization..."
+    local kv_id=$(az keyvault show --name "$kv_name" --query id -o tsv)
+    az role assignment create \
+      --role "Key Vault Secrets User" \
+      --assignee-object-id "$principal_id" \
+      --scope "$kv_id" \
+      --assignee-principal-type ServicePrincipal \
+      2>/dev/null || echo "   ✓ Role already assigned or assignment skipped"
+  else
+    echo "   Using Access Policies for authorization..."
+    az keyvault set-policy \
+      --name "$kv_name" \
+      --secret-permissions get list \
+      --object-id "$principal_id" \
+      --only-show-errors 2>/dev/null || echo "   ⚠️  Could not set access policy. Ensure you have permissions."
+  fi
+}
+
+# Store secrets in Key Vault (only if local values are set - avoids overwriting with 'placeholder')
+# Run ./secrets.sh separately to seed real values into Key Vault
+echo "🔑 Storing secrets in Key Vault (skipping secrets without local values)..."
+if [ -n "${TAVILY_API_KEY:-}" ]; then
+  az keyvault secret set --vault-name $KV_NAME --name TAVILY-API-KEY --value "$TAVILY_API_KEY" --only-show-errors || true
+  echo "  ✓ TAVILY-API-KEY updated"
+else
+  echo "  ⏭️  TAVILY_API_KEY not set locally - keeping existing KV value"
+fi
+if [ -n "${LANGCHAIN_API_KEY:-}" ]; then
+  az keyvault secret set --vault-name $KV_NAME --name LANGCHAIN-API-KEY --value "$LANGCHAIN_API_KEY" --only-show-errors || true
+  echo "  ✓ LANGCHAIN-API-KEY updated"
+else
+  echo "  ⏭️  LANGCHAIN_API_KEY not set locally - keeping existing KV value"
+fi
+if [ -n "${AZURE_OPENAI_ENDPOINT:-}" ]; then
+  az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-ENDPOINT --value "$AZURE_OPENAI_ENDPOINT" --only-show-errors || true
+  echo "  ✓ AZURE-OPENAI-ENDPOINT updated"
+else
+  echo "  ⏭️  AZURE_OPENAI_ENDPOINT not set locally - keeping existing KV value"
+fi
+if [ -n "${AZURE_OPENAI_DEPLOYMENT:-}" ]; then
+  az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-DEPLOYMENT --value "$AZURE_OPENAI_DEPLOYMENT" --only-show-errors || true
+  echo "  ✓ AZURE-OPENAI-DEPLOYMENT updated"
+else
+  echo "  ⏭️  AZURE_OPENAI_DEPLOYMENT not set locally - keeping existing KV value"
+fi
+if [ -n "${AZURE_OPENAI_API_KEY:-}" ]; then
+  az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-API-KEY --value "$AZURE_OPENAI_API_KEY" --only-show-errors || true
+  echo "  ✓ AZURE-OPENAI-API-KEY updated"
+else
+  echo "  ⏭️  AZURE_OPENAI_API_KEY not set locally - keeping existing KV value"
+fi
+if [ -n "${UPLOAD_API_KEY:-}" ]; then
+  az keyvault secret set --vault-name $KV_NAME --name UPLOAD-API-KEY --value "$UPLOAD_API_KEY" --only-show-errors || true
+  echo "  ✓ UPLOAD-API-KEY updated"
+else
+  echo "  ⏭️  UPLOAD_API_KEY not set locally - keeping existing KV value"
+fi
+echo "✅ Key Vault secret update complete"
+echo "💡 Tip: Run ./secrets.sh to update all API keys in Key Vault"
 
 # 7. Setup Persistent Storage
 echo ""
@@ -243,6 +341,7 @@ echo "✅ Persistent storage setup complete"
 echo "🚀 Deploying agent..."
 
 # Prepare environment variables with persistent storage paths
+# Note: Sensitive values will be injected via Key Vault secret references
 ENV_VARS=(
   VERIFY_SSL=false
   LOG_LEVEL=INFO
@@ -300,27 +399,72 @@ echo "✅ Environment storage registered"
 if az containerapp show --name $AGENT_NAME --resource-group $RESOURCE_GROUP &> /dev/null; then
   echo "📝 Container app already exists. Updating..."
     
-  # Update image and environment variables
-  echo "⚙️  Updating image and environment variables..."
-  az containerapp update \
+  # 8a. Ensure managed identity exists and has permissions
+  echo "🔐 Ensuring managed identity and permissions..."
+  
+  # Enable SystemAssigned identity if not already enabled
+  az containerapp identity assign \
     --name $AGENT_NAME \
     --resource-group $RESOURCE_GROUP \
-    --image $ACR_NAME.azurecr.io/deep-research-agent:latest \
-    --set-env-vars $ENV_VARS_STRING RESTART_TRIGGER="$(date +%s)" \
-    --remove-env-vars \
-      properties.configuration.secrets \
-      properties.configuration.ingress.external \
-      properties.configuration.ingress.targetPort \
-      properties.configuration.ingress.transport \
-      properties.template.storages \
-    2>/dev/null || true
+    --system-assigned \
+    --only-show-errors > /dev/null
+    
+  # Get the principal ID
+  PRINCIPAL_ID=$(az containerapp show \
+    --name $AGENT_NAME \
+    --resource-group $RESOURCE_GROUP \
+    --query "identity.principalId" \
+    -o tsv)
+    
+  if [ -n "$PRINCIPAL_ID" ]; then
+    grant_kv_access "$KV_NAME" "$PRINCIPAL_ID"
+  else
+    echo "⚠️  Could not find principal ID for managed identity."
+  fi
 
-  # Configure persistent storage volume mount using YAML
-  # (--set is hijacked by the containerapp extension and cannot be used for ARM paths)
-  echo "📎 Configuring persistent storage volume mount via YAML..."
-  VOLUME_YAML=$(mktemp /tmp/volume-config-XXXXXX.yaml)
-  cat > "$VOLUME_YAML" <<EOF
+  # Update image, secrets, env vars, and volume mounts in a single YAML update
+  # (Multiple separate az containerapp update calls overwrite each other's env arrays)
+  echo "⚙️  Applying comprehensive configuration update..."
+  UPDATE_YAML=$(mktemp /tmp/update-config-XXXXXX.yaml 2>/dev/null || mktemp)
+  RESTART_TRIGGER=$(date +%s)
+  cat > "$UPDATE_YAML" <<EOF
 properties:
+  configuration:
+    secrets:
+      - name: tavily-api-key
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/TAVILY-API-KEY
+        identity: system
+      - name: langchain-api-key
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/LANGCHAIN-API-KEY
+        identity: system
+      - name: azure-openai-endpoint
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/AZURE-OPENAI-ENDPOINT
+        identity: system
+      - name: azure-openai-deployment
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/AZURE-OPENAI-DEPLOYMENT
+        identity: system
+      - name: azure-openai-api-key
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/AZURE-OPENAI-API-KEY
+        identity: system
+      - name: upload-api-key
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/UPLOAD-API-KEY
+        identity: system
+      - name: storage-account-name
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/STORAGE-ACCOUNT-NAME
+        identity: system
+      - name: storage-account-key
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/STORAGE-ACCOUNT-KEY
+        identity: system
+      - name: file-share-name
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/FILE-SHARE-NAME
+        identity: system
+      - name: acr-password
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/ACR-PASSWORD
+        identity: system
+    registries:
+      - server: ${ACR_NAME}.azurecr.io
+        username: ${ACR_NAME}
+        passwordSecretRef: acr-password
   template:
     volumes:
       - name: persistent-storage
@@ -328,10 +472,85 @@ properties:
         storageType: AzureFile
     containers:
       - name: deep-research-agent
-        image: $ACR_NAME.azurecr.io/deep-research-agent:latest
+        image: ${ACR_NAME}.azurecr.io/deep-research-agent:latest
         resources:
           cpu: 2.0
           memory: 4Gi
+        env:
+          - name: RESTART_TRIGGER
+            value: "${RESTART_TRIGGER}"
+          - name: VERIFY_SSL
+            value: "false"
+          - name: LOG_LEVEL
+            value: INFO
+          - name: LANGCHAIN_TRACING_V2
+            value: "true"
+          - name: LANGSMITH_ENDPOINT
+            value: https://api.smith.langchain.com
+          - name: LANGCHAIN_PROJECT
+            value: deep-research-production
+          - name: ENABLE_EVAL_TRACKING
+            value: "true"
+          - name: MODEL_TPM
+            value: "120000"
+          - name: MODEL_RPM
+            value: "500"
+          - name: GRAPH_RECURSION_LIMIT
+            value: "200"
+          - name: MAX_CONCURRENT_RESEARCH_UNITS
+            value: "3"
+          - name: MAX_RESEARCHER_ITERATIONS
+            value: "3"
+          - name: MAX_GLOB_DEPTH
+            value: "3"
+          - name: MAX_FILES_TO_READ
+            value: "20"
+          - name: MAX_TOTAL_SIZE_MB
+            value: "50"
+          - name: MODEL_MAX_RETRIES
+            value: "5"
+          - name: MODEL_INITIAL_BACKOFF
+            value: "1.0"
+          - name: MODEL_MAX_BACKOFF
+            value: "60.0"
+          - name: MODEL_BACKOFF_MULTIPLIER
+            value: "2.0"
+          - name: MODEL_RETRY_JITTER
+            value: "true"
+          - name: AZURE_OPENAI_API_VERSION
+            value: 2025-04-01-preview
+          - name: MEMORY_TYPE
+            value: cosmosdb
+          - name: COSMOSDB_DB_NAME
+            value: deep-research-checkpoints
+          - name: COSMOSDB_CONTAINER_NAME
+            value: checkpoints
+          - name: REPORTS_OUTPUT_FOLDER
+            value: ${MOUNT_PATH}/output
+          - name: EVAL_HISTORY_FILE
+            value: ${MOUNT_PATH}/output/eval_history/server_runs.jsonl
+          - name: DOC_FOLDER
+            value: ${MOUNT_PATH}/docs
+          - name: INPUT_FOLDER
+            value: ${MOUNT_PATH}/input
+          - name: TAVILY_API_KEY
+            secretRef: tavily-api-key
+          - name: LANGCHAIN_API_KEY
+            secretRef: langchain-api-key
+          - name: AZURE_OPENAI_ENDPOINT
+            secretRef: azure-openai-endpoint
+          - name: AZURE_OPENAI_DEPLOYMENT
+            secretRef: azure-openai-deployment
+          - name: AZURE_OPENAI_API_KEY
+            secretRef: azure-openai-api-key
+          - name: UPLOAD_API_KEY
+            secretRef: upload-api-key
+          - name: STORAGE_ACCOUNT_NAME
+            secretRef: storage-account-name
+          - name: STORAGE_ACCOUNT_KEY
+            secretRef: storage-account-key
+          - name: FILE_SHARE_NAME
+            secretRef: file-share-name
         volumeMounts:
           - volumeName: persistent-storage
             mountPath: $MOUNT_PATH
@@ -339,12 +558,40 @@ EOF
   az containerapp update \
     --name $AGENT_NAME \
     --resource-group $RESOURCE_GROUP \
-    --yaml "$VOLUME_YAML"
-  rm -f "$VOLUME_YAML"
+    --yaml "$UPDATE_YAML"
+  rm -f "$UPDATE_YAML"
 
-  echo "🔄 Container updated with persistent storage volume mount."
+  echo "🔄 Container updated with all configuration (secrets, env vars, volume mount)."
 else
   echo "✨ Creating new container app..."
+  
+  # First, assign Key Vault Reader role to the managed identity
+  echo "🔐 Assigning Key Vault access to managed identity..."
+  MANAGED_IDENTITY_PRINCIPAL_ID=$(az identity show \
+    --name "${AGENT_NAME}-identity" \
+    --resource-group $RESOURCE_GROUP \
+    --query principalId \
+    -o tsv 2>/dev/null || echo "")
+  
+  if [ -z "$MANAGED_IDENTITY_PRINCIPAL_ID" ]; then
+    echo "   Creating user-assigned managed identity..."
+    az identity create \
+      --name "${AGENT_NAME}-identity" \
+      --resource-group $RESOURCE_GROUP
+    MANAGED_IDENTITY_PRINCIPAL_ID=$(az identity show \
+      --name "${AGENT_NAME}-identity" \
+      --resource-group $RESOURCE_GROUP \
+      --query principalId \
+      -o tsv)
+  fi
+  
+  # Assign Key Vault Secrets User role
+  echo "   Assigning 'Key Vault Secrets User' role..."
+  az role assignment create \
+    --role "Key Vault Secrets User" \
+    --assignee-object-id "$MANAGED_IDENTITY_PRINCIPAL_ID" \
+    --scope $(az keyvault show --name $KV_NAME --query id -o tsv) \
+    --assignee-principal-type ServicePrincipal
   
   az containerapp create \
     --name $AGENT_NAME \
@@ -359,13 +606,50 @@ else
     --max-replicas 5 \
     --cpu 2.0 \
     --memory 4Gi \
-    --env-vars $ENV_VARS_STRING
+    --env-vars $ENV_VARS_STRING \
+    --user-assigned ${AGENT_NAME}-identity
 
-  # Add volume mount after creation using YAML
-  echo "📎 Configuring persistent storage volume mount via YAML..."
-  VOLUME_YAML=$(mktemp /tmp/volume-config-XXXXXX.yaml)
-  cat > "$VOLUME_YAML" <<EOF
+  # Apply comprehensive configuration: secrets, env vars, and volume mounts in one update
+  echo "⚙️  Applying comprehensive configuration..."
+  UPDATE_YAML=$(mktemp /tmp/update-config-XXXXXX.yaml 2>/dev/null || mktemp)
+  cat > "$UPDATE_YAML" <<EOF
 properties:
+  configuration:
+    secrets:
+      - name: tavily-api-key
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/TAVILY-API-KEY
+        identity: system
+      - name: langchain-api-key
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/LANGCHAIN-API-KEY
+        identity: system
+      - name: azure-openai-endpoint
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/AZURE-OPENAI-ENDPOINT
+        identity: system
+      - name: azure-openai-deployment
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/AZURE-OPENAI-DEPLOYMENT
+        identity: system
+      - name: azure-openai-api-key
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/AZURE-OPENAI-API-KEY
+        identity: system
+      - name: upload-api-key
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/UPLOAD-API-KEY
+        identity: system
+      - name: storage-account-name
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/STORAGE-ACCOUNT-NAME
+        identity: system
+      - name: storage-account-key
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/STORAGE-ACCOUNT-KEY
+        identity: system
+      - name: file-share-name
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/FILE-SHARE-NAME
+        identity: system
+      - name: acr-password
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/ACR-PASSWORD
+        identity: system
+    registries:
+      - server: ${ACR_NAME}.azurecr.io
+        username: ${ACR_NAME}
+        passwordSecretRef: acr-password
   template:
     volumes:
       - name: persistent-storage
@@ -373,10 +657,83 @@ properties:
         storageType: AzureFile
     containers:
       - name: deep-research-agent
-        image: $ACR_NAME.azurecr.io/deep-research-agent:latest
+        image: ${ACR_NAME}.azurecr.io/deep-research-agent:latest
         resources:
           cpu: 2.0
           memory: 4Gi
+        env:
+          - name: VERIFY_SSL
+            value: "false"
+          - name: LOG_LEVEL
+            value: INFO
+          - name: LANGCHAIN_TRACING_V2
+            value: "true"
+          - name: LANGSMITH_ENDPOINT
+            value: https://api.smith.langchain.com
+          - name: LANGCHAIN_PROJECT
+            value: deep-research-production
+          - name: ENABLE_EVAL_TRACKING
+            value: "true"
+          - name: MODEL_TPM
+            value: "120000"
+          - name: MODEL_RPM
+            value: "500"
+          - name: GRAPH_RECURSION_LIMIT
+            value: "200"
+          - name: MAX_CONCURRENT_RESEARCH_UNITS
+            value: "3"
+          - name: MAX_RESEARCHER_ITERATIONS
+            value: "3"
+          - name: MAX_GLOB_DEPTH
+            value: "3"
+          - name: MAX_FILES_TO_READ
+            value: "20"
+          - name: MAX_TOTAL_SIZE_MB
+            value: "50"
+          - name: MODEL_MAX_RETRIES
+            value: "5"
+          - name: MODEL_INITIAL_BACKOFF
+            value: "1.0"
+          - name: MODEL_MAX_BACKOFF
+            value: "60.0"
+          - name: MODEL_BACKOFF_MULTIPLIER
+            value: "2.0"
+          - name: MODEL_RETRY_JITTER
+            value: "true"
+          - name: AZURE_OPENAI_API_VERSION
+            value: 2025-04-01-preview
+          - name: MEMORY_TYPE
+            value: cosmosdb
+          - name: COSMOSDB_DB_NAME
+            value: deep-research-checkpoints
+          - name: COSMOSDB_CONTAINER_NAME
+            value: checkpoints
+          - name: REPORTS_OUTPUT_FOLDER
+            value: $MOUNT_PATH/output
+          - name: EVAL_HISTORY_FILE
+            value: $MOUNT_PATH/output/eval_history/server_runs.jsonl
+          - name: DOC_FOLDER
+            value: $MOUNT_PATH/docs
+          - name: INPUT_FOLDER
+            value: $MOUNT_PATH/input
+          - name: TAVILY_API_KEY
+            secretRef: tavily-api-key
+          - name: LANGCHAIN_API_KEY
+            secretRef: langchain-api-key
+          - name: AZURE_OPENAI_ENDPOINT
+            secretRef: azure-openai-endpoint
+          - name: AZURE_OPENAI_DEPLOYMENT
+            secretRef: azure-openai-deployment
+          - name: AZURE_OPENAI_API_KEY
+            secretRef: azure-openai-api-key
+          - name: UPLOAD_API_KEY
+            secretRef: upload-api-key
+          - name: STORAGE_ACCOUNT_NAME
+            secretRef: storage-account-name
+          - name: STORAGE_ACCOUNT_KEY
+            secretRef: storage-account-key
+          - name: FILE_SHARE_NAME
+            secretRef: file-share-name
         volumeMounts:
           - volumeName: persistent-storage
             mountPath: $MOUNT_PATH
@@ -384,8 +741,8 @@ EOF
   az containerapp update \
     --name $AGENT_NAME \
     --resource-group $RESOURCE_GROUP \
-    --yaml "$VOLUME_YAML"
-  rm -f "$VOLUME_YAML"
+    --yaml "$UPDATE_YAML"
+  rm -f "$UPDATE_YAML"
 fi
 
 echo ""

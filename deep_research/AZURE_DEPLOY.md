@@ -7,7 +7,9 @@ This guide provides step-by-step instructions for deploying the Deep Research Ag
 - [Architecture Overview](#architecture-overview)
 - [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
+- [Deployment Quick Reference](#-deployment-quick-reference)
 - [Detailed Deployment Steps](#detailed-deployment-steps)
+- [Key Vault Integration Details](#-key-vault-integration-details)
 - [Persistent Storage with Azure Files](#persistent-storage-with-azure-files)
 - [Container-to-Container Communication](#container-to-container-communication)
 - [Configuration Management](#configuration-management)
@@ -184,6 +186,32 @@ echo "Test: curl https://$INTERNAL_URL/research/invoke"
 
 ---
 
+## ⚡ Deployment Quick Reference
+
+### Common Scenarios
+
+| Scenario | Commands |
+|----------|----------|
+| **🆕 First-Time** | `./secrets.sh` <br/> `./deploy.sh` |
+| **🔄 Code Changes** | `./deploy.sh` |
+| **🔑 Secrets Update** | `./secrets.sh` <br/> `./deploy.sh --skip-build` |
+| **⚡ Config Update** | `./deploy.sh --skip-build` |
+| **📁 Sync Files** | `./deploy.sh --sync-files` |
+
+### Command Options Reference
+
+| Flag | Description | Use Case |
+|------|-------------|----------|
+| *(none)* | Full build + deploy | Code changes, new features |
+| `--skip-build` | Skip Docker build | Config/secrets/RBAC updates only (saves ~2-5 mins) |
+| `--sync-files` | Sync local files to Azure | Initial setup or manual data update |
+
+**When to use `--skip-build`:**
+- ✅ Use for: Key Vault updates, Env var changes, RBAC tweaks.
+- ❌ Don't use for: Python code changes, `pyproject.toml` updates, `Dockerfile` changes.
+
+---
+
 ## Detailed Deployment Steps
 
 ### Step 1: Prepare Docker Image
@@ -298,23 +326,65 @@ az containerapp env telemetry application-insights set \
 
 ### Step 3: Configure Secrets in Azure Key Vault
 
+This project uses Azure Key Vault for secure secret management. Real secrets are **never** stored in version control.
+
+#### Setup Instructions
+
+**Option 1: Using `secrets.sh` (Recommended)**
+1. **Copy the template:** `cp secrets.sh.example secrets.sh`
+2. **Edit `secrets.sh`** with your actual values (Tavily, LangChain, Azure OpenAI).
+3. **Populate Key Vault:** `./secrets.sh`
+4. **Secure the file:** `chmod 600 secrets.sh` or delete it.
+
+**Option 2: Using Environment Variables**
+Set variables before running `deploy.sh`:
 ```bash
-# Create Key Vault
-export KV_NAME="kv-deep-agents" #-$(openssl rand -hex 3)
-az keyvault create \
-  --name $KV_NAME \
-  --resource-group $RESOURCE_GROUP \
-  --location $LOCATION \
-  --enable-rbac-authorization false
+export TAVILY_API_KEY="tvly-..."
+export AZURE_OPENAI_API_KEY="..."
+./deploy.sh
+```
+The script will detect these and update Key Vault automatically.
 
-# Store secrets
-az keyvault secret set --vault-name $KV_NAME --name TAVILY-API-KEY --value "<your-tavily-key>"
-az keyvault secret set --vault-name $KV_NAME --name LANGCHAIN-API-KEY --value "<your-langsmith-key>"
-az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-ENDPOINT --value "<your-azure-endpoint>"
-az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-DEPLOYMENT --value "<your-deployment>"
-az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-API-KEY --value "<your-azure-key>"
-az keyvault secret set --vault-name $KV_NAME --name UPLOAD-API-KEY --value "<your-azure-key>"
+#### Required API Keys
+- **Tavily**: [app.tavily.com](https://app.tavily.com)
+- **LangSmith**: [smith.langchain.com](https://smith.langchain.com/settings)
+- **Azure OpenAI**: Keys and Endpoint from Azure Portal resource.
 
+#### Security Best Practices
+- ✅ Use `secrets.sh.example` as a template.
+- ✅ Store real secrets in Key Vault.
+- ❌ **NEVER** commit `secrets.sh` or `.env` files.
+- ❌ **NEVER** hardcode secrets in source code.
+
+---
+
+## 🔐 Key Vault Integration Details
+
+### Architecture Flow
+
+```mermaid
+graph TB
+    secrets_sh[secrets.sh] -->|Store Secrets| KV[Azure Key Vault]
+    deploy_sh[deploy.sh] -->|Assign Role| MI[Managed Identity]
+    deploy_sh -->|Config secretref| ACA[Container App]
+    ACA -->|Fetch at Runtime| KV
+    MI -.->|Authorize Access| KV
+```
+
+### How It Works
+The fix implements **Azure Key Vault secret references** in Container Apps using managed identity:
+1. **Managed Identity**: A system-assigned managed identity is created for the app.
+2. **RBAC Authorization**: The identity is granted the "Key Vault Secrets User" role (least privilege).
+3. **Secret References**: Secrets are defined in the App config pointing to Key Vault URLs. 
+4. **Runtime Injection**: Azure injects the values as environment variables (e.g., `TAVILY_API_KEY=secretref:tavily-api-key`) at runtime.
+
+### Verification
+```bash
+# List secrets in Key Vault
+az keyvault secret list --vault-name $KV_NAME -o table
+
+# Verify managed identity permissions
+az role assignment list --assignee $PRINCIPAL_ID --scope $KV_ID
 ```
 
 ### Step 4: Deploy Deep Research Agent
@@ -529,6 +599,7 @@ graph TB
     FileShare -->|Persistent dirs| Docs[docs/]
     FileShare -->|Persistent dirs| Output[output/]
     FileShare -->|Persistent dirs| Input[input/]
+    FileShare -->|Persistent dirs| Input[.langgraph_api/]
     
     style FileShare fill:#e1f5ff
     style CosmosDB fill:#fff4e1
@@ -2248,7 +2319,35 @@ az containerapp env containerregistry update \
   --acr-server $ACR_NAME.azurecr.io
 ```
 
-#### 2. Port Connection Refused
+#### 2. Key Vault Secrets Not Loading
+
+**Symptoms**: Authentication errors or "environment variable not found" in container logs.
+
+**Troubleshooting Steps**:
+1. **Verify secrets exist in Key Vault**:
+   ```bash
+   az keyvault secret list --vault-name $KV_NAME -o table
+   ```
+2. **Check Managed Identity role assignment**:
+   ```bash
+   PRINCIPAL_ID=$(az containerapp show --name $AGENT_NAME --resource-group $RESOURCE_GROUP --query identity.principalId -o tsv)
+   az role assignment list --assignee $PRINCIPAL_ID --scope $KV_ID -o table
+   ```
+   *Should show "Key Vault Secrets User" role.*
+3. **Verify secret references in App configuration**:
+   ```bash
+   az containerapp show --name $AGENT_NAME --resource-group $RESOURCE_GROUP --query "properties.configuration.secrets"
+   ```
+
+**Solution**: Re-run `./secrets.sh` and then `./deploy.sh --skip-build` to refresh the configuration.
+
+#### 3. ACR Image Pull Failures (401 Unauthorized)
+
+**Root Cause**: The container app is attempting to use managed identity for ACR access, but lacks `AcrPull` permissions.
+
+**Solution**: Ensure `deploy.sh` is configured to use the ACR admin password as a secret reference for registry authentication. Verify the `acr-password` secret exists in Key Vault and is correctly referenced in the `registries` block of the container app configuration.
+
+#### 4. Port Connection Refused
 
 ```bash
 # Verify target port configuration
