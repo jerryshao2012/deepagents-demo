@@ -1,9 +1,44 @@
 #!/bin/bash
 set -e
 
+# Timer tracking
+TOTAL_START_TIME=$(date +%s)
+STEP_TIMES=()
+
+# Function to track step timing
+start_step() {
+  STEP_NAME="$1"
+  STEP_START=$(date +%s)
+  echo "⏱️  Starting: $STEP_NAME"
+}
+
+end_step() {
+  STEP_END=$(date +%s)
+  DURATION=$((STEP_END - STEP_START))
+  STEP_TIMES+=("$STEP_NAME: ${DURATION}s")
+  echo "✅ Completed: $STEP_NAME (${DURATION}s)"
+  echo ""
+}
+
+print_timing_summary() {
+  TOTAL_END=$(date +%s)
+  TOTAL_DURATION=$((TOTAL_END - TOTAL_START_TIME))
+  echo ""
+  echo "═══════════════════════════════════════════════════════"
+  echo "⏱️  Deployment Timing Summary"
+  echo "═══════════════════════════════════════════════════════"
+  for timing in "${STEP_TIMES[@]}"; do
+    echo "   • $timing"
+  done
+  echo "───────────────────────────────────────────────────────"
+  echo "   Total deployment time: ${TOTAL_DURATION}s"
+  echo "═══════════════════════════════════════════════════════"
+}
+
 # Parse command-line arguments
 SYNC_FILES=false
 SKIP_BUILD=false
+SKIP_KV_ACCESS=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -15,19 +50,25 @@ while [[ $# -gt 0 ]]; do
       SKIP_BUILD=true
       shift
       ;;
+    --skip-kv-access)
+      SKIP_KV_ACCESS=true
+      shift
+      ;;
     --help|-h)
       echo "Usage: ./deploy.sh [OPTIONS]"
       echo ""
       echo "Options:"
-      echo "  --sync-files    Sync local files (docs/, output/, input/) to Azure File Share"
-      echo "  --skip-build    Skip Docker build and use existing image in ACR"
-      echo "  --help, -h      Show this help message"
+      echo "  --sync-files     Sync local files (docs/, output/, input/) to Azure File Share"
+      echo "  --skip-build     Skip Docker build and use existing image in ACR"
+      echo "  --skip-kv-access Skip Key Vault access policy updates (faster re-deployment)"
+      echo "  --help, -h       Show this help message"
       echo ""
       echo "Examples:"
-      echo "  ./deploy.sh                  # Full deployment with build"
-      echo "  ./deploy.sh --sync-files     # Deploy with build and sync files"
-      echo "  ./deploy.sh --skip-build     # Deploy existing image without rebuild"
-      echo "  ./deploy.sh --skip-build --sync-files  # Deploy existing image and sync files"
+      echo "  ./deploy.sh                                    # Full deployment with build"
+      echo "  ./deploy.sh --sync-files                       # Deploy with build and sync files"
+      echo "  ./deploy.sh --skip-build                       # Deploy existing image without rebuild"
+      echo "  ./deploy.sh --skip-build --sync-files          # Deploy existing image and sync files"
+      echo "  ./deploy.sh --skip-build --skip-kv-access      # Fast re-deployment (no build, no KV access check)"
       echo ""
       echo "Note: For manual file sync after deployment, use:"
       echo "  ./sync-files.sh"
@@ -51,22 +92,25 @@ else
 fi
 
 # 1. Create resource group
-echo "📦 Creating resource group..."
+start_step "Resource Group Setup"
 if az group show --name $RESOURCE_GROUP &> /dev/null; then
   echo "✅ Resource group '$RESOURCE_GROUP' already exists. Skipping creation."
 else
   az group create --name $RESOURCE_GROUP --location $LOCATION
 fi
+end_step
 
 # 2. Create ACR
-echo "🐳 Creating Container Registry..."
+start_step "Container Registry Setup"
 if az acr show --name $ACR_NAME --resource-group $RESOURCE_GROUP &> /dev/null; then
   echo "✅ Container Registry '$ACR_NAME' already exists. Skipping creation."
 else
   az acr create --resource-group $RESOURCE_GROUP --name $ACR_NAME --sku Standard --admin-enabled true
 fi
+end_step
 
 # 3. Increment API version (only if building)
+start_step "API Version Management"
 if [ "$SKIP_BUILD" = false ]; then
   echo "🔢 Incrementing API version..."
   python3 ./increment_version.py
@@ -77,8 +121,10 @@ else
   NEW_VERSION=$(grep 'API_VERSION = ' webapp.py | grep -o '"[^"]*"' | tr -d '"')
   echo "ℹ️  Current API version: $NEW_VERSION"
 fi
+end_step
 
 # 4. Build and push image (optional)
+start_step "Docker Image Build & Push"
 if [ "$SKIP_BUILD" = false ]; then
   echo "🔨 Building Docker image..."
   # Ensure we're in the correct directory (where Dockerfile is located)
@@ -100,9 +146,10 @@ else
   fi
   echo "✅ Verified image exists in ACR"
 fi
+end_step
 
 # 5. Create environment
-echo "🌍 Creating Container Apps environment..."
+start_step "Container Apps Environment Setup"
 if az containerapp env show --name $ENV_NAME --resource-group $RESOURCE_GROUP &> /dev/null; then
   echo "✅ Container Apps environment '$ENV_NAME' already exists. Skipping creation."
 else
@@ -111,9 +158,10 @@ else
     --resource-group $RESOURCE_GROUP \
     --location $LOCATION
 fi
+end_step
 
 # 6. Create Key Vault and store secrets
-echo "🔐 Setting up Key Vault..."
+start_step "Key Vault Setup & Secrets"
 if az keyvault show --name $KV_NAME --resource-group $RESOURCE_GROUP &> /dev/null; then
   echo "✅ Key Vault '$KV_NAME' already exists. Skipping creation."
 else
@@ -125,78 +173,62 @@ echo "🔑 Ensuring Key Vault access configuration..."
 # Try to enable RBAC, but don't fail if it's already set or if we lack permissions
 az keyvault update --name $KV_NAME --resource-group $RESOURCE_GROUP --enable-rbac-authorization true 2>/dev/null || true
 
-# Function to grant Key Vault access to an identity
-grant_kv_access() {
-  local kv_name=$1
-  local principal_id=$2
-  
-  echo "🔐 Ensuring identity '$principal_id' has access to Key Vault '$kv_name'..."
-  
-  # Check if RBAC is enabled
-  local rbac_enabled=$(az keyvault show --name "$kv_name" --query "properties.enableRbacAuthorization" -o tsv 2>/dev/null || echo "false")
-  
-  if [ "$rbac_enabled" = "true" ]; then
-    echo "   Using RBAC for authorization..."
-    local kv_id=$(az keyvault show --name "$kv_name" --query id -o tsv)
-    az role assignment create \
-      --role "Key Vault Secrets User" \
-      --assignee-object-id "$principal_id" \
-      --scope "$kv_id" \
-      --assignee-principal-type ServicePrincipal \
-      2>/dev/null || echo "   ✓ Role already assigned or assignment skipped"
-  else
-    echo "   Using Access Policies for authorization..."
-    az keyvault set-policy \
-      --name "$kv_name" \
-      --secret-permissions get list \
-      --object-id "$principal_id" \
-      --only-show-errors 2>/dev/null || echo "   ⚠️  Could not set access policy. Ensure you have permissions."
-  fi
-}
-
 # Store secrets in Key Vault (only if local values are set - avoids overwriting with 'placeholder')
 # Run ./secrets.sh separately to seed real values into Key Vault
 echo "🔑 Storing secrets in Key Vault (skipping secrets without local values)..."
+SECRETS_UPDATED=0
 if [ -n "${TAVILY_API_KEY:-}" ]; then
   az keyvault secret set --vault-name $KV_NAME --name TAVILY-API-KEY --value "$TAVILY_API_KEY" --only-show-errors || true
   echo "  ✓ TAVILY-API-KEY updated"
+  SECRETS_UPDATED=$((SECRETS_UPDATED + 1))
 else
   echo "  ⏭️  TAVILY_API_KEY not set locally - keeping existing KV value"
 fi
 if [ -n "${LANGCHAIN_API_KEY:-}" ]; then
   az keyvault secret set --vault-name $KV_NAME --name LANGCHAIN-API-KEY --value "$LANGCHAIN_API_KEY" --only-show-errors || true
   echo "  ✓ LANGCHAIN-API-KEY updated"
+  SECRETS_UPDATED=$((SECRETS_UPDATED + 1))
 else
   echo "  ⏭️  LANGCHAIN_API_KEY not set locally - keeping existing KV value"
 fi
 if [ -n "${AZURE_OPENAI_ENDPOINT:-}" ]; then
   az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-ENDPOINT --value "$AZURE_OPENAI_ENDPOINT" --only-show-errors || true
   echo "  ✓ AZURE-OPENAI-ENDPOINT updated"
+  SECRETS_UPDATED=$((SECRETS_UPDATED + 1))
 else
   echo "  ⏭️  AZURE_OPENAI_ENDPOINT not set locally - keeping existing KV value"
 fi
 if [ -n "${AZURE_OPENAI_DEPLOYMENT:-}" ]; then
   az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-DEPLOYMENT --value "$AZURE_OPENAI_DEPLOYMENT" --only-show-errors || true
   echo "  ✓ AZURE-OPENAI-DEPLOYMENT updated"
+  SECRETS_UPDATED=$((SECRETS_UPDATED + 1))
 else
   echo "  ⏭️  AZURE_OPENAI_DEPLOYMENT not set locally - keeping existing KV value"
 fi
 if [ -n "${AZURE_OPENAI_API_KEY:-}" ]; then
   az keyvault secret set --vault-name $KV_NAME --name AZURE-OPENAI-API-KEY --value "$AZURE_OPENAI_API_KEY" --only-show-errors || true
   echo "  ✓ AZURE-OPENAI-API-KEY updated"
+  SECRETS_UPDATED=$((SECRETS_UPDATED + 1))
 else
   echo "  ⏭️  AZURE_OPENAI_API_KEY not set locally - keeping existing KV value"
 fi
 if [ -n "${UPLOAD_API_KEY:-}" ]; then
   az keyvault secret set --vault-name $KV_NAME --name UPLOAD-API-KEY --value "$UPLOAD_API_KEY" --only-show-errors || true
   echo "  ✓ UPLOAD-API-KEY updated"
+  SECRETS_UPDATED=$((SECRETS_UPDATED + 1))
 else
   echo "  ⏭️  UPLOAD_API_KEY not set locally - keeping existing KV value"
 fi
-echo "✅ Key Vault secret update complete"
+if [ $SECRETS_UPDATED -gt 0 ]; then
+  echo "✅ Key Vault secret update complete ($SECRETS_UPDATED secrets updated)"
+else
+  echo "✅ No secrets updated (all using existing KV values)"
+fi
 echo "💡 Tip: Run ./secrets.sh to update all API keys in Key Vault"
+end_step
 
 # 7. Setup Persistent Storage
+start_step "Persistent Storage Setup"
 echo ""
 echo "📦 Setting up Azure Files persistent storage..."
 
@@ -336,8 +368,10 @@ az keyvault secret set --vault-name $KV_NAME --name STORAGE-ACCOUNT-KEY --value 
 az keyvault secret set --vault-name $KV_NAME --name FILE-SHARE-NAME --value $FILE_SHARE_NAME
 
 echo "✅ Persistent storage setup complete"
+end_step
 
 # 8. Deploy or update agent
+start_step "Container App Deployment"
 echo "🚀 Deploying agent..."
 
 # Prepare environment variables with persistent storage paths
@@ -399,27 +433,65 @@ echo "✅ Environment storage registered"
 if az containerapp show --name $AGENT_NAME --resource-group $RESOURCE_GROUP &> /dev/null; then
   echo "📝 Container app already exists. Updating..."
     
-  # 8a. Ensure managed identity exists and has permissions
-  echo "🔐 Ensuring managed identity and permissions..."
-  
-  # Enable SystemAssigned identity if not already enabled
-  az containerapp identity assign \
-    --name $AGENT_NAME \
-    --resource-group $RESOURCE_GROUP \
-    --system-assigned \
-    --only-show-errors > /dev/null
+  # 8a. Ensure managed identity exists and has permissions (skip if --skip-kv-access)
+  if [ "$SKIP_KV_ACCESS" = false ]; then
+    echo "🔐 Ensuring managed identity and permissions..."
     
-  # Get the principal ID
-  PRINCIPAL_ID=$(az containerapp show \
-    --name $AGENT_NAME \
-    --resource-group $RESOURCE_GROUP \
-    --query "identity.principalId" \
-    -o tsv)
-    
-  if [ -n "$PRINCIPAL_ID" ]; then
-    grant_kv_access "$KV_NAME" "$PRINCIPAL_ID"
+    # Enable SystemAssigned identity if not already enabled
+    az containerapp identity assign \
+      --name $AGENT_NAME \
+      --resource-group $RESOURCE_GROUP \
+      --system-assigned \
+      --only-show-errors > /dev/null
+      
+    # Get the principal ID
+    PRINCIPAL_ID=$(az containerapp show \
+      --name $AGENT_NAME \
+      --resource-group $RESOURCE_GROUP \
+      --query "identity.principalId" \
+      -o tsv)
+      
+    if [ -n "$PRINCIPAL_ID" ]; then
+      # Function to grant Key Vault access to an identity (optimized with skip check)
+      echo "🔐 Ensuring identity '$PRINCIPAL_ID' has access to Key Vault '$KV_NAME'..."
+      
+      # Check if RBAC is enabled
+      RBAC_ENABLED=$(az keyvault show --name "$KV_NAME" --query "properties.enableRbacAuthorization" -o tsv 2>/dev/null || echo "false")
+      
+      if [ "$RBAC_ENABLED" = "true" ]; then
+        echo "   Using RBAC for authorization..."
+        KV_ID=$(az keyvault show --name "$KV_NAME" --query id -o tsv)
+        # Check if role assignment already exists
+        EXISTING_ROLE=$(az role assignment list \
+          --assignee "$PRINCIPAL_ID" \
+          --scope "$KV_ID" \
+          --role "Key Vault Secrets User" \
+          --query "length(@)" -o tsv 2>/dev/null || echo "0")
+        
+        if [ "$EXISTING_ROLE" = "0" ]; then
+          az role assignment create \
+            --role "Key Vault Secrets User" \
+            --assignee-object-id "$PRINCIPAL_ID" \
+            --scope "$KV_ID" \
+            --assignee-principal-type ServicePrincipal \
+            2>/dev/null || echo "   ✓ Role assignment completed"
+        else
+          echo "   ✓ RBAC role already assigned, skipping"
+        fi
+      else
+        echo "   Using Access Policies for authorization..."
+        # Access policies don't have easy skip check, so we'll just set it
+        az keyvault set-policy \
+          --name "$KV_NAME" \
+          --secret-permissions get list \
+          --object-id "$PRINCIPAL_ID" \
+          --only-show-errors 2>/dev/null || echo "   ⚠️  Could not set access policy. Ensure you have permissions."
+      fi
+    else
+      echo "⚠️  Could not find principal ID for managed identity."
+    fi
   else
-    echo "⚠️  Could not find principal ID for managed identity."
+    echo "⏭️  Skipping Key Vault access check (--skip-kv-access)"
   fi
 
   # Update image, secrets, env vars, and volume mounts in a single YAML update
@@ -585,13 +657,25 @@ else
       -o tsv)
   fi
   
-  # Assign Key Vault Secrets User role
+  # Assign Key Vault Secrets User role (check if already assigned)
   echo "   Assigning 'Key Vault Secrets User' role..."
-  az role assignment create \
+  KV_SCOPE=$(az keyvault show --name $KV_NAME --query id -o tsv)
+  EXISTING_ROLE=$(az role assignment list \
+    --assignee "$MANAGED_IDENTITY_PRINCIPAL_ID" \
+    --scope "$KV_SCOPE" \
     --role "Key Vault Secrets User" \
-    --assignee-object-id "$MANAGED_IDENTITY_PRINCIPAL_ID" \
-    --scope $(az keyvault show --name $KV_NAME --query id -o tsv) \
-    --assignee-principal-type ServicePrincipal
+    --query "length(@)" -o tsv 2>/dev/null || echo "0")
+  
+  if [ "$EXISTING_ROLE" = "0" ]; then
+    az role assignment create \
+      --role "Key Vault Secrets User" \
+      --assignee-object-id "$MANAGED_IDENTITY_PRINCIPAL_ID" \
+      --scope "$KV_SCOPE" \
+      --assignee-principal-type ServicePrincipal
+    echo "   ✓ Role assigned successfully"
+  else
+    echo "   ✓ Role already assigned, skipping"
+  fi
   
   az containerapp create \
     --name $AGENT_NAME \
@@ -744,6 +828,7 @@ EOF
     --yaml "$UPDATE_YAML"
   rm -f "$UPDATE_YAML"
 fi
+end_step
 
 echo ""
 echo "═══════════════════════════════════════════════════════"
@@ -775,6 +860,7 @@ echo "   • Monitor: https://portal.azure.com/#@/resource/subscriptions/$AZURE_
 echo "═══════════════════════════════════════════════════════"
 
 # Test health endpoint with version verification
+start_step "Health Check Verification"
 echo ""
 echo "🔍 Testing health endpoint (waiting for container to start)..."
 
@@ -821,3 +907,7 @@ else
   echo ""
   echo "✅ Deployment verified successfully!"
 fi
+end_step
+
+# Print timing summary before exit
+print_timing_summary
