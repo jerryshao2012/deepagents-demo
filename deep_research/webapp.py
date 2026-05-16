@@ -13,10 +13,10 @@ load_dotenv()
 DOCS_ROOT = Path(__file__).resolve().parent / "docs"
 
 # API version - increment this with each new build
-API_VERSION = "1.8.15"
+API_VERSION = "1.8.16"
 
 # API Key for authentication (from environment variable)
-API_KEY = os.environ.get("UPLOAD_API_KEY", "")
+API_KEY = os.environ.get("UPLOAD_API_KEY") or os.environ.get("LANGCHAIN_API_KEY", "")
 if not API_KEY:
     # Generate a default key for development (should be set in production)
     import secrets

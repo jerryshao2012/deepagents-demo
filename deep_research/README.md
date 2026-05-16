@@ -297,6 +297,35 @@ Give me an overview of AI Evaluation through Harness Engineering
 
 The project includes a FastAPI-based document upload service that allows you to programmatically upload documents to the research agent's docs folder via HTTP API.
 
+---
+
+## 🔒 Security & Authentication
+
+The LangGraph server and the Document Upload API are secured with API key authentication to ensure that only authorized users can access the research capabilities and manage documents.
+
+### LangGraph Server Authentication
+
+When running `langgraph dev`, the server is protected by a custom authentication handler. All API requests must include a valid API key in the headers.
+
+- **Environment Variable**: `LANGCHAIN_API_KEY`
+- **Supported Headers**: 
+  - `x-api-key: your_key` (recommended)
+  - `Authorization: Bearer your_key`
+
+If `LANGCHAIN_API_KEY` is not set, the server will fallback to using `UPLOAD_API_KEY` for authentication.
+
+### Document Upload API Authentication
+
+The custom document upload service in `webapp.py` is also secured.
+
+- **Environment Variable**: `UPLOAD_API_KEY`
+- **Supported Header**: `X-API-Key: your_key`
+
+> [!TIP]
+> For a seamless experience, you can set both `LANGCHAIN_API_KEY` and `UPLOAD_API_KEY` to the same secure value in your `.env` file.
+
+---
+
 #### Starting the Upload API Server
 
 Set your API key and start the server:
