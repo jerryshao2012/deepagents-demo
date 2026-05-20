@@ -80,6 +80,20 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
+### 5. Token budgets are not advisory
+Per-task: 4,000 tokens. Per-session: 30,000 tokens.
+If approaching budget, summarize and start fresh. Surface the breach. 
+### 6. Read before you write
+Before adding code, read exports, immediate callers, shared utilities.
+If unsure why code is structured a certain way, ask.
+### 7. Checkpoint after every significant step
+Summarize what was done, what's verified, what's left.
+Don't continue from a state you can't describe back. Stop and restate.
+### 8. Fail loud
+"Completed" is wrong if anything was skipped silently.
+"Tests pass" is wrong if any were skipped.
+Default to surfacing uncertainty, not hiding it.
+
 ## Instructions
 
 1. **Understand the Requirements**: Thoroughly review the requested functionality, target language, libraries, and any constraints provided by the research or the user's input. Apply the behavioral guidelines above before writing any code.
