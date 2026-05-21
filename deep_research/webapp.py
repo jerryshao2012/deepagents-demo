@@ -4,8 +4,8 @@ import shutil
 from pathlib import Path, PurePosixPath
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile, status
+from fastapi.responses import FileResponse, RedirectResponse
 
 # Load environment variables
 load_dotenv()
@@ -13,7 +13,7 @@ load_dotenv()
 DOCS_ROOT = Path(__file__).resolve().parent / "docs"
 
 # API version - increment this with each new build
-API_VERSION = "1.8.16"
+API_VERSION = "1.8.18"
 
 # API Key for authentication (from environment variable)
 API_KEY = os.environ.get("UPLOAD_API_KEY") or os.environ.get("LANGCHAIN_API_KEY", "")
@@ -25,10 +25,31 @@ if not API_KEY:
     print(f"⚠️  WARNING: UPLOAD_API_KEY not set. Using generated key: {API_KEY}")
     print("   Set UPLOAD_API_KEY in your .env file for production use.")
 
+# Import OAuth handlers
+try:
+    from oauth_handler import (
+        get_oauth_login_url,
+        handle_github_callback,
+        handle_google_callback,
+        user_manager,
+    )
+
+    OAUTH_ENABLED = True
+except ImportError:
+    OAUTH_ENABLED = False
+    print("⚠️  OAuth dependencies not installed. OAuth login will be disabled.")
+
 app = FastAPI(
     title="Document Upload API",
     description="Upload documents to the deep research agent docs folder",
     version=API_VERSION
+)
+
+from starlette.middleware.sessions import SessionMiddleware
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ.get("OAUTH_SECRET_KEY", "oauth-session-secret-key-fallback-for-dev"),
 )
 
 
@@ -409,6 +430,137 @@ async def delete_folder_contents(
         "message": f"All files deleted from folder '{folder}'",
         "folder": str(relative_folder),
         "deleted_count": deleted_count,
+    }
+
+
+# OAuth Authentication Endpoints
+@app.get("/auth/login/{provider}")
+async def oauth_login(provider: str, request: Request):
+    """Initiate OAuth login with Google or GitHub.
+    
+    Usage:
+    - GET /auth/login/google
+    - GET /auth/login/github
+    """
+    if not OAUTH_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OAuth authentication is not enabled. Install required dependencies.",
+        )
+
+    if provider not in ["google", "github"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported OAuth provider: {provider}. Use 'google' or 'github'.",
+        )
+
+    # Get base URL from request
+    base_url = str(request.base_url).rstrip("/")
+    redirect_uri = f"{base_url}/auth/callback/{provider}"
+
+    try:
+        login_url = await get_oauth_login_url(request, provider, redirect_uri)
+        return RedirectResponse(url=login_url)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate login URL: {str(e)}",
+        )
+
+
+@app.get("/auth/callback/{provider}")
+async def oauth_callback(provider: str, request: Request):
+    """Handle OAuth callback from Google or GitHub.
+    
+    Returns user information and session token.
+    """
+    if not OAUTH_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OAuth authentication is not enabled.",
+        )
+
+    if provider not in ["google", "github"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported OAuth provider: {provider}.",
+        )
+
+    try:
+        if provider == "google":
+            user_data = await handle_google_callback(request)
+        else:
+            user_data = await handle_github_callback(request)
+
+        # Redirect back to the frontend with the session token
+        frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+        session_token = user_data["session_token"]
+        return RedirectResponse(url=f"{frontend_url}/login/success?token={session_token}")
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"OAuth authentication failed: {str(e)}",
+        )
+
+
+@app.get("/auth/session/validate")
+async def validate_session(request: Request, x_api_key: str | None = Header(None)):
+    """Validate an OAuth session token.
+    
+    Provide session token via X-API-Key header or Authorization: Bearer header.
+    """
+    if not OAUTH_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OAuth authentication is not enabled.",
+        )
+
+    # Get token from header
+    token = x_api_key
+    if not token:
+        auth_header = request.headers.get("authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing session token.",
+        )
+
+    # Validate session
+    user_data = user_manager.validate_session(token)
+    if not user_data:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session token.",
+        )
+
+    return {
+        "valid": True,
+        "user": {
+            "identity": user_data["identity"],
+            "email": user_data.get("email"),
+            "name": user_data.get("name"),
+            "provider": user_data.get("provider"),
+            "avatar_url": user_data.get("picture") or user_data.get("avatar_url"),
+        },
+        "metadata": {
+            k: v
+            for k, v in user_data.items()
+            if k
+               not in [
+                   "identity",
+                   "email",
+                   "name",
+                   "provider",
+                   "picture",
+                   "avatar_url",
+                   "raw_token",
+                   "session_token",
+               ]
+        },
     }
 
 
