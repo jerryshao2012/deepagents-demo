@@ -786,6 +786,34 @@ graph TB
 
 To configure OAuth client credentials for local development and production, follow these setup steps:
 
+#### Quick Reference: Google OAuth Configuration
+
+| Configuration Item | Local Development | Production (Azure) |
+|-------------------|-------------------|-------------------|
+| **Frontend URL** | `http://localhost:3000` | `https://deepagent-ui.calmsmoke-0bc2dc70.canadacentral.azurecontainerapps.io` |
+| **Backend Callback** | `http://localhost:2024/auth/callback/google` | `https://deep-research-agent.calmsmoke-0bc2dc70.canadacentral.azurecontainerapps.io/auth/callback/google` |
+| **Authorized JS Origins** | `http://localhost:3000` | Your frontend HTTPS URL |
+| **Authorized Redirect URIs** | `http://localhost:2024/auth/callback/google` | Your backend HTTPS URL + `/auth/callback/google` |
+
+> [!NOTE]
+> - The **LangGraph dev server** runs on port **2024** by default (not 8000)
+> - The **frontend UI** typically runs on port **3000**
+> - Both **Authorized JavaScript origins** AND **Authorized redirect URIs** must be configured in Google Cloud Console
+
+#### Quick Reference: GitHub OAuth Configuration
+
+| Configuration Item | Local Development | Production (Azure) |
+|-------------------|-------------------|-------------------|
+| **Application Name** | `BMO Deep Agent Local` | `BMO Deep Agent` |
+| **Homepage URL** | `http://localhost:3000` | `https://deepagent-ui.calmsmoke-0bc2dc70.canadacentral.azurecontainerapps.io` |
+| **Authorization Callback URL** | `http://localhost:2024/auth/callback/github` | `https://deep-research-agent.calmsmoke-0bc2dc70.canadacentral.azurecontainerapps.io/auth/callback/github` |
+| **Device Flow** | Optional | Optional |
+
+> [!NOTE]
+> - GitHub OAuth apps are **free** and can be created under your personal GitHub account or organization
+> - Unlike Google OAuth, GitHub uses **Homepage URL** (not separate "Authorized JavaScript origins")
+> - You must create **separate OAuth apps** for local and production environments
+
 #### 1. Google OAuth Setup
 1. Go to the [Google Cloud Console](https://console.cloud.google.com/).
 2. Create a new project or select an existing one.
@@ -795,22 +823,53 @@ To configure OAuth client credentials for local development and production, foll
 6. Navigate to **APIs & Services > Credentials**.
 7. Click **+ Create Credentials** at the top and select **OAuth client ID**.
 8. Set the **Application type** to **Web application**.
-9. Add a name (e.g., BMO Deep Agent Local).
-10. Under **Authorized redirect URIs**, click **+ Add URI** and enter:
-    - For Local Development: `http://localhost:8000/auth/callback/google`
-    - For Docker/Production: Set according to your deployment domain (e.g. `https://your-backend-url.com/auth/callback/google`).
-11. Click **Create** and copy the generated **Client ID** and **Client Secret**.
+9. Add a name (e.g., "BMO Deep Agent").
+10. **Configure Authorized JavaScript origins** (required for browser-based OAuth flows):
+    - For Local Development: `http://localhost:3000`
+    - For Production: Add your frontend URL (e.g., `https://deepagent-ui.calmsmoke-0bc2dc70.canadacentral.azurecontainerapps.io`)
+11. **Configure Authorized redirect URIs** (must match your backend callback endpoints exactly):
+    - For Local Development: `http://localhost:2024/auth/callback/google`
+    - For Production: Add your backend URL (e.g., `https://deep-research-agent.calmsmoke-0bc2dc70.canadacentral.azurecontainerapps.io/auth/callback/google`)
+12. Click **Create** and copy the generated **Client ID** and **Client Secret**.
+
+> [!IMPORTANT]
+> - The redirect URI must match **exactly** (including protocol, host, and port) between Google Cloud Console and your application configuration.
+> - Google distinguishes between `http://localhost:2024` and `http://127.0.0.1:2024` - use `localhost` consistently.
+> - In production, always use HTTPS URLs for both origins and redirect URIs.
 
 #### 2. GitHub OAuth Setup
+
+> [!IMPORTANT]
+> You need to create **two separate GitHub OAuth applications**: one for local development and one for production.
+
+##### Local Development App
 1. Go to your [GitHub Developer Settings](https://github.com/settings/developers).
 2. Click on **OAuth Apps** in the left sidebar, then click **New OAuth App**.
 3. Fill in the application details:
-   - **Application name**: BMO Deep Agent Local
+   - **Application name**: `BMO Deep Agent Local`
    - **Homepage URL**: `http://localhost:3000` (points to the frontend UI)
-   - **Authorization callback URL**: `http://localhost:8000/auth/callback/github` (points to the backend API callback)
+   - **Authorization callback URL**: `http://localhost:2024/auth/callback/github` (points to the backend API callback)
+   - **Enable Device Flow**: Optional - check this if you want to support device-based authentication flows
 4. Click **Register application**.
 5. Copy the **Client ID** from the application dashboard page.
 6. Click **Generate a new client secret** and copy the generated secret value immediately.
+
+##### Production App
+1. Repeat the same process to create a production OAuth app.
+2. Fill in the application details:
+   - **Application name**: `BMO Deep Agent`
+   - **Homepage URL**: `https://deepagent-ui.calmsmoke-0bc2dc70.canadacentral.azurecontainerapps.io` (your frontend URL)
+   - **Authorization callback URL**: `https://deep-research-agent.calmsmoke-0bc2dc70.canadacentral.azurecontainerapps.io/auth/callback/github` (your backend URL)
+   - **Enable Device Flow**: Optional - check this if needed for your deployment
+3. Click **Register application**.
+4. Copy the **Client ID** and **Client Secret** for production use.
+
+> [!IMPORTANT]
+> - GitHub uses **Homepage URL** (not "Authorized JavaScript origins" like Google) to identify your application
+> - The **Authorization callback URL** must match exactly (including protocol, host, and port) between GitHub and your application
+> - GitHub distinguishes between `http://localhost:2024` and `http://127.0.0.1:2024` - use `localhost` consistently
+> - In production, always use HTTPS URLs for both homepage and callback URLs
+> - GitHub OAuth scope `user:email` is required to access user email addresses (configured automatically in the code)
 
 #### 3. Update the Backend Environment Config
 Create or open the `.env` file in the backend `deep_research` directory and add the copied client IDs and secrets:
@@ -850,12 +909,15 @@ python webapp.py
 
 ##### Method A: OAuth Authentication (Recommended)
 1. Navigate in your browser to start the flow:
-   - **Google Login**: `http://localhost:8000/auth/login/google`
-   - **GitHub Login**: `http://localhost:8000/auth/login/github`
+   - **Google Login**: `http://localhost:2024/auth/login/google`
+   - **GitHub Login**: `http://localhost:2024/auth/login/github`
 2. Complete authorization on the provider's login screen.
 3. Upon success, the backend redirects you to:
    `http://localhost:3000/login/success?token=SESSION_TOKEN`
 4. Copy the `session_token` parameter from the URL.
+
+> [!NOTE]
+> The LangGraph dev server runs on port **2024**, so all authentication endpoints are accessible at `http://localhost:2024/auth/*`
 
 ##### Method B: Legacy API Key Authentication
 API Key authentication remains fully active. Requests containing your admin key will work identically:
@@ -946,6 +1008,9 @@ Endpoints extracting authenticated user state will receive structured dictionari
   }
 }
 ```
+
+> [!NOTE]
+> GitHub OAuth provides **rich profile metadata** including username, bio, followers, repositories, and more. The `username` field in metadata is the GitHub handle (login), while `name` is the display name.
 
 ##### API Key User (Legacy Admin)
 ```json
@@ -1054,8 +1119,43 @@ This means the client secrets/IDs are not parsed correctly or dependency package
 
 #### 2. "Invalid Redirect URI" error from Google/GitHub
 The redirection URI on the provider dashboard must match *exactly* to the protocol, host, and port of the FastAPI app callback endpoint:
-- Correct local callback URI: `http://localhost:8000/auth/callback/google`
-- Note: Google Cloud Console distinguishes `http://localhost:8000` from `http://127.0.0.1:8000`.
+- Correct local callback URI: `http://localhost:2024/auth/callback/google`
+- Note: Google Cloud Console distinguishes `http://localhost:2024` from `http://127.0.0.1:2024`.
+- **Important**: The LangGraph dev server typically runs on port 2024, not port 8000. Verify your server port matches the redirect URI configuration.
+- For production deployments, ensure the full HTTPS URL is configured (e.g., `https://your-domain.com/auth/callback/google`).
+
+#### 2.1. "Origin Mismatch" error from Google
+Google OAuth requires **Authorized JavaScript origins** to be configured in addition to redirect URIs:
+- Add your frontend URL to Authorized JavaScript origins (e.g., `http://localhost:3000` for local development)
+- This is separate from Authorized redirect URIs - both must be configured
+- Origins don't include the path (just protocol + host + port)
+
+#### 2.2. "Invalid redirect_uri" error from GitHub
+GitHub OAuth common issues:
+- The **Authorization callback URL** must match exactly between GitHub and your app configuration
+- GitHub uses **Homepage URL** (not "Authorized JavaScript origins") - only one URL needs to be configured
+- Verify the callback URL includes the correct port (`2024` for LangGraph dev server)
+- Common mistake: Using `http://localhost:8000` instead of `http://localhost:2024`
+- Email addresses may be null if user has no public email - the code falls back to first available email
+
+> [!TIP]
+> GitHub OAuth is simpler than Google OAuth - you only need to configure the **Homepage URL** and **Authorization callback URL**, with no separate "origins" configuration.
+
+#### 2.3. GitHub vs Google OAuth Key Differences
+
+| Feature | Google OAuth | GitHub OAuth |
+|---------|-------------|-------------|
+| **Consent Screen** | Required (External/Internal) | Not required |
+| **Homepage URL** | Not used | Required |
+| **Authorized Origins** | Required (JS origins) | Not used |
+| **Redirect URIs** | Required | Required (Authorization callback URL) |
+| **Scopes** | `openid email profile` | `user:email` |
+| **User ID Field** | `sub` | `id` |
+| **Username Field** | Not available | `login` (in metadata) |
+| **Email Verification** | `email_verified` field | Must check email visibility |
+
+> [!NOTE]
+> GitHub OAuth users may not have a public email address. The application will use the first available email from the user's email list, which may be private.
 
 #### 3. Run Validation Tests
 The project includes a validation script `test_oauth_setup.py` that verifies imports, session creation mechanics, and environment settings. Run:
