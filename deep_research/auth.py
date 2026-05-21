@@ -1,6 +1,10 @@
 from langgraph_sdk import Auth
 import os
 
+from logger_utils import setup_logger
+
+logger = setup_logger(__name__)
+
 auth = Auth()
 
 @auth.authenticate
@@ -16,7 +20,7 @@ async def authenticate(headers: dict) -> Auth.types.MinimalUserDict:
     """
     # 1. Try 'x-api-key' header (LangSmith style)
     api_key_bytes = headers.get(b"x-api-key") or headers.get(b"X-API-Key")
-    
+
     # 2. Try 'Authorization: Bearer' header (Standard style)
     if not api_key_bytes:
         auth_header = headers.get(b"authorization") or headers.get(b"Authorization")
@@ -51,6 +55,8 @@ async def authenticate(headers: dict) -> Auth.types.MinimalUserDict:
             status_code=401, 
             detail="Invalid API key."
         )
-    
+
+    # logger.info("Authenticate successfully")
+
     # Return user identity
     return {"identity": "admin"}
