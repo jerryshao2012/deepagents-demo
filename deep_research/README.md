@@ -247,11 +247,11 @@ LangGraph server will open a new browser window with the Studio interface, which
 
 <img width="1915" alt="Screenshot 2026-04-03 at 10 27 11 AM" src="./resources/Screenshot 2026-04-03 at 10 27 11 AM.png" />
 
-You can also connect the LangGraph server to a [UI specifically designed for deepagents](https://github.com/langchain-ai/deep-agents-ui):
+You can also connect the LangGraph server to a [UI specifically designed for deepagents](https://github.com/jerryshao2012/bmo-deepagent-ui.git):
 
 ```bash
-git clone https://github.com/langchain-ai/deep-agents-ui.git
-cd deep-agents-ui
+git clone https://github.com/jerryshao2012/bmo-deepagent-ui.git
+cd bmo-deep-agents-ui
 
 # Update a remote branch with rewritten history
 # git reset --hard <commit-hash>
