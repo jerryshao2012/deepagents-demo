@@ -260,13 +260,16 @@ cd bmo-deep-agents-ui
 # Install yarn
 npm config set "bin-links" true
 npm config set "strict-ssl" false
+npm config set registry https://bmostaging.jfrog.io/artifactory/api/npm/bmoai-npm-virtual/
+# Choose SAML SSO
+npm login --auth-type=web
 npm install -g yarn
 # Add %AppData%\npm to PATH for Windows
 
 # For corporation network
 yarn config set "strict-ssl" false
 # Get configuration from npm config list
-yarn config set registry <url>
+yarn config set registry https://bmostaging.jfrog.io/artifactory/api/npm/bmoai-npm-virtual/
 
 yarn install
 yarn dev
