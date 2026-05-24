@@ -24,7 +24,14 @@ async def authenticate(headers: dict) -> Auth.types.MinimalUserDict:
     3. OAuth session tokens from Google/GitHub login
     
     Returns user identity with metadata based on authentication method.
+    
+    NOTE: For local testing, set ALLOW_ALL_THREADS=true to bypass identity filtering.
     """
+    # Check for test mode bypass
+    if os.environ.get("ALLOW_ALL_THREADS", "").lower() == "true":
+        logger.warning("TEST MODE: Allowing access to all threads regardless of identity")
+        return {"identity": "test-admin", "permissions": ["threads:read:all"]}
+    
     # Try to get authentication credentials from headers
     api_key_bytes = headers.get(b"x-api-key") or headers.get(b"X-API-Key")
 
