@@ -5,6 +5,7 @@ from pathlib import Path, PurePosixPath
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 
 # Load environment variables
@@ -13,7 +14,7 @@ load_dotenv()
 DOCS_ROOT = Path(__file__).resolve().parent / "docs"
 
 # API version - increment this with each new build
-API_VERSION = "1.8.19"
+API_VERSION = "1.8.20"
 
 # API Key for authentication (from environment variable)
 API_KEY = os.environ.get("UPLOAD_API_KEY") or os.environ.get("LANGCHAIN_API_KEY", "")
@@ -43,6 +44,25 @@ app = FastAPI(
     title="Document Upload API",
     description="Upload documents to the deep research agent docs folder",
     version=API_VERSION
+)
+
+frontend_origins = [
+    "http://localhost:3000",
+    os.environ.get("FRONTEND_URL", "").rstrip("/"),
+]
+frontend_origins = [origin for origin in frontend_origins if origin]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=frontend_origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=[
+        "authorization",
+        "content-type",
+        "x-auth-scheme",
+        "x-api-key",
+    ],
 )
 
 from starlette.middleware.sessions import SessionMiddleware
