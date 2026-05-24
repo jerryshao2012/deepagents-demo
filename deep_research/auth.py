@@ -1,4 +1,5 @@
 import os
+from typing import Set
 
 from langgraph_sdk import Auth
 
@@ -8,6 +9,9 @@ from oauth_handler import user_manager
 logger = setup_logger(__name__)
 
 auth = Auth()
+
+# Track users who have already been logged for first-time OAuth authentication
+_logged_oauth_users: Set[str] = set()
 
 
 @auth.authenticate
@@ -49,8 +53,13 @@ async def authenticate(headers: dict) -> Auth.types.MinimalUserDict:
     if user_data:
         # OAuth authentication successful - return full user metadata
         identity_ = user_data["identity"]
-        logger.info(f"OAuth user data: {user_data}")
-        logger.info(f"OAuth authentication successful for provider: {user_data.get('provider')} as {identity_}")
+        
+        # Log only on first successful authentication for this user
+        if identity_ not in _logged_oauth_users:
+            logger.info(f"OAuth user data: {user_data}")
+            logger.info(f"OAuth authentication successful for provider: {user_data.get('provider')} as {identity_}")
+            _logged_oauth_users.add(identity_)
+        
         return {"identity": identity_}
 
     # If not a valid session token, try API key authentication
