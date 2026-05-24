@@ -60,7 +60,7 @@ async def authenticate(headers: dict) -> Auth.types.MinimalUserDict:
     if user_data:
         # OAuth authentication successful - return full user metadata
         identity_ = user_data["identity"]
-        display_name = user_data.get("display_name", identity_)
+        display_name = user_data.get("name", identity_)
         
         # Log only on first successful authentication for this user
         if identity_ not in _logged_oauth_users:

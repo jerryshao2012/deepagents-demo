@@ -14,7 +14,7 @@ load_dotenv()
 DOCS_ROOT = Path(__file__).resolve().parent / "docs"
 
 # API version - increment this with each new build
-API_VERSION = "1.8.23"
+API_VERSION = "1.8.24"
 
 # API Key for authentication (from environment variable)
 API_KEY = os.environ.get("UPLOAD_API_KEY") or os.environ.get("LANGCHAIN_API_KEY", "")
