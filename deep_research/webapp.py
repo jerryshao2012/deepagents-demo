@@ -14,7 +14,7 @@ load_dotenv()
 DOCS_ROOT = Path(__file__).resolve().parent / "docs"
 
 # API version - increment this with each new build
-API_VERSION = "1.8.20"
+API_VERSION = "1.8.21"
 
 # API Key for authentication (from environment variable)
 API_KEY = os.environ.get("UPLOAD_API_KEY") or os.environ.get("LANGCHAIN_API_KEY", "")
@@ -48,6 +48,7 @@ app = FastAPI(
 
 frontend_origins = [
     "http://localhost:3000",
+    "https://smith.langchain.com",
     os.environ.get("FRONTEND_URL", "").rstrip("/"),
 ]
 frontend_origins = [origin for origin in frontend_origins if origin]
@@ -55,14 +56,9 @@ frontend_origins = [origin for origin in frontend_origins if origin]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=frontend_origins,
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=[
-        "authorization",
-        "content-type",
-        "x-auth-scheme",
-        "x-api-key",
-    ],
+    allow_headers=["*"],
 )
 
 from starlette.middleware.sessions import SessionMiddleware
@@ -478,12 +474,12 @@ async def oauth_login(provider: str, request: Request):
     # Azure Container Apps sends X-Forwarded-Proto and X-Forwarded-Host headers
     forwarded_proto = request.headers.get("x-forwarded-proto", "http")
     forwarded_host = request.headers.get("x-forwarded-host", request.headers.get("host", ""))
-    
+
     if forwarded_host:
         base_url = f"{forwarded_proto}://{forwarded_host}"
     else:
         base_url = str(request.base_url).rstrip("/")
-    
+
     redirect_uri = f"{base_url}/auth/callback/{provider}"
 
     try:
