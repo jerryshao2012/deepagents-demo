@@ -60,6 +60,7 @@ async def authenticate(headers: dict) -> Auth.types.MinimalUserDict:
     if user_data:
         # OAuth authentication successful - return full user metadata
         identity_ = user_data["identity"]
+        display_name = user_data.get("display_name", identity_)
         
         # Log only on first successful authentication for this user
         if identity_ not in _logged_oauth_users:
@@ -67,7 +68,20 @@ async def authenticate(headers: dict) -> Auth.types.MinimalUserDict:
             logger.info(f"OAuth authentication successful for provider: {user_data.get('provider')} as {identity_}")
             _logged_oauth_users.add(identity_)
         
-        return {"identity": identity_}
+        return {
+            "identity": identity_,
+            "display_name": display_name,
+            "is_authenticated": True
+        }
+    else:
+        # Session validation failed - clean up logged users tracking if session was expired
+        # Check if this credential was previously a valid session (by checking if it's not an API key)
+        expected_key = os.environ.get("LANGCHAIN_API_KEY") or os.environ.get("UPLOAD_API_KEY")
+        if expected_key and credential != expected_key:
+            # This might have been an expired session token, remove from tracking
+            # We can't directly map token to identity here, but we can trigger cleanup
+            user_manager.cleanup_expired_sessions()
+            logger.debug(f"Session validation failed for credential, cleaned up expired sessions")
 
     # If not a valid session token, try API key authentication
     expected_key = os.environ.get("LANGCHAIN_API_KEY") or os.environ.get("UPLOAD_API_KEY")
@@ -86,4 +100,8 @@ async def authenticate(headers: dict) -> Auth.types.MinimalUserDict:
 
     # API key authentication successful
     logger.info("API key authentication successful")
-    return {"identity": "admin"}
+    return {
+        "identity": "admin",
+        "display_name": "Admin",
+        "is_authenticated": True
+    }

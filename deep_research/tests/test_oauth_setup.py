@@ -162,6 +162,68 @@ def test_session_management():
         return False
 
 
+def test_logout_and_cleanup():
+    """Test logout and cleanup of logged users tracking."""
+    print("\nTesting logout and cleanup...")
+
+    try:
+        from oauth_handler import user_manager, handle_logout
+        from auth import _logged_oauth_users
+
+        # Create a test session
+        test_user = {
+            "identity": "google:test456",
+            "email": "test456@example.com",
+            "name": "Test User 456",
+            "provider": "google",
+        }
+
+        token = user_manager.create_session(test_user, "google")
+        print(f"✓ Session created for logout test")
+
+        # Simulate first authentication (adds to _logged_oauth_users)
+        _logged_oauth_users.add(test_user["identity"])
+        print(f"✓ User added to _logged_oauth_users: {test_user['identity']}")
+        print(f"  - Tracked users count: {len(_logged_oauth_users)}")
+
+        # Handle logout
+        identity = handle_logout(token)
+        if identity == test_user["identity"]:
+            print(f"✓ Logout successful, returned identity: {identity}")
+        else:
+            print(f"✗ Logout failed, expected {test_user['identity']}, got {identity}")
+            return False
+
+        # Verify session is removed
+        validated = user_manager.validate_session(token)
+        if validated is None:
+            print("✓ Session correctly removed after logout")
+        else:
+            print("✗ Session still exists after logout")
+            return False
+
+        # Clean up _logged_oauth_users (simulating what webapp.py does)
+        if identity in _logged_oauth_users:
+            _logged_oauth_users.discard(identity)
+            print(f"✓ User removed from _logged_oauth_users")
+            print(f"  - Tracked users count: {len(_logged_oauth_users)}")
+
+        # Verify user is no longer tracked
+        if test_user["identity"] not in _logged_oauth_users:
+            print("✓ User correctly removed from tracking set")
+        else:
+            print("✗ User still in tracking set after logout")
+            return False
+
+        return True
+
+    except Exception as e:
+        print(f"✗ Logout and cleanup test failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def main():
     """Run all tests."""
     print("=" * 70)
@@ -185,6 +247,9 @@ def main():
 
     # Test session management
     results.append(("Session Management", test_session_management()))
+
+    # Test logout and cleanup
+    results.append(("Logout & Cleanup", test_logout_and_cleanup()))
 
     # Summary
     print("\n" + "=" * 70)

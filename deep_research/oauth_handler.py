@@ -83,6 +83,13 @@ class OAuthUserManager:
         ]
         for token in expired:
             del self.sessions[token]
+    
+    def remove_session(self, session_token: str) -> Optional[str]:
+        """Remove a specific session and return the user identity if it existed."""
+        session = self.sessions.pop(session_token, None)
+        if session:
+            return session["user_data"].get("identity")
+        return None
 
 
 # Global user manager instance
@@ -179,3 +186,16 @@ async def get_oauth_login_url(request: Request, provider: str, redirect_uri: str
         return rv["url"]
     else:
         raise ValueError(f"Unsupported provider: {provider}")
+
+
+def handle_logout(session_token: str) -> Optional[str]:
+    """Handle user logout by removing session and returning user identity.
+    
+    Returns the user identity if the session was found and removed, None otherwise.
+    The caller (auth.py) should use this identity to clean up _logged_oauth_users.
+    """
+    identity = user_manager.remove_session(session_token)
+    if identity:
+        # Also trigger cleanup of any other expired sessions
+        user_manager.cleanup_expired_sessions()
+    return identity

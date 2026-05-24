@@ -14,7 +14,7 @@ load_dotenv()
 DOCS_ROOT = Path(__file__).resolve().parent / "docs"
 
 # API version - increment this with each new build
-API_VERSION = "1.8.22"
+API_VERSION = "1.8.23"
 
 # API Key for authentication (from environment variable)
 API_KEY = os.environ.get("UPLOAD_API_KEY") or os.environ.get("LANGCHAIN_API_KEY", "")
@@ -32,6 +32,7 @@ try:
         get_oauth_login_url,
         handle_github_callback,
         handle_google_callback,
+        handle_logout,
         user_manager,
     )
 
@@ -585,6 +586,53 @@ async def validate_session(request: Request, x_api_key: str | None = Header(None
                    "session_token",
                ]
         },
+    }
+
+
+@app.post("/auth/logout")
+async def logout(request: Request, x_api_key: str | None = Header(None)):
+    """Logout user by invalidating their OAuth session token.
+    
+    Provide session token via X-API-Key header or Authorization: Bearer header.
+    Returns success message and cleaned up user identity.
+    """
+    if not OAUTH_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OAuth authentication is not enabled.",
+        )
+
+    # Get token from header
+    token = x_api_key
+    if not token:
+        auth_header = request.headers.get("authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing session token.",
+        )
+
+    # Handle logout - this removes the session and returns user identity
+    identity = handle_logout(token)
+    if not identity:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found or already expired.",
+        )
+
+    # Clean up the logged users tracking in auth module
+    from auth import _logged_oauth_users
+    if identity in _logged_oauth_users:
+        _logged_oauth_users.discard(identity)
+        print(f"✅ Cleaned up logged user tracking for: {identity}")
+
+    return {
+        "success": True,
+        "message": "Successfully logged out",
+        "identity": identity,
     }
 
 
