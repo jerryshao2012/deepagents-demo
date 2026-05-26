@@ -1,4 +1,14 @@
-"""Tests for Tavily web search functionality."""
+"""Tests for Tavily web search functionality.
+
+$env:TAVILY_API_KEY="your_tavily_api_key_here"
+$username = [uri]::EscapeDataString("office\your_username")
+$password = [uri]::EscapeDataString("your_password")
+$env:HTTP_PROXY  = "http://${username}:${password}@ebcswg.bmogc.net:8080/"
+$env:HTTPS_PROXY = "http://${username}:${password}@ebcswg.bmogc.net:8080/"
+$env:REQUESTS_CA_BUNDLE = "path\to\cert.pem"
+To run these tests, use the following command:
+pytest -vv -rs tests/test_web_search.py::TestTavilySearchIntegration::test_tavily_search_real_api_call
+"""
 import os
 from unittest.mock import MagicMock, patch
 
