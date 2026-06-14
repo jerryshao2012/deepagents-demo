@@ -2866,11 +2866,12 @@ docker build --platform linux/amd64 -t <acr>.azurecr.io/deep-research-agent:late
 
 ## Version History
 
-| Date | Version | Changes |
-|------|---------|---------|
-| 2026-05-01 | 1.0.0 | Initial deployment guide created |
+| Date       | Version | Changes                                 |
+|------------|---------|-----------------------------------------|
+| 2026-05-01 | 1.0.0   | Initial deployment guide created        |
+| 2026-06-14 | 1.5.0   | Apply to a different azure subscription |
 
 ---
 
-**Last Updated**: May 11, 2026
+**Last Updated**: June 14, 2026
 **Maintainer**: AI Evals Team

@@ -37,17 +37,12 @@ print_timing_summary() {
 
 # Parse command-line arguments
 SYNC_FILES=false
-SKIP_BUILD=false
 SKIP_KV_ACCESS=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --sync-files)
       SYNC_FILES=true
-      shift
-      ;;
-    --skip-build)
-      SKIP_BUILD=true
       shift
       ;;
     --skip-kv-access)
@@ -59,19 +54,18 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Options:"
       echo "  --sync-files     Sync local files (docs/, output/, input/) to Azure File Share"
-      echo "  --skip-build     Skip Docker build and use existing image in ACR"
       echo "  --skip-kv-access Skip Key Vault access policy updates (faster re-deployment)"
       echo "  --help, -h       Show this help message"
       echo ""
       echo "Examples:"
-      echo "  ./deploy.sh                                    # Full deployment with build"
-      echo "  ./deploy.sh --sync-files                       # Deploy with build and sync files"
-      echo "  ./deploy.sh --skip-build                       # Deploy existing image without rebuild"
-      echo "  ./deploy.sh --skip-build --sync-files          # Deploy existing image and sync files"
-      echo "  ./deploy.sh --skip-build --skip-kv-access      # Fast re-deployment (no build, no KV access check)"
+      echo "  ./deploy.sh                                    # Full deployment using existing image"
+      echo "  ./deploy.sh --sync-files                       # Deploy and sync files"
+      echo "  ./deploy.sh --skip-kv-access                   # Fast re-deployment (no KV access check)"
       echo ""
       echo "Note: For manual file sync after deployment, use:"
       echo "  ./sync-files.sh"
+      echo "Note: To build the image, run:"
+      echo "  ./build.sh"
       exit 0
       ;;
     *)
@@ -85,11 +79,7 @@ done
 # Configuration
 source ./env.sh
 
-if [ "$SKIP_BUILD" = true ]; then
-  echo "🚀 Starting Deep Research Agent deployment (using existing image)..."
-else
-  echo "🚀 Starting Deep Research Agent deployment with persistent storage..."
-fi
+echo "🚀 Starting Deep Research Agent deployment (using existing image)..."
 
 # 1. Set Azure Subscription
 start_step "Set Azure Subscription"
@@ -98,75 +88,20 @@ az account set --subscription $AZURE_SUBSCRIPTION_ID
 echo "✅ Subscription set to $AZURE_SUBSCRIPTION_ID"
 end_step
 
-# 2. Create resource group
-start_step "Resource Group Setup"
-if az group show --name $RESOURCE_GROUP &> /dev/null; then
-  echo "✅ Resource group '$RESOURCE_GROUP' already exists. Skipping creation."
-else
-  az group create --name $RESOURCE_GROUP --location $LOCATION
+# 2. Verify image exists in ACR
+start_step "Verify Container Image"
+if ! az acr repository show-tags --name $ACR_NAME --repository deep-research-agent --query "contains(@, 'latest')" -o tsv 2>/dev/null | grep -q "true"; then
+  echo "⚠️  WARNING: Image 'deep-research-agent:latest' not found in ACR!"
+  echo "   Please run './build.sh' first to build and push the image."
+  exit 1
 fi
+echo "✅ Verified image exists in ACR"
+
+NEW_VERSION=$(grep 'API_VERSION = ' webapp.py | grep -o '"[^"]*"' | tr -d '"')
+echo "ℹ️  Current API version: $NEW_VERSION"
 end_step
 
-# 3. Azure Provider Registration
-start_step "Azure Provider Registration"
-echo "📝 Registering required Azure providers..."
-az provider register -n Microsoft.OperationalInsights --wait
-az provider register -n Microsoft.App --wait
-az provider register -n Microsoft.KeyVault --wait
-az provider register -n Microsoft.Storage --wait
-az provider register -n Microsoft.ManagedIdentity --wait
-echo "✅ Providers registered."
-end_step
-
-# 4. Create ACR
-start_step "Container Registry Setup"
-if az acr show --name $ACR_NAME --resource-group $RESOURCE_GROUP &> /dev/null; then
-  echo "✅ Container Registry '$ACR_NAME' already exists. Skipping creation."
-else
-  az acr create --resource-group $RESOURCE_GROUP --name $ACR_NAME --sku Standard --admin-enabled true
-fi
-end_step
-
-# 5. Increment API version (only if building)
-start_step "API Version Management"
-if [ "$SKIP_BUILD" = false ]; then
-  echo "🔢 Incrementing API version..."
-  python3 ./increment_version.py
-  NEW_VERSION=$(grep 'API_VERSION = ' webapp.py | grep -o '"[^"]*"' | tr -d '"')
-  echo "✅ New API version: $NEW_VERSION"
-else
-  echo "⏭️  Skipping API version increment (--skip-build)"
-  NEW_VERSION=$(grep 'API_VERSION = ' webapp.py | grep -o '"[^"]*"' | tr -d '"')
-  echo "ℹ️  Current API version: $NEW_VERSION"
-fi
-end_step
-
-# 6. Build and push image (optional)
-start_step "Docker Image Build & Push"
-if [ "$SKIP_BUILD" = false ]; then
-  echo "🔨 Building Docker image..."
-  # Ensure we're in the correct directory (where Dockerfile is located)
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  cd "$SCRIPT_DIR"
-  docker build --platform linux/amd64 -t $ACR_NAME.azurecr.io/deep-research-agent:latest .
-  az acr login --name $ACR_NAME
-  docker push $ACR_NAME.azurecr.io/deep-research-agent:latest
-  echo "✅ Image built and pushed successfully"
-else
-  echo "⏭️  Skipping Docker build (--skip-build)"
-  echo "ℹ️  Using existing image: $ACR_NAME.azurecr.io/deep-research-agent:latest"
-  
-  # Verify image exists in ACR
-  if ! az acr repository show-tags --name $ACR_NAME --repository deep-research-agent --query "contains(@, 'latest')" -o tsv 2>/dev/null | grep -q "true"; then
-    echo "⚠️  WARNING: Image 'deep-research-agent:latest' not found in ACR!"
-    echo "   Please run './deploy.sh' without --skip-build first to build and push the image."
-    exit 1
-  fi
-  echo "✅ Verified image exists in ACR"
-fi
-end_step
-
-# 7. Create environment
+# 3. Create environment
 start_step "Container Apps Environment Setup"
 if az containerapp env show --name $ENV_NAME --resource-group $RESOURCE_GROUP &> /dev/null; then
   echo "✅ Container Apps environment '$ENV_NAME' already exists. Skipping creation."
@@ -178,7 +113,7 @@ else
 fi
 end_step
 
-# 8. Create Key Vault and store secrets
+# 4. Create Key Vault and store secrets
 start_step "Key Vault Setup & Secrets"
 if az keyvault show --name $KV_NAME --resource-group $RESOURCE_GROUP &> /dev/null; then
   echo "✅ Key Vault '$KV_NAME' already exists. Skipping creation."
@@ -186,21 +121,25 @@ else
   az keyvault create --name $KV_NAME --resource-group $RESOURCE_GROUP --location $LOCATION --enable-rbac-authorization false
 fi
 
-echo "🔑 Ensuring Key Vault access configuration uses Access Policies..."
-az keyvault update --name $KV_NAME --resource-group $RESOURCE_GROUP --enable-rbac-authorization false 2>/dev/null || true
+if [ "$SKIP_KV_ACCESS" = false ]; then
+  echo "🔑 Ensuring Key Vault access configuration uses Access Policies..."
+  az keyvault update --name $KV_NAME --resource-group $RESOURCE_GROUP --enable-rbac-authorization false 2>/dev/null || true
 
-echo "🔑 Granting current user access to manage secrets..."
-CURRENT_USER_OID=$(az ad signed-in-user show --query id -o tsv 2>/dev/null || echo "")
-if [ -z "$CURRENT_USER_OID" ]; then
-  echo "   Attempting to get Object ID from access token..."
-  CURRENT_USER_OID=$(az account get-access-token --query accessToken -o tsv | python3 -c "import sys, jwt; print(jwt.decode(sys.stdin.read().strip(), options={'verify_signature': False}).get('oid', ''))" 2>/dev/null || echo "")
-fi
+  echo "🔑 Granting current user access to manage secrets..."
+  CURRENT_USER_OID=$(az ad signed-in-user show --query id -o tsv 2>/dev/null || echo "")
+  if [ -z "$CURRENT_USER_OID" ]; then
+    echo "   Attempting to get Object ID from access token..."
+    CURRENT_USER_OID=$(az account get-access-token --query accessToken -o tsv | python3 -c "import sys, jwt; print(jwt.decode(sys.stdin.read().strip(), options={'verify_signature': False}).get('oid', ''))" 2>/dev/null || echo "")
+  fi
 
-if [ -n "$CURRENT_USER_OID" ]; then
-  echo "   Setting Key Vault Access Policy for Object ID: $CURRENT_USER_OID..."
-  az keyvault set-policy --name $KV_NAME --secret-permissions all --object-id "$CURRENT_USER_OID" 2>/dev/null || echo "   ⚠️  Could not set access policy."
+  if [ -n "$CURRENT_USER_OID" ]; then
+    echo "   Setting Key Vault Access Policy for Object ID: $CURRENT_USER_OID..."
+    az keyvault set-policy --name $KV_NAME --secret-permissions all --object-id "$CURRENT_USER_OID" 2>/dev/null || echo "   ⚠️  Could not set access policy."
+  else
+    echo "   ⚠️  Could not determine current user Object ID. Secret updates might fail."
+  fi
 else
-  echo "   ⚠️  Could not determine current user Object ID. Secret updates might fail."
+  echo "⏭️  Skipping Key Vault access policy updates (--skip-kv-access)"
 fi
 
 if [ -f "./secrets.sh" ]; then
@@ -211,7 +150,7 @@ else
 fi
 end_step
 
-# 9. Setup Persistent Storage
+# 5. Setup Persistent Storage
 start_step "Persistent Storage Setup"
 echo ""
 echo "📦 Setting up Azure Files persistent storage..."
@@ -263,7 +202,7 @@ az keyvault secret set --vault-name $KV_NAME --name FILE-SHARE-NAME --value $FIL
 echo "✅ Persistent storage setup complete"
 end_step
 
-# 10. Deploy or update agent
+# 6. Deploy or update agent
 start_step "Container App Deployment"
 echo "🚀 Deploying agent..."
 
