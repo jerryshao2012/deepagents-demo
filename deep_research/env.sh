@@ -1,17 +1,21 @@
-export APP_NAME="deep-research-agent"
+export SEED="0312"
+export APP_NAME="deep-research-agent-$SEED"
 
 # Create resource group
-export RESOURCE_GROUP="rg-deep-agents"
+export RESOURCE_GROUP="resource-group-deep-agents-$SEED"
 export LOCATION="canadacentral"
 
 # 1. Build and push Docker image
-export ACR_NAME="acrdeepagents"
+export ACR_NAME="acrdeepagents$SEED"
 
 # 2. Create Container Apps environment
-export ENV_NAME="env-deep-agents"
+export ENV_NAME="env-name-deep-agents-$SEED"
 
 # 3. Deploy agent
-export AGENT_NAME="deep-research-agent"
+export AGENT_NAME="deep-research-agent-$SEED"
 
 # Create Key Vault
-export KV_NAME="kv-deep-agents"
+export KV_NAME="kv-deep-agents-$SEED"
+
+# 4. Agent URL
+export DEEP_RESEARCH_AGENT_URL="https://deep-research-agent-0312.salmonrock-b46ff20d.canadacentral.azurecontainerapps.io"

@@ -54,15 +54,13 @@ def get_configured_model():
             os.getenv("AZURE_OPENAI_ENDPOINT")
             and os.getenv("AZURE_OPENAI_DEPLOYMENT")
             and os.getenv("AZURE_OPENAI_API_KEY")
-            and os.getenv("AZURE_OPENAI_API_VERSION")
     ):
-        from langchain_openai import AzureChatOpenAI
+        from langchain_openai import ChatOpenAI
 
-        model = AzureChatOpenAI(
-            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-            azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
-            api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+        model = ChatOpenAI(
+            base_url=os.getenv("AZURE_OPENAI_ENDPOINT"),
             api_key=SecretStr(os.getenv("AZURE_OPENAI_API_KEY", "")),
+            model=os.getenv("AZURE_OPENAI_DEPLOYMENT", ""),
             http_client=httpx.Client(verify=verify_ssl),
             stream_usage=True,
         )
