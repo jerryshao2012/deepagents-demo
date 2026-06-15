@@ -30,6 +30,7 @@ ENV/
 env/
 .env
 .env.docker
+.env-aws.docker
 
 # IDE
 .idea/
