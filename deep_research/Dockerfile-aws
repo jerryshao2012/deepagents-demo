@@ -15,17 +15,18 @@ WORKDIR /deps/deep_research
 
 # Copy the local package
 ADD . /deps/deep_research
-RUN cp /deps/deep_research/.env.docker /deps/deep_research/.env
+RUN cp /deps/deep_research/.env-aws.docker /deps/deep_research/.env
 
 # Note: Runtime directories (docs/, output/, input/) are mounted via Azure Files at runtime
 # No need to create them in the Docker image - they will be provided by the volume mount
 
-# Use pip directly instead of uv sync to avoid segfault
-RUN uv pip install --no-cache-dir -e .
+# Use uv pip install for extremely fast and reliable dependency installation
+RUN uv pip install --system --no-cache -e .
 
 # Set the host for the dev server
 ENV HOST=0.0.0.0
 ENV PORT=2024
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 2024
 

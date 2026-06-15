@@ -22,4 +22,4 @@ export SECRETS_MANAGER_NAME="kv-deep-agents-$SEED"
 export EFS_FILE_SYSTEM_NAME="efs-deep-agents-$SEED"
 
 # 4. Agent URL (automatically populated by deploy-aws.sh)
-export DEEP_RESEARCH_AGENT_URL="https://ypnzysusax.us-east-1.awsapprunner.com"
+export DEEP_RESEARCH_AGENT_URL="https://bh3z333bky.us-east-1.awsapprunner.com"

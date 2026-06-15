@@ -23,6 +23,38 @@ def get_configured_model():
     """
     verify_ssl = get_ssl_verify_config()
 
+    if (
+            os.getenv("AWS_BEDROCK_ENDPOINT")
+            and os.getenv("AWS_BEARER_TOKEN_BEDROCK")
+            and os.getenv("MODEL_NAME")
+    ):
+        from langchain_openai import ChatOpenAI
+
+        model = ChatOpenAI(
+            base_url=os.getenv("AWS_BEDROCK_ENDPOINT"),
+            api_key=SecretStr(os.getenv("AWS_BEARER_TOKEN_BEDROCK", "")),
+            model=os.getenv("MODEL_NAME", ""),
+            http_client=httpx.Client(verify=verify_ssl),
+            stream_usage=True,
+        )
+        return wrap_model_with_rate_limiting(model)
+
+    if (
+            os.getenv("AZURE_OPENAI_ENDPOINT")
+            and os.getenv("AZURE_OPENAI_DEPLOYMENT")
+            and os.getenv("AZURE_OPENAI_API_KEY")
+    ):
+        from langchain_openai import ChatOpenAI
+
+        model = ChatOpenAI(
+            base_url=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            api_key=SecretStr(os.getenv("AZURE_OPENAI_API_KEY", "")),
+            model=os.getenv("AZURE_OPENAI_DEPLOYMENT", ""),
+            http_client=httpx.Client(verify=verify_ssl),
+            stream_usage=True,
+        )
+        return wrap_model_with_rate_limiting(model)
+
     if os.getenv("GOOGLE_API_KEY") and os.getenv("MODEL_NAME"):
         from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -47,22 +79,6 @@ def get_configured_model():
         model = init_chat_model(
             model=f"ollama:{os.getenv('MODEL_NAME')}",
             base_url=os.getenv("OLLAMA_API_BASE"),
-        )
-        return wrap_model_with_rate_limiting(model)
-
-    if (
-            os.getenv("AZURE_OPENAI_ENDPOINT")
-            and os.getenv("AZURE_OPENAI_DEPLOYMENT")
-            and os.getenv("AZURE_OPENAI_API_KEY")
-    ):
-        from langchain_openai import ChatOpenAI
-
-        model = ChatOpenAI(
-            base_url=os.getenv("AZURE_OPENAI_ENDPOINT"),
-            api_key=SecretStr(os.getenv("AZURE_OPENAI_API_KEY", "")),
-            model=os.getenv("AZURE_OPENAI_DEPLOYMENT", ""),
-            http_client=httpx.Client(verify=verify_ssl),
-            stream_usage=True,
         )
         return wrap_model_with_rate_limiting(model)
 

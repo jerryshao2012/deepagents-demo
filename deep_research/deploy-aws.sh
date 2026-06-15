@@ -245,9 +245,9 @@ cat > "$SOURCE_CONFIG_FILE" <<EOF
         "TAVILY_API_KEY": "${SECRET_ARN}:TAVILY-API-KEY::",
         "LANGCHAIN_API_KEY": "${SECRET_ARN}:LANGCHAIN-API-KEY::",
         "UPLOAD_API_KEY": "${SECRET_ARN}:UPLOAD-API-KEY::",
-        "AZURE_OPENAI_ENDPOINT": "${SECRET_ARN}:AZURE-OPENAI-ENDPOINT::",
-        "AZURE_OPENAI_DEPLOYMENT": "${SECRET_ARN}:AZURE-OPENAI-DEPLOYMENT::",
-        "AZURE_OPENAI_API_KEY": "${SECRET_ARN}:AZURE-OPENAI-API-KEY::"
+        "AWS_BEARER_TOKEN_BEDROCK": "${SECRET_ARN}:AWS-BEARER-TOKEN-BEDROCK::",
+        "AWS_BEDROCK_ENDPOINT": "${SECRET_ARN}:AWS-BEDROCK-ENDPOINT::",
+        "MODEL_NAME": "${SECRET_ARN}:MODEL-NAME::"
       }
     },
     "ImageRepositoryType": "ECR"
@@ -268,7 +268,7 @@ if [ -n "$SERVICE_ARN" ] && [ "$SERVICE_ARN" != "None" ] && [ "$SERVICE_ARN" != 
     --service-arn "$SERVICE_ARN" \
     --source-configuration "file://$SOURCE_CONFIG_FILE" \
     --instance-configuration Cpu="2 vCPU",Memory="4 GB",InstanceRoleArn="$INSTANCE_ROLE_ARN" \
-    --region "$AWS_REGION" > /dev/null
+    --region "$AWS_REGION"
 else
   echo "✨ Creating new App Runner service '$APP_NAME'..."
   SERVICE_ARN=$(aws apprunner create-service \
@@ -282,6 +282,8 @@ fi
 
 rm -f "$SOURCE_CONFIG_FILE"
 echo "✅ Deployment triggered for Service: $SERVICE_ARN"
+echo "⏳ Waiting 10s for the deployment operation to initialize..."
+sleep 10
 end_step
 
 # 5. Wait for Deployment to settle and get Endpoint

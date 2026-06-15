@@ -77,7 +77,7 @@ ECR_URL="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
 IMAGE_TAG="$ECR_URL/$ECR_REPO_NAME:latest"
 
 echo "🔨 Building Docker image ($IMAGE_TAG)..."
-docker build --platform linux/amd64 -t "$IMAGE_TAG" .
+docker build --no-cache --platform linux/amd64 -f Dockerfile-aws -t "$IMAGE_TAG" .
 
 echo "🔑 Logging in to AWS ECR..."
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_URL"
