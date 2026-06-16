@@ -469,9 +469,19 @@ research_sub_agent: SubAgent = {
         think_tool,
     ],
 }
-
-model = get_configured_model()
-
+try:
+    model = get_configured_model()
+except Exception as e:
+    import sys
+    import traceback
+    import time
+    print(f"CRITICAL ERROR INITIALIZING MODEL: {e}", file=sys.stderr)
+    traceback.print_exc()
+    with open("/deps/deep_research/FATAL_ERROR.log", "w") as f:
+        f.write(f"CRITICAL ERROR: get_configured_model() failed!\n")
+        f.write(traceback.format_exc())
+    time.sleep(15)  # Give App Runner 15 seconds to flush the logs to CloudWatch before exiting
+    raise
 # Recursion limit - configurable via environment variable (applied at graph compile time)
 RECURSION_LIMIT = int(os.environ.get("GRAPH_RECURSION_LIMIT", "200"))
 

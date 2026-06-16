@@ -263,12 +263,20 @@ EOF
 SERVICE_ARN=$(aws apprunner list-services --query "ServiceSummaryList[?ServiceName=='$APP_NAME'].ServiceArn" --output text --region "$AWS_REGION" 2>/dev/null || echo "")
 
 if [ -n "$SERVICE_ARN" ] && [ "$SERVICE_ARN" != "None" ] && [ "$SERVICE_ARN" != "null" ]; then
-  echo "📝 App Runner service '$APP_NAME' already exists. Updating..."
-  aws apprunner update-service \
+  echo "📝 App Runner service '$APP_NAME' already exists. Updating configuration..."
+  UPDATE_OUT=$(aws apprunner update-service \
     --service-arn "$SERVICE_ARN" \
     --source-configuration "file://$SOURCE_CONFIG_FILE" \
     --instance-configuration Cpu="2 vCPU",Memory="4 GB",InstanceRoleArn="$INSTANCE_ROLE_ARN" \
-    --region "$AWS_REGION"
+    --region "$AWS_REGION")
+  
+  # Check if an OperationId was returned (meaning config actually changed)
+  OP_ID=$(echo "$UPDATE_OUT" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('OperationId', ''))" 2>/dev/null || echo "")
+  
+  if [ -z "$OP_ID" ]; then
+    echo "ℹ️  Configuration unchanged. Triggering explicit deployment to pull latest image..."
+    aws apprunner start-deployment --service-arn "$SERVICE_ARN" --region "$AWS_REGION" > /dev/null
+  fi
 else
   echo "✨ Creating new App Runner service '$APP_NAME'..."
   SERVICE_ARN=$(aws apprunner create-service \
@@ -282,8 +290,15 @@ fi
 
 rm -f "$SOURCE_CONFIG_FILE"
 echo "✅ Deployment triggered for Service: $SERVICE_ARN"
-echo "⏳ Waiting 10s for the deployment operation to initialize..."
-sleep 10
+echo "⏳ Waiting for the deployment operation to initialize..."
+# App Runner takes a few seconds to transition from RUNNING to OPERATION_IN_PROGRESS
+for i in {1..12}; do
+  STATUS=$(aws apprunner describe-service --service-arn "$SERVICE_ARN" --region "$AWS_REGION" --query "Service.Status" --output text 2>/dev/null || echo "")
+  if [ "$STATUS" = "OPERATION_IN_PROGRESS" ]; then
+    break
+  fi
+  sleep 5
+done
 end_step
 
 # 5. Wait for Deployment to settle and get Endpoint

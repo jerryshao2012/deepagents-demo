@@ -21,7 +21,7 @@ RUN cp /deps/deep_research/.env.docker /deps/deep_research/.env
 # No need to create them in the Docker image - they will be provided by the volume mount
 
 # Use pip directly instead of uv sync to avoid segfault
-RUN uv pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir -e .
 
 # Set the host for the dev server
 ENV HOST=0.0.0.0

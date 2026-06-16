@@ -830,11 +830,11 @@ To configure OAuth client credentials for local development and production, foll
 10. **Configure Authorized JavaScript origins** (required for browser-based OAuth flows):
     - For Local Development: `http://localhost:3000`
     - For Production: Add your frontend URL for Azure (e.g., `https://deepagent-ui.salmonrock-b46ff20d.canadacentral.azurecontainerapps.io`)
-    - For Production: Add your frontend URL for AWS (e.g., `https://uxi3ee2ugm.us-east-1.awsapprunner.com`)
+    - For Production: Add your frontend URL for AWS (e.g., `https://d600y3wyk0xvf.cloudfront.net`)
 11. **Configure Authorized redirect URIs** (must match your backend callback endpoints exactly):
     - For Local Development: `http://localhost:2024/auth/callback/google`
     - For Production: Add your backend URL for Azure (e.g., `https://deep-research-agent-0312.salmonrock-b46ff20d.canadacentral.azurecontainerapps.io/auth/callback/google`)
-    - For Production: Add your backend URL for AWS (e.g., `https://ypnzysusax.us-east-1.awsapprunner.com/auth/callback/google`)
+    - For Production: Add your backend URL for AWS (e.g., `https://bh3z333bky.us-east-1.awsapprunner.com/auth/callback/google`)
 12. Click **Create** and copy the generated **Client ID** and **Client Secret**.
 
 > [!IMPORTANT]
@@ -868,8 +868,8 @@ To configure OAuth client credentials for local development and production, foll
      - **Enable Device Flow**: Optional - check this if needed for your deployment
 
    - **Application name**: `BMO Deep Agent AWS`
-     - **Homepage URL**: `https://uxi3ee2ugm.us-east-1.awsapprunner.com` (your frontend URL)
-     - **Authorization callback URL**: `https://ypnzysusax.us-east-1.awsapprunner.com/auth/callback/github` (your backend URL)
+     - **Homepage URL**: `https://d600y3wyk0xvf.cloudfront.net` (your frontend URL)
+     - **Authorization callback URL**: `https://bh3z333bky.us-east-1.awsapprunner.com/auth/callback/github` (your backend URL)
      - **Enable Device Flow**: Optional - check this if needed for your deployment
 3. Click **Register application**.
 4. Copy the **Client ID** and **Client Secret** for production use.
