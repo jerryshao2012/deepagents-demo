@@ -12,9 +12,8 @@ from langchain.chat_models import init_chat_model
 from langchain.embeddings import init_embeddings
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph_checkpoint_cosmosdb import CosmosDBSaver
-from pydantic import SecretStr
-
 from logger_utils import setup_logger
+from pydantic import SecretStr
 from retry_utils import wrap_model_with_rate_limiting
 from utils import get_ssl_verify_config
 
@@ -110,6 +109,27 @@ def get_configured_model():
         )
         return wrap_model_with_rate_limiting(model)
 
+    # Legacy Azure OpenAI configuration (with explicit API version)
+    if (
+            os.getenv("AZURE_OPENAI_ENDPOINT")
+            and os.getenv("AZURE_OPENAI_DEPLOYMENT")
+            and (os.getenv("AZURE_OPENAI_API_KEY")
+                 or (os.getenv("AZURE_CLIENT_ID") and os.getenv("AZURE_OPENAI_SCOPE")))
+            and os.getenv("AZURE_OPENAI_API_VERSION")
+    ):
+        from langchain_openai import AzureChatOpenAI
+
+        model = AzureChatOpenAI(
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+            api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+            http_client=httpx.Client(verify=verify_ssl),
+            stream_usage=True,
+            **get_openai_auth_kwargs(),
+        )
+        return wrap_model_with_rate_limiting(model)
+
+    # New Azure OpenAI configuration (without explicit API version)
     if (
             os.getenv("AZURE_OPENAI_ENDPOINT")
             and os.getenv("AZURE_OPENAI_DEPLOYMENT")

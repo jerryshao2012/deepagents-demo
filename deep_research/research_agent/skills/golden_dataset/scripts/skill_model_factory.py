@@ -39,6 +39,26 @@ def get_configured_model():
         )
         return wrap_model_with_rate_limiting(model)
 
+    # Legacy Azure OpenAI configuration (with explicit API version)
+    if (
+            os.getenv("AZURE_OPENAI_ENDPOINT")
+            and os.getenv("AZURE_OPENAI_DEPLOYMENT")
+            and (os.getenv("AZURE_OPENAI_API_KEY")
+                 or (os.getenv("AZURE_CLIENT_ID") and os.getenv("AZURE_OPENAI_SCOPE")))
+            and os.getenv("AZURE_OPENAI_API_VERSION")
+    ):
+        from langchain_openai import AzureChatOpenAI
+
+        model = AzureChatOpenAI(
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+            api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
+            http_client=httpx.Client(verify=verify_ssl),
+            stream_usage=True,
+        )
+        return wrap_model_with_rate_limiting(model)
+
+    # New Azure OpenAI configuration (without explicit API version)
     if (
             os.getenv("AZURE_OPENAI_ENDPOINT")
             and os.getenv("AZURE_OPENAI_DEPLOYMENT")
