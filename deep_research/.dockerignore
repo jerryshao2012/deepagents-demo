@@ -40,12 +40,10 @@ env.sh
 sync-files.sh
 
 # Documentation
+document/
 README.md
 
 # Azure deployment configs
-AZURE_DEPLOY.md
-POSTMAN_README.md
-UPLOAD_API_GUIDE.md
 
 # Postman collections
 postman_collection.json

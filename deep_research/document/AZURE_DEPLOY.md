@@ -236,7 +236,7 @@ RUN curl -LsSf https://astral.sh/uv/0.5.0/install.sh | env UV_UNMANAGED_INSTALL=
 WORKDIR /deps/deep_research
 
 # Copy the local package
-ADD . /deps/deep_research
+ADD .. /deps/deep_research
 
 # Use pip directly instead of uv sync to avoid segfault
 RUN pip install --no-cache-dir -e .
