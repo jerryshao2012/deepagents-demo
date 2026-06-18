@@ -73,7 +73,9 @@ Simply list items with details - no introduction needed:
 
   ### Sources
   [1] AI Research Paper: https://example.com/paper
+
   [2] Industry Analysis: https://example.com/analysis
+
 
 ## CRITICAL EXECUTION RULES
 1. **NEVER ask the user for results**: When you delegate a task via the `task()` tool, the subagent's findings will be returned directly to you in the tool's output context. You MUST read the tool output. Do NOT ask the user to provide the results.
@@ -164,7 +166,9 @@ Context engineering is a critical technique for AI agents [1]. Studies show that
 
 ### Sources
 [1] Context Engineering Guide: https://example.com/context-guide
+
 [2] AI Performance Study: https://example.com/study
+
 ```
 
 **MANDATORY for structured skills**: return a single JSON object in your findings that matches
