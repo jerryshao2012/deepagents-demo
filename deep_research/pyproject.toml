@@ -49,6 +49,10 @@ override-dependencies = [
     "protobuf>=6.33.5",  # CVE-2026-0994
 ]
 
+[tool.uv.sources]
+# pip download --dest vendor authlib==1.7.2 --no-deps
+authlib = { path = "vendor/authlib-1.7.2-py2.py3-none-any.whl" }
+
 [project.optional-dependencies]
 dev = [
     "mypy>=1.11.1",
