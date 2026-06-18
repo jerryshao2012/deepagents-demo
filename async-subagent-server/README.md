@@ -19,7 +19,7 @@ The example includes both sides of the pattern:
 **1. Install dependencies:**
 
 ```bash
-cd examples/async-subagent-server
+cd async-subagent-server
 uv sync
 ```
 
@@ -27,7 +27,7 @@ uv sync
 
 ```bash
 cp .env.example .env
-# fill in ANTHROPIC_API_KEY (and optionally TAVILY_API_KEY)
+# fill in your model provider variables and optionally TAVILY_API_KEY
 ```
 
 **3. Start the server:**
@@ -39,8 +39,8 @@ uv run uvicorn server:app --port 2024
 **4. In another terminal, start the supervisor:**
 
 ```bash
-cd examples/async-subagent-server
-ANTHROPIC_API_KEY=... uv run python supervisor.py
+cd async-subagent-server
+uv run python supervisor.py
 ```
 
 Try these prompts:
@@ -78,6 +78,20 @@ _agent = create_deep_agent(
     tools=[your_tool],
 )
 ```
+
+## Model configuration in this repo
+
+This workspace keeps the upstream async-subagent example behavior, but the supervisor uses `model_factory.py`
+instead of hardcoding Anthropic. `model_factory.py` selects the first configured provider from this order:
+
+- AWS Bedrock-compatible endpoint via `AWS_BEDROCK_ENDPOINT`, `AWS_BEARER_TOKEN_BEDROCK`, `MODEL_NAME`
+- Azure OpenAI via `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_VERSION`
+- Google via `GOOGLE_API_KEY`, `MODEL_NAME`
+- Anthropic via `ANTHROPIC_API_KEY`, `MODEL_NAME`
+- Ollama via `OLLAMA_API_BASE`, `MODEL_NAME`
+
+The FastAPI server in `server.py` still uses the example's built-in researcher agent wiring. Keep that contract intact
+when merging newer upstream changes.
 
 ## ⚠️ For demonstration purposes only
 

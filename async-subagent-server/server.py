@@ -60,50 +60,21 @@ def _init_db() -> None:
         status    one of: pending | running | success | error | cancelled
     """
     _conn.executescript("""
-                        CREATE TABLE IF NOT EXISTS threads
-                        (
-                            thread_id
-                            TEXT
-                            PRIMARY
-                            KEY,
-                            created_at
-                            TEXT
-                            NOT
-                            NULL,
-                            messages
-                            TEXT
-                            NOT
-                            NULL
-                            DEFAULT
-                            '[]',
-                            values_
-                            TEXT
-                            NOT
-                            NULL
-                            DEFAULT
-                            '{}'
-                        );
-                        CREATE TABLE IF NOT EXISTS runs
-                        (
-                            run_id
-                            TEXT
-                            PRIMARY
-                            KEY,
-                            thread_id
-                            TEXT
-                            NOT
-                            NULL
-                            REFERENCES
-                            threads
-                        (
-                            thread_id
-                        ),
-                            assistant_id TEXT NOT NULL,
-                            status TEXT NOT NULL DEFAULT 'pending',
-                            created_at TEXT NOT NULL,
-                            error TEXT
-                            );
-                        """)
+        CREATE TABLE IF NOT EXISTS threads (
+            thread_id  TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            messages   TEXT NOT NULL DEFAULT '[]',
+            values_    TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE TABLE IF NOT EXISTS runs (
+            run_id       TEXT PRIMARY KEY,
+            thread_id    TEXT NOT NULL REFERENCES threads(thread_id),
+            assistant_id TEXT NOT NULL,
+            status       TEXT NOT NULL DEFAULT 'pending',
+            created_at   TEXT NOT NULL,
+            error        TEXT
+        );
+    """)
     _conn.commit()
 
 
