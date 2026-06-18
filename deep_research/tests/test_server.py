@@ -22,8 +22,9 @@ import server
 
 
 @pytest.fixture(autouse=True)
-def _fresh_db():
-    """Re-initialize the in-memory database before each test."""
+def _fresh_db(monkeypatch):
+    """Re-initialize the in-memory database before each test and mock test mode bypass."""
+    monkeypatch.setenv("ALLOW_ALL_THREADS", "true")
     server._conn.executescript("DROP TABLE IF EXISTS runs; DROP TABLE IF EXISTS threads;")
     server._init_db()
 
@@ -184,3 +185,53 @@ def test_404_for_missing_run(client):
     thread = client.post("/threads").json()
     resp = client.get(f"/threads/{thread['thread_id']}/runs/nonexistent")
     assert resp.status_code == 404
+
+
+def test_authentication_required(client, monkeypatch):
+    monkeypatch.setenv("ALLOW_ALL_THREADS", "false")
+    monkeypatch.setenv("LANGCHAIN_API_KEY", "secret-key")
+    
+    # Missing headers
+    resp = client.post("/threads")
+    assert resp.status_code == 401
+    assert "Missing authentication" in resp.json()["detail"]
+
+    # Invalid header key
+    resp = client.post("/threads", headers={"X-API-Key": "wrong-key"})
+    assert resp.status_code == 401
+    assert "Invalid API key" in resp.json()["detail"]
+
+    # Valid header key
+    resp = client.post("/threads", headers={"X-API-Key": "secret-key"})
+    assert resp.status_code == 200
+    assert "thread_id" in resp.json()
+
+
+def test_thread_ownership(client, monkeypatch):
+    monkeypatch.setenv("ALLOW_ALL_THREADS", "false")
+    monkeypatch.setenv("LANGCHAIN_API_KEY", "secret-key")
+    
+    # Set up mock OAuth session validation
+    from oauth_handler import user_manager
+    session_store = {"token-user-1": {"identity": "user-1", "name": "User One"},
+                     "token-user-2": {"identity": "user-2", "name": "User Two"}}
+    
+    with patch.object(user_manager, "validate_session", side_effect=session_store.get):
+        # User 1 creates thread
+        resp1 = client.post("/threads", headers={"Authorization": "Bearer token-user-1"})
+        assert resp1.status_code == 200
+        thread_id = resp1.json()["thread_id"]
+
+        # User 1 can view it
+        resp = client.get(f"/threads/{thread_id}", headers={"Authorization": "Bearer token-user-1"})
+        assert resp.status_code == 200
+
+        # User 2 cannot view it (Forbidden)
+        resp = client.get(f"/threads/{thread_id}", headers={"Authorization": "Bearer token-user-2"})
+        assert resp.status_code == 403
+        assert "Forbidden" in resp.json()["detail"]
+
+        # Admin can view it
+        resp = client.get(f"/threads/{thread_id}", headers={"X-API-Key": "secret-key"})
+        assert resp.status_code == 200
+

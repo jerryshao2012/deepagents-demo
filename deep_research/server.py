@@ -1,7 +1,7 @@
 """Async Subagent Server — Agent Protocol over FastAPI.
 
 Extends the existing FastAPI app in webapp.py to support LangGraph-style
-async subagent endpoints.
+async subagent endpoints with integrated security authentication.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
 # Import the existing app and settings from webapp
 from webapp import app
@@ -41,7 +41,8 @@ def _init_db() -> None:
             thread_id  TEXT PRIMARY KEY,
             created_at TEXT NOT NULL,
             messages   TEXT NOT NULL DEFAULT '[]',
-            values_    TEXT NOT NULL DEFAULT '{}'
+            values_    TEXT NOT NULL DEFAULT '{}',
+            user_id    TEXT
         );
         CREATE TABLE IF NOT EXISTS runs (
             run_id       TEXT PRIMARY KEY,
@@ -60,20 +61,79 @@ async def startup_event():
     _init_db()
 
 
+# ── Security Authentication ───────────────────────────────────────────────────
+
+async def get_current_user(request: Request) -> dict[str, Any]:
+    """Authenticate requests using API key or OAuth session token (matching auth.py logic)."""
+    # Check for test mode bypass
+    if os.environ.get("ALLOW_ALL_THREADS", "").lower() == "true":
+        return {"identity": "test-admin", "display_name": "Test Admin"}
+
+    headers = request.headers
+    api_key = headers.get("x-api-key") or headers.get("X-API-Key")
+
+    if not api_key:
+        auth_header = headers.get("authorization") or headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            api_key = auth_header[7:]
+
+    if not api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing authentication. Please provide 'x-api-key', 'Authorization: Bearer', or OAuth session token."
+        )
+
+    # Try to validate as OAuth session token
+    from oauth_handler import user_manager
+    user_data = user_manager.validate_session(api_key)
+    if user_data:
+        return {
+            "identity": user_data["identity"],
+            "display_name": user_data.get("name", user_data["identity"]),
+        }
+
+    # API key authentication
+    expected_key = os.environ.get("LANGCHAIN_API_KEY") or os.environ.get("UPLOAD_API_KEY")
+    if not expected_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Server configuration error: LANGCHAIN_API_KEY not set."
+        )
+
+    if api_key != expected_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key or session token."
+        )
+
+    return {
+        "identity": "admin",
+        "display_name": "Admin",
+    }
+
+
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
-def _get_thread(thread_id: str) -> dict[str, Any] | None:
+def _get_thread_with_auth(thread_id: str, current_user: dict[str, Any]) -> dict[str, Any]:
     row = _conn.execute(
-        "SELECT thread_id, created_at, messages, values_ FROM threads WHERE thread_id = ?",
+        "SELECT thread_id, created_at, messages, values_, user_id FROM threads WHERE thread_id = ?",
         (thread_id,),
     ).fetchone()
     if row is None:
-        return None
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    # Access control: threads are only accessible by their owner, admins, or if ALLOW_ALL_THREADS=true
+    if os.environ.get("ALLOW_ALL_THREADS", "").lower() == "true":
+        pass
+    elif current_user["identity"] != "admin" and row["user_id"] and row["user_id"] != current_user["identity"]:
+        raise HTTPException(status_code=403, detail="Forbidden: You do not own this thread")
+
     return {
         "thread_id": row["thread_id"],
         "created_at": row["created_at"],
         "messages": json.loads(row["messages"]),
         "values": json.loads(row["values_"]),
+        "user_id": row["user_id"],
     }
 
 
@@ -171,24 +231,27 @@ async def health() -> dict[str, bool]:
 
 
 @app.post("/threads")
-async def create_thread() -> dict[str, Any]:
+async def create_thread(current_user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     """Create a thread."""
     thread_id = str(uuid.uuid4())
     now = datetime.now(UTC).isoformat()
+    user_id = current_user["identity"]
     _conn.execute(
-        "INSERT INTO threads (thread_id, created_at) VALUES (?, ?)",
-        (thread_id, now),
+        "INSERT INTO threads (thread_id, created_at, user_id) VALUES (?, ?, ?)",
+        (thread_id, now, user_id),
     )
     _conn.commit()
-    return {"thread_id": thread_id, "created_at": now, "messages": [], "values": {}}
+    return {"thread_id": thread_id, "created_at": now, "messages": [], "values": {}, "user_id": user_id}
 
 
 @app.post("/threads/{thread_id}/runs")
-async def create_run(thread_id: str, request: Request) -> dict[str, Any]:
+async def create_run(
+    thread_id: str,
+    request: Request,
+    current_user: dict[str, Any] = Depends(get_current_user)
+) -> dict[str, Any]:
     """Create a run on an existing thread."""
-    thread = _get_thread(thread_id)
-    if thread is None:
-        raise HTTPException(status_code=404, detail="Thread not found")
+    thread = _get_thread_with_auth(thread_id, current_user)
 
     body = await request.json()
     multitask_strategy = body.get("multitask_strategy")
@@ -243,8 +306,15 @@ async def create_run(thread_id: str, request: Request) -> dict[str, Any]:
 
 
 @app.get("/threads/{thread_id}/runs/{run_id}")
-async def get_run(thread_id: str, run_id: str) -> dict[str, Any]:
+async def get_run(
+    thread_id: str,
+    run_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user)
+) -> dict[str, Any]:
     """Get run status."""
+    # Ensure thread belongs to authenticated user/is accessible
+    _get_thread_with_auth(thread_id, current_user)
+    
     run = _get_run(run_id)
     if run is None or run["thread_id"] != thread_id:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -252,17 +322,24 @@ async def get_run(thread_id: str, run_id: str) -> dict[str, Any]:
 
 
 @app.get("/threads/{thread_id}")
-async def get_thread(thread_id: str) -> dict[str, Any]:
+async def get_thread(
+    thread_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user)
+) -> dict[str, Any]:
     """Get thread state."""
-    thread = _get_thread(thread_id)
-    if thread is None:
-        raise HTTPException(status_code=404, detail="Thread not found")
-    return thread
+    return _get_thread_with_auth(thread_id, current_user)
 
 
 @app.post("/threads/{thread_id}/runs/{run_id}/cancel")
-async def cancel_run(thread_id: str, run_id: str) -> dict[str, Any]:
+async def cancel_run(
+    thread_id: str,
+    run_id: str,
+    current_user: dict[str, Any] = Depends(get_current_user)
+) -> dict[str, Any]:
     """Cancel a run."""
+    # Ensure thread belongs to authenticated user/is accessible
+    _get_thread_with_auth(thread_id, current_user)
+
     run = _get_run(run_id)
     if run is None or run["thread_id"] != thread_id:
         raise HTTPException(status_code=404, detail="Run not found")
