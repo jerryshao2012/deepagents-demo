@@ -331,27 +331,31 @@ The custom document upload service in `webapp.py` is also secured.
 
 ---
 
-#### Starting the Upload API Server
+#### Starting the API Server
 
-Set your API key and start the server:
+You have two options to run the API server:
 
+##### Option 1: Standalone Upload API Server
+To start only the document upload API server:
 ```bash
 # Set environment variables (or add to .env file)
 export UPLOAD_API_KEY=your_secure_api_key_here
 export UPLOAD_HOST=0.0.0.0  # Listen on all interfaces for public access
 export UPLOAD_PORT=8000
 
-# Start the server
+# Start the upload server
 uv run python webapp.py
 ```
 
-Or use uvicorn directly:
-
+##### Option 2: Independent Async Subagent Server (With Upload API)
+To start an independent Agent Protocol-compliant server that hosts the `deep_research` agent in the background and also reuses the upload API:
 ```bash
-uv run uvicorn webapp:app --host 0.0.0.0 --port 8000
+# Start the async subagent server
+uv run python server.py
 ```
 
 #### API Endpoints
+
 
 **1. Upload Documents** (`POST /documents/upload`)
 
@@ -908,11 +912,20 @@ FRONTEND_URL="http://localhost:3000"
 ### 🚀 Usage & Quickstart
 
 #### 1. Start the FastAPI Server
-Ensure all packages are synced, and start the application server:
+Ensure all packages are synced, and start the application server.
+
+**Option A: Upload API Only**
 ```bash
 cd deep_research
 uv sync
 python webapp.py
+```
+
+**Option B: Independent Async Subagent Server (With Upload API)**
+```bash
+cd deep_research
+uv sync
+python server.py
 ```
 
 #### 2. Test the Authentication Flow
