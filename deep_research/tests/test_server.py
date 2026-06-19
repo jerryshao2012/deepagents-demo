@@ -18,6 +18,7 @@ from langchain_core.messages import AIMessage
 # Ensure deep_research is in sys.path
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
+import db
 import server
 
 
@@ -25,8 +26,10 @@ import server
 def _fresh_db(monkeypatch):
     """Re-initialize the in-memory database before each test and mock test mode bypass."""
     monkeypatch.setenv("ALLOW_ALL_THREADS", "true")
-    server._conn.executescript("DROP TABLE IF EXISTS runs; DROP TABLE IF EXISTS threads;")
-    server._init_db()
+    monkeypatch.setenv("DB_TYPE", "sqlite")
+    conn = db._get_sqlite_conn()
+    conn.executescript("DROP TABLE IF EXISTS runs; DROP TABLE IF EXISTS threads;")
+    db._init_sqlite()
 
 
 FAKE_RESPONSE = {"messages": [AIMessage(content="Here are the research results.")]}

@@ -1,25 +1,27 @@
 """Async Subagent Server — Agent Protocol over FastAPI.
 
 Extends the existing FastAPI app in webapp.py to support LangGraph-style
-async subagent endpoints with integrated security authentication.
+async subagent endpoints with integrated security authentication,
+pluggable database backends (SQLite, CosmosDB, PostgreSQL), thread-safe /
+concurrency-safe task execution and cancellation, and Pydantic request validation.
 """
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
+
 # Ensure local imports work correctly
 sys.path.append(str(Path(__file__).parent))
 
 import asyncio
-import json
 import os
-import sqlite3
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 
 # Import the existing app and settings from webapp
 from webapp import app
@@ -27,38 +29,36 @@ from webapp import app
 # Import the actual deep_research agent
 from agent import agent
 
-# ── Database ──────────────────────────────────────────────────────────────────
+# Import DB wrapper
+import db
 
-# In-memory SQLite shared across all connections in this process.
-_conn = sqlite3.connect(":memory:", check_same_thread=False)
-_conn.row_factory = sqlite3.Row
-
-
-def _init_db() -> None:
-    """Create the threads and runs tables if they don't already exist."""
-    _conn.executescript("""
-        CREATE TABLE IF NOT EXISTS threads (
-            thread_id  TEXT PRIMARY KEY,
-            created_at TEXT NOT NULL,
-            messages   TEXT NOT NULL DEFAULT '[]',
-            values_    TEXT NOT NULL DEFAULT '{}',
-            user_id    TEXT
-        );
-        CREATE TABLE IF NOT EXISTS runs (
-            run_id       TEXT PRIMARY KEY,
-            thread_id    TEXT NOT NULL REFERENCES threads(thread_id),
-            assistant_id TEXT NOT NULL,
-            status       TEXT NOT NULL DEFAULT 'pending',
-            created_at   TEXT NOT NULL,
-            error        TEXT
-        );
-    """)
-    _conn.commit()
+# Track active background tasks to allow cancellation
+_active_tasks: dict[str, asyncio.Task] = {}
+# Lock to synchronize task modification operations
+_task_lock = asyncio.Lock()
 
 
 @app.on_event("startup")
 async def startup_event():
-    _init_db()
+    db.init_db()
+
+
+# ── Pydantic Request/Response Models ──────────────────────────────────────────
+
+class MessagePayload(BaseModel):
+    role: str
+    content: str
+    name: str | None = None
+
+
+class RunInputPayload(BaseModel):
+    messages: list[MessagePayload] = Field(default_factory=list)
+
+
+class RunCreateRequest(BaseModel):
+    assistant_id: str = "researcher"
+    input: RunInputPayload = Field(default_factory=RunInputPayload)
+    multitask_strategy: str | None = None
 
 
 # ── Security Authentication ───────────────────────────────────────────────────
@@ -115,36 +115,18 @@ async def get_current_user(request: Request) -> dict[str, Any]:
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 def _get_thread_with_auth(thread_id: str, current_user: dict[str, Any]) -> dict[str, Any]:
-    row = _conn.execute(
-        "SELECT thread_id, created_at, messages, values_, user_id FROM threads WHERE thread_id = ?",
-        (thread_id,),
-    ).fetchone()
-    if row is None:
+    thread = db.get_thread(thread_id)
+    if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
     # Access control: threads are only accessible by their owner, admins, or if ALLOW_ALL_THREADS=true
     if os.environ.get("ALLOW_ALL_THREADS", "").lower() == "true":
         pass
-    elif current_user["identity"] != "admin" and row["user_id"] and row["user_id"] != current_user["identity"]:
+    elif current_user["identity"] != "admin" and thread.get("user_id") and thread.get("user_id") != current_user[
+        "identity"]:
         raise HTTPException(status_code=403, detail="Forbidden: You do not own this thread")
 
-    return {
-        "thread_id": row["thread_id"],
-        "created_at": row["created_at"],
-        "messages": json.loads(row["messages"]),
-        "values": json.loads(row["values_"]),
-        "user_id": row["user_id"],
-    }
-
-
-def _get_run(run_id: str) -> dict[str, Any] | None:
-    row = _conn.execute(
-        "SELECT run_id, thread_id, assistant_id, status, created_at, error FROM runs WHERE run_id = ?",
-        (run_id,),
-    ).fetchone()
-    if row is None:
-        return None
-    return dict(row)
+    return thread
 
 
 def serialize_message(m: Any) -> dict[str, Any]:
@@ -156,7 +138,7 @@ def serialize_message(m: Any) -> dict[str, Any]:
         role = "user"
     elif role == "ai":
         role = "assistant"
-    
+
     res = {"role": role, "content": getattr(m, "content", "")}
     if hasattr(m, "name") and m.name:
         res["name"] = m.name
@@ -167,18 +149,17 @@ def serialize_message(m: Any) -> dict[str, Any]:
 
 async def _execute_run(run_id: str, thread_id: str) -> None:
     """Invoke the agent and persist the result; called as a fire-and-forget task."""
-    _conn.execute("UPDATE runs SET status = 'running' WHERE run_id = ?", (run_id,))
-    _conn.commit()
+    db.update_run_status(run_id, "running")
     try:
         # Load all existing messages and state values on the thread
-        row = _conn.execute(
-            "SELECT messages, values_ FROM threads WHERE thread_id = ?", (thread_id,)
-        ).fetchone()
-        
-        existing_values = json.loads(row["values_"]) if row and row["values_"] else {}
-        existing_files = existing_values.get("files", {})
-        messages = json.loads(row["messages"]) if row else []
-        
+        thread = db.get_thread(thread_id)
+        if not thread:
+            raise ValueError(f"Thread {thread_id} not found during run execution")
+
+        existing_values = thread.get("values") or {}
+        existing_files = existing_values.get("files") or {}
+        messages = thread.get("messages") or []
+
         # Build initial input state for deep_research agent
         input_state = {
             "messages": messages,
@@ -187,16 +168,23 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
             "skill": existing_values.get("skill"),
             "no_web": existing_values.get("no_web"),
         }
-        
+
         # Clean None values
         input_state = {k: v for k, v in input_state.items() if v is not None}
-        
+
         # Invoke the deep_research agent
         result = await agent.ainvoke(input_state)
-        
+
+        # Check if this run has been cancelled in the database/active tasks while executing
+        # to prevent overwriting newer thread states in case of race conditions.
+        async with _task_lock:
+            run_data = db.get_run(run_id)
+            if run_data and run_data.get("status") == "cancelled":
+                return
+
         # Serialize messages
         serialized_messages = [serialize_message(m) for m in result.get("messages", [])]
-        
+
         # Serialize the other state fields to preserve files, doc_folder, etc.
         serializable_result = {
             "messages": serialized_messages,
@@ -205,21 +193,20 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
             "skill": result.get("skill"),
             "no_web": result.get("no_web"),
         }
-        
-        _conn.execute(
-            "UPDATE threads SET messages = ?, values_ = ? WHERE thread_id = ?",
-            (json.dumps(serialized_messages), json.dumps(serializable_result), thread_id),
-        )
-        _conn.execute("UPDATE runs SET status = 'success' WHERE run_id = ?", (run_id,))
-        _conn.commit()
+
+        db.update_thread(thread_id, serialized_messages, serializable_result)
+        db.update_run_status(run_id, "success")
+    except asyncio.CancelledError:
+        # Task was explicitly cancelled
+        db.update_run_status(run_id, "cancelled")
+        raise
     except Exception as exc:
         import traceback
         traceback.print_exc()
-        _conn.execute(
-            "UPDATE runs SET status = 'error', error = ? WHERE run_id = ?",
-            (str(exc), run_id),
-        )
-        _conn.commit()
+        db.update_run_status(run_id, "error", error=str(exc))
+    finally:
+        async with _task_lock:
+            _active_tasks.pop(run_id, None)
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -236,64 +223,55 @@ async def create_thread(current_user: dict[str, Any] = Depends(get_current_user)
     thread_id = str(uuid.uuid4())
     now = datetime.now(UTC).isoformat()
     user_id = current_user["identity"]
-    _conn.execute(
-        "INSERT INTO threads (thread_id, created_at, user_id) VALUES (?, ?, ?)",
-        (thread_id, now, user_id),
-    )
-    _conn.commit()
+    db.create_thread(thread_id, user_id, now)
     return {"thread_id": thread_id, "created_at": now, "messages": [], "values": {}, "user_id": user_id}
 
 
 @app.post("/threads/{thread_id}/runs")
 async def create_run(
-    thread_id: str,
-    request: Request,
-    current_user: dict[str, Any] = Depends(get_current_user)
+        thread_id: str,
+        body: RunCreateRequest,
+        current_user: dict[str, Any] = Depends(get_current_user)
 ) -> dict[str, Any]:
-    """Create a run on an existing thread."""
+    """Create a run on an existing thread with request payload validation."""
     thread = _get_thread_with_auth(thread_id, current_user)
 
-    body = await request.json()
-    multitask_strategy = body.get("multitask_strategy")
+    multitask_strategy = body.multitask_strategy
 
+    # If interrupt, cancel all currently active runs on this thread
     if multitask_strategy == "interrupt":
-        _conn.execute(
-            "UPDATE runs SET status = 'cancelled' WHERE thread_id = ? AND status = 'running'",
-            (thread_id,),
-        )
-        _conn.execute(
-            "UPDATE threads SET values_ = '{}' WHERE thread_id = ?",
-            (thread_id,),
-        )
-        _conn.commit()
+        async with _task_lock:
+            # Cancel tasks from memory
+            to_cancel = []
+            for run_id, task in list(_active_tasks.items()):
+                run_data = db.get_run(run_id)
+                if run_data and run_data.get("thread_id") == thread_id:
+                    task.cancel()
+                    to_cancel.append(run_id)
 
-    messages = (body.get("input") or {}).get("messages") or []
-    user_message = next((m["content"] for m in messages if m.get("role") == "user"), "")
+            for run_id in to_cancel:
+                _active_tasks.pop(run_id, None)
+
+            db.cancel_running_runs(thread_id)
+            db.update_thread(thread_id, [], {})
+
+    messages = body.input.messages
+    user_message = next((m.content for m in messages if m.role == "user"), "")
 
     if user_message:
-        existing = json.loads(
-            _conn.execute(
-                "SELECT messages FROM threads WHERE thread_id = ?", (thread_id,)
-            ).fetchone()[0]
-        )
+        existing = thread.get("messages") or []
         existing.append({"role": "user", "content": user_message})
-        _conn.execute(
-            "UPDATE threads SET messages = ? WHERE thread_id = ?",
-            (json.dumps(existing), thread_id),
-        )
-        _conn.commit()
+        db.update_thread(thread_id, existing, thread.get("values") or {})
 
     run_id = str(uuid.uuid4())
     now = datetime.now(UTC).isoformat()
-    assistant_id = body.get("assistant_id") or "researcher"
-    _conn.execute(
-        "INSERT INTO runs (run_id, thread_id, assistant_id, created_at) VALUES (?, ?, ?, ?)",
-        (run_id, thread_id, assistant_id, now),
-    )
-    _conn.commit()
+    assistant_id = body.assistant_id or "researcher"
+    db.create_run(run_id, thread_id, assistant_id, now)
 
-    # Fire and forget run executor
-    asyncio.ensure_future(_execute_run(run_id, thread_id))
+    # Spawn background task and register it in _active_tasks
+    async with _task_lock:
+        task = asyncio.create_task(_execute_run(run_id, thread_id))
+        _active_tasks[run_id] = task
 
     return {
         "run_id": run_id,
@@ -307,15 +285,15 @@ async def create_run(
 
 @app.get("/threads/{thread_id}/runs/{run_id}")
 async def get_run(
-    thread_id: str,
-    run_id: str,
-    current_user: dict[str, Any] = Depends(get_current_user)
+        thread_id: str,
+        run_id: str,
+        current_user: dict[str, Any] = Depends(get_current_user)
 ) -> dict[str, Any]:
     """Get run status."""
     # Ensure thread belongs to authenticated user/is accessible
     _get_thread_with_auth(thread_id, current_user)
-    
-    run = _get_run(run_id)
+
+    run = db.get_run(run_id)
     if run is None or run["thread_id"] != thread_id:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
@@ -323,8 +301,8 @@ async def get_run(
 
 @app.get("/threads/{thread_id}")
 async def get_thread(
-    thread_id: str,
-    current_user: dict[str, Any] = Depends(get_current_user)
+        thread_id: str,
+        current_user: dict[str, Any] = Depends(get_current_user)
 ) -> dict[str, Any]:
     """Get thread state."""
     return _get_thread_with_auth(thread_id, current_user)
@@ -332,19 +310,24 @@ async def get_thread(
 
 @app.post("/threads/{thread_id}/runs/{run_id}/cancel")
 async def cancel_run(
-    thread_id: str,
-    run_id: str,
-    current_user: dict[str, Any] = Depends(get_current_user)
+        thread_id: str,
+        run_id: str,
+        current_user: dict[str, Any] = Depends(get_current_user)
 ) -> dict[str, Any]:
     """Cancel a run."""
     # Ensure thread belongs to authenticated user/is accessible
     _get_thread_with_auth(thread_id, current_user)
 
-    run = _get_run(run_id)
+    run = db.get_run(run_id)
     if run is None or run["thread_id"] != thread_id:
         raise HTTPException(status_code=404, detail="Run not found")
-    _conn.execute("UPDATE runs SET status = 'cancelled' WHERE run_id = ?", (run_id,))
-    _conn.commit()
+
+    async with _task_lock:
+        task = _active_tasks.pop(run_id, None)
+        if task:
+            task.cancel()
+        db.update_run_status(run_id, "cancelled")
+
     return {**run, "status": "cancelled"}
 
 

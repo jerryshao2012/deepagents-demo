@@ -354,6 +354,26 @@ To start an independent Agent Protocol-compliant server that hosts the `deep_res
 uv run python server.py
 ```
 
+##### 🗄️ Pluggable Database Configuration for Async Server
+The async subagent server (`server.py`) supports multiple pluggable database backends configured via environment variables in your `.env` file:
+
+* **SQLite** (Default):
+  - `DB_TYPE=sqlite` (Optional, defaults to `sqlite`)
+  - `SQLITE_DB_PATH`: Path to the SQLite DB file (e.g. `deep_research.db`). Defaults to `:memory:` if not set.
+
+* **Azure Cosmos DB**:
+  - `DB_TYPE=cosmosdb`
+  - `COSMOSDB_ENDPOINT`: Your Cosmos DB Endpoint URL
+  - `COSMOSDB_KEY`: Your Cosmos DB Key
+  - `COSMOSDB_DB_NAME`: Database name (defaults to `deep_research`)
+  - `COSMOS_CONNECTION_STRING`: Connection string (alternative to endpoint + key)
+
+* **PostgreSQL**:
+  - `DB_TYPE=postgres`
+  - `DATABASE_URL` (or `POSTGRES_URL`): Database connection string (e.g. `postgresql://user:pass@host:5432/dbname`)
+  - Alternatively, configure separate connection variables: `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`.
+  - *Note*: Requires the `psycopg` package (run `pip install "psycopg[binary]"` or `uv add "psycopg[binary]"`).
+
 #### API Endpoints
 
 
