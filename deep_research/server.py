@@ -7,6 +7,7 @@ concurrency-safe task execution and cancellation, and Pydantic request validatio
 
 Examples:
 # Start on the default port (2024)
+$env:UVICORN_RELOAD="false"
 uv run python run.py
 
 # Start explicitly on 2024
