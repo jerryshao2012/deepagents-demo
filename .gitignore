@@ -44,6 +44,10 @@ env/
 # config.yaml is kept for demo purposes
 !.env.example
 secrets.sh
+secrets-aws.sh
+test_azure_connectivity.py
+test_bedrock_init.py
+setup.md
 
 # Temporary files
 *.tmp
