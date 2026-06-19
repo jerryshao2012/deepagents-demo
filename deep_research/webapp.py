@@ -49,14 +49,28 @@ app = FastAPI(
 
 frontend_origins = [
     "http://localhost:3000",
+    "http://127.0.0.1:3000",
     "https://smith.langchain.com",
-    os.environ.get("FRONTEND_URL", "").rstrip("/"),
 ]
-frontend_origins = [origin for origin in frontend_origins if origin]
+
+# Support one or more explicit frontend origins from env.
+# Accept comma-separated values and normalize by trimming trailing slashes.
+env_frontend_urls = os.environ.get("FRONTEND_URL", "")
+if env_frontend_urls:
+    frontend_origins.extend(
+        origin.strip().rstrip("/")
+        for origin in env_frontend_urls.split(",")
+        if origin.strip()
+    )
+
+# Deduplicate while preserving order and remove any accidental empties.
+frontend_origins = list(dict.fromkeys(origin for origin in frontend_origins if origin))
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=frontend_origins,
+    # Allow local development UI hosts on any port.
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -109,7 +123,7 @@ async def upload_documents(
         x_api_key: str | None = Header(None),
 ) -> dict:
     """Upload documents to a specified folder within docs directory.
-    
+
     Requires API key authentication via X-API-Key header.
     Returns uploaded file info and remaining free storage space.
     """
@@ -215,7 +229,7 @@ async def list_documents(
         x_api_key: str | None = Header(None),
 ) -> dict:
     """List all files in a specified folder within docs directory.
-    
+
     Requires API key authentication via X-API-Key header.
     Returns array of files with name and size.
     """
@@ -280,7 +294,7 @@ async def download_document(
         x_api_key: str | None = Header(None),
 ):
     """Download a specific file from a folder.
-    
+
     Requires API key authentication via X-API-Key header.
     Returns the file as a downloadable response.
     """
@@ -351,7 +365,7 @@ async def delete_document(
         x_api_key: str | None = Header(None),
 ) -> dict:
     """Delete a specific file from a folder.
-    
+
     Requires API key authentication via X-API-Key header.
     Returns confirmation of deletion.
     """
@@ -406,7 +420,7 @@ async def delete_folder_contents(
         x_api_key: str | None = Header(None),
 ) -> dict:
     """Delete all files in a specified folder.
-    
+
     Requires API key authentication via X-API-Key header.
     Returns count of deleted files.
     """
@@ -454,7 +468,7 @@ async def delete_folder_contents(
 @app.get("/auth/login/{provider}")
 async def oauth_login(provider: str, request: Request):
     """Initiate OAuth login with Google or GitHub.
-    
+
     Usage:
     - GET /auth/login/google
     - GET /auth/login/github
@@ -496,7 +510,7 @@ async def oauth_login(provider: str, request: Request):
 @app.get("/auth/callback/{provider}")
 async def oauth_callback(provider: str, request: Request):
     """Handle OAuth callback from Google or GitHub.
-    
+
     Returns user information and session token.
     """
     if not OAUTH_ENABLED:
@@ -532,7 +546,7 @@ async def oauth_callback(provider: str, request: Request):
 @app.get("/auth/session/validate")
 async def validate_session(request: Request, x_api_key: str | None = Header(None)):
     """Validate an OAuth session token.
-    
+
     Provide session token via X-API-Key header or Authorization: Bearer header.
     """
     if not OAUTH_ENABLED:
@@ -592,7 +606,7 @@ async def validate_session(request: Request, x_api_key: str | None = Header(None
 @app.post("/auth/logout")
 async def logout(request: Request, x_api_key: str | None = Header(None)):
     """Logout user by invalidating their OAuth session token.
-    
+
     Provide session token via X-API-Key header or Authorization: Bearer header.
     Returns success message and cleaned up user identity.
     """
