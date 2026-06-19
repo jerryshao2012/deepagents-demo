@@ -56,7 +56,7 @@ def test_create_thread(client):
     assert resp.status_code == 200
     data = resp.json()
     assert "thread_id" in data
-    assert data["messages"] == []
+    assert data["values"]["messages"] == []
 
 
 def test_create_run_starts_agent(client):
@@ -134,11 +134,11 @@ def test_cancel_run(client):
 
     cancel_resp = client.post(f"/threads/{thread_id}/runs/{run_id}/cancel")
     assert cancel_resp.status_code == 200
-    assert cancel_resp.json()["status"] == "cancelled"
+    assert cancel_resp.json()["status"] == "interrupted"
 
     # Verify the run is cancelled.
     status_resp = client.get(f"/threads/{thread_id}/runs/{run_id}")
-    assert status_resp.json()["status"] == "cancelled"
+    assert status_resp.json()["status"] == "interrupted"
 
 
 def test_interrupt_strategy(client):
@@ -176,7 +176,7 @@ def test_interrupt_strategy(client):
 
     # First run should be cancelled.
     first_status = client.get(f"/threads/{thread_id}/runs/{first_run['run_id']}").json()
-    assert first_status["status"] == "cancelled"
+    assert first_status["status"] == "interrupted"
 
 
 def test_404_for_missing_thread(client):
@@ -193,7 +193,7 @@ def test_404_for_missing_run(client):
 def test_authentication_required(client, monkeypatch):
     monkeypatch.setenv("ALLOW_ALL_THREADS", "false")
     monkeypatch.setenv("LANGCHAIN_API_KEY", "secret-key")
-    
+
     # Missing headers
     resp = client.post("/threads")
     assert resp.status_code == 401
@@ -213,12 +213,12 @@ def test_authentication_required(client, monkeypatch):
 def test_thread_ownership(client, monkeypatch):
     monkeypatch.setenv("ALLOW_ALL_THREADS", "false")
     monkeypatch.setenv("LANGCHAIN_API_KEY", "secret-key")
-    
+
     # Set up mock OAuth session validation
     from oauth_handler import user_manager
     session_store = {"token-user-1": {"identity": "user-1", "name": "User One"},
                      "token-user-2": {"identity": "user-2", "name": "User Two"}}
-    
+
     with patch.object(user_manager, "validate_session", side_effect=session_store.get):
         # User 1 creates thread
         resp1 = client.post("/threads", headers={"Authorization": "Bearer token-user-1"})
@@ -237,4 +237,3 @@ def test_thread_ownership(client, monkeypatch):
         # Admin can view it
         resp = client.get(f"/threads/{thread_id}", headers={"X-API-Key": "secret-key"})
         assert resp.status_code == 200
-

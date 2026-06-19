@@ -4,6 +4,14 @@ Extends the existing FastAPI app in webapp.py to support LangGraph-style
 async subagent endpoints with integrated security authentication,
 pluggable database backends (SQLite, CosmosDB, PostgreSQL), thread-safe /
 concurrency-safe task execution and cancellation, and Pydantic request validation.
+
+Examples:
+# Start on the default port (2024)
+uvicorn server:app --reload
+
+# Start explicitly on 2024
+export UPLOAD_PORT=2024
+uvicorn server:app --reload
 """
 
 from __future__ import annotations
@@ -11,16 +19,20 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import uvicorn
+
 # Ensure local imports work correctly
 sys.path.append(str(Path(__file__).parent))
 
 import asyncio
+import json
 import os
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request, Query
+from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, Field
 
 # Import the existing app and settings from webapp
@@ -36,6 +48,33 @@ import db
 _active_tasks: dict[str, asyncio.Task] = {}
 # Lock to synchronize task modification operations
 _task_lock = asyncio.Lock()
+
+
+def custom_openapi() -> dict[str, Any]:
+    """Build an explicit OpenAPI document for the async subagent server."""
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    app.openapi_schema = get_openapi(
+        title="Deep Research Async Subagent API",
+        version=os.environ.get("SERVER_API_VERSION", "1.0.0"),
+        description=(
+            "Async subagent server for Deep Research. "
+            "Includes thread/run lifecycle endpoints, upload API, and auth-protected operations."
+        ),
+        routes=app.routes,
+        tags=[
+            {"name": "Health", "description": "Service health endpoints."},
+            {"name": "Threads", "description": "Thread lifecycle and state endpoints."},
+            {"name": "Runs", "description": "Background run execution and cancellation endpoints."},
+            {"name": "Documents", "description": "Document upload and management endpoints."},
+            {"name": "Auth", "description": "Authentication and authorization endpoints."},
+        ],
+    )
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 
 @app.on_event("startup")
@@ -59,6 +98,75 @@ class RunCreateRequest(BaseModel):
     assistant_id: str = "researcher"
     input: RunInputPayload = Field(default_factory=RunInputPayload)
     multitask_strategy: str | None = None
+
+
+class ThreadCreateRequest(BaseModel):
+    thread_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    if_exists: str = "raise"
+
+
+class ThreadSearchRequest(BaseModel):
+    limit: int = 10
+    offset: int = 0
+    sort_by: str = "updated_at"
+    sort_order: str = "desc"
+    status: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class ThreadPatchRequest(BaseModel):
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ThreadStateUpdateRequest(BaseModel):
+    values: dict[str, Any] | list[Any] | None = None
+
+
+class RunStreamRequest(BaseModel):
+    assistant_id: str = "researcher"
+    input: dict[str, Any] | list[Any] | str | int | float | bool | None = None
+    multitask_strategy: str | None = None
+
+
+def _sse_frame(event: str, data: Any, event_id: int | None = None) -> str:
+    payload = json.dumps(data, default=str)
+    id_part = f"id: {event_id}\n" if event_id is not None else ""
+    return f"{id_part}event: {event}\ndata: {payload}\n\n"
+
+
+def _api_thread(thread: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "thread_id": thread.get("thread_id"),
+        "created_at": thread.get("created_at"),
+        "updated_at": thread.get("updated_at") or thread.get("created_at"),
+        "state_updated_at": thread.get("state_updated_at"),
+        "metadata": thread.get("metadata") or {},
+        "status": thread.get("status") or "idle",
+        "values": thread.get("values") or {},
+    }
+
+
+def _map_run_status_for_api(status: str | None) -> str:
+    # Keep API-compatible enum for clients expecting interrupted rather than cancelled.
+    if status == "cancelled":
+        return "interrupted"
+    return status or "pending"
+
+
+def _api_run(run: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "run_id": run.get("run_id"),
+        "thread_id": run.get("thread_id"),
+        "assistant_id": run.get("assistant_id"),
+        "created_at": run.get("created_at"),
+        "updated_at": run.get("updated_at") or run.get("created_at"),
+        "status": _map_run_status_for_api(run.get("status")),
+        "metadata": run.get("metadata") or {},
+        "kwargs": run.get("kwargs") or {},
+        "multitask_strategy": run.get("multitask_strategy") or "enqueue",
+        "error": run.get("error"),
+    }
 
 
 # ── Security Authentication ───────────────────────────────────────────────────
@@ -211,23 +319,116 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-@app.get("/ok")
+@app.get("/ok", tags=["Health"])
 async def health() -> dict[str, bool]:
     """Health check."""
     return {"ok": True}
 
 
-@app.post("/threads")
-async def create_thread(current_user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
+@app.post("/threads", tags=["Threads"])
+async def create_thread(
+        body: ThreadCreateRequest = ThreadCreateRequest(),
+        current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
     """Create a thread."""
-    thread_id = str(uuid.uuid4())
+    thread_id = body.thread_id or str(uuid.uuid4())
+    existing = db.get_thread(thread_id)
+    if existing is not None:
+        if body.if_exists == "do_nothing":
+            return _api_thread(existing)
+        raise HTTPException(status_code=409, detail="Thread already exists")
+
     now = datetime.now(UTC).isoformat()
     user_id = current_user["identity"]
-    db.create_thread(thread_id, user_id, now)
-    return {"thread_id": thread_id, "created_at": now, "messages": [], "values": {}, "user_id": user_id}
+    db.create_thread(thread_id, user_id, now, metadata=body.metadata or {}, status="idle", values={"messages": []})
+    created = db.get_thread(thread_id)
+    if created is None:
+        raise HTTPException(status_code=500, detail="Failed to create thread")
+    return _api_thread(created)
 
 
-@app.post("/threads/{thread_id}/runs")
+@app.post("/threads/search", tags=["Threads"])
+async def search_threads(
+        body: ThreadSearchRequest,
+        current_user: dict[str, Any] = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    """Search/list threads."""
+    user_id = None if current_user.get("identity") == "admin" else current_user.get("identity")
+    items = db.search_threads(
+        limit=body.limit,
+        offset=body.offset,
+        sort_by=body.sort_by,
+        sort_order=body.sort_order,
+        status=body.status,
+        metadata=body.metadata or {},
+        user_id=user_id,
+    )
+    return [_api_thread(t) for t in items]
+
+
+@app.patch("/threads/{thread_id}", tags=["Threads"])
+async def patch_thread(
+        thread_id: str,
+        body: ThreadPatchRequest,
+        current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Patch thread metadata."""
+    _get_thread_with_auth(thread_id, current_user)
+    ok = db.update_thread_metadata(thread_id, body.metadata or {})
+    if not ok:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    updated = db.get_thread(thread_id)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return _api_thread(updated)
+
+
+@app.delete("/threads/{thread_id}", tags=["Threads"])
+async def delete_thread(
+        thread_id: str,
+        current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Delete a thread and associated runs."""
+    _get_thread_with_auth(thread_id, current_user)
+    ok = db.delete_thread(thread_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return {}
+
+
+@app.post("/threads/{thread_id}/state", tags=["Threads"])
+async def update_thread_state(
+        thread_id: str,
+        body: ThreadStateUpdateRequest,
+        current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Update thread state values."""
+    _get_thread_with_auth(thread_id, current_user)
+    values = body.values
+    if values is None:
+        payload_values: dict[str, Any] = {}
+    elif isinstance(values, dict):
+        payload_values = values
+    else:
+        payload_values = {"values": values}
+
+    ok = db.update_thread_state(thread_id, payload_values)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    thread = db.get_thread(thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    checkpoint = {
+        "thread_id": thread_id,
+        "checkpoint_ns": "",
+        "checkpoint_id": str(uuid.uuid4()),
+    }
+    return {"checkpoint": checkpoint}
+
+
+@app.post("/threads/{thread_id}/runs", tags=["Runs"])
 async def create_run(
         thread_id: str,
         body: RunCreateRequest,
@@ -253,7 +454,7 @@ async def create_run(
                 _active_tasks.pop(run_id, None)
 
             db.cancel_running_runs(thread_id)
-            db.update_thread(thread_id, [], {})
+            db.update_thread(thread_id, [], {"messages": []})
 
     messages = body.input.messages
     user_message = next((m.content for m in messages if m.role == "user"), "")
@@ -266,24 +467,123 @@ async def create_run(
     run_id = str(uuid.uuid4())
     now = datetime.now(UTC).isoformat()
     assistant_id = body.assistant_id or "researcher"
-    db.create_run(run_id, thread_id, assistant_id, now)
+    db.create_run(run_id, thread_id, assistant_id, now, multitask_strategy=multitask_strategy or "enqueue")
 
     # Spawn background task and register it in _active_tasks
     async with _task_lock:
         task = asyncio.create_task(_execute_run(run_id, thread_id))
         _active_tasks[run_id] = task
 
-    return {
-        "run_id": run_id,
-        "thread_id": thread_id,
-        "assistant_id": assistant_id,
-        "status": "pending",
-        "created_at": now,
-        "error": None,
-    }
+    run = db.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=500, detail="Failed to create run")
+    return _api_run(run)
 
 
-@app.get("/threads/{thread_id}/runs/{run_id}")
+@app.get("/threads/{thread_id}/runs", tags=["Runs"])
+async def list_runs(
+        thread_id: str,
+        limit: int = Query(default=10),
+        offset: int = Query(default=0),
+        current_user: dict[str, Any] = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    """List runs for a thread."""
+    _get_thread_with_auth(thread_id, current_user)
+    runs = db.list_runs(thread_id, limit=limit, offset=offset)
+    return [_api_run(r) for r in runs]
+
+
+@app.post("/threads/{thread_id}/runs/stream", tags=["Runs"])
+async def stream_run(
+        thread_id: str,
+        body: RunStreamRequest,
+        current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Create a run and stream output as SSE-compatible event payloads."""
+    _get_thread_with_auth(thread_id, current_user)
+
+    messages_payload: list[MessagePayload] = []
+    if isinstance(body.input, dict):
+        raw_messages = body.input.get("messages", [])
+        if isinstance(raw_messages, list):
+            for msg in raw_messages:
+                if isinstance(msg, dict):
+                    messages_payload.append(
+                        MessagePayload(
+                            role=str(msg.get("role", "user")),
+                            content=str(msg.get("content", "")),
+                            name=msg.get("name"),
+                        )
+                    )
+
+    run_request = RunCreateRequest(
+        assistant_id=body.assistant_id,
+        input=RunInputPayload(messages=messages_payload),
+        multitask_strategy=body.multitask_strategy,
+    )
+    created = await create_run(thread_id=thread_id, body=run_request, current_user=current_user)
+    run_id = created["run_id"]
+
+    async def event_stream():
+        seq = 0
+        last_status = None
+        last_values_json = None
+
+        first_run = db.get_run(run_id)
+        if first_run is None:
+            yield _sse_frame("error", {"detail": "Run not found"}, event_id=seq)
+            return
+
+        yield _sse_frame("metadata", _api_run(first_run), event_id=seq)
+        seq += 1
+
+        while True:
+            run = db.get_run(run_id)
+            if run is None:
+                yield _sse_frame("error", {"detail": "Run not found"}, event_id=seq)
+                break
+
+            status = _map_run_status_for_api(run.get("status"))
+            if status != last_status:
+                yield _sse_frame(
+                    "updates",
+                    {
+                        "run_id": run_id,
+                        "status": status,
+                        "multitask_strategy": run.get("multitask_strategy") or "enqueue",
+                    },
+                    event_id=seq,
+                )
+                seq += 1
+                last_status = status
+
+            thread = db.get_thread(thread_id)
+            values = (thread or {}).get("values") or {}
+            values_json = json.dumps(values, default=str, sort_keys=True)
+            if values_json != last_values_json:
+                yield _sse_frame("values", values, event_id=seq)
+                seq += 1
+                last_values_json = values_json
+
+            if status in {"success", "error", "interrupted", "timeout"}:
+                yield _sse_frame(
+                    "end",
+                    {
+                        "run_id": run_id,
+                        "status": status,
+                    },
+                    event_id=seq,
+                )
+                break
+
+            await asyncio.sleep(0.3)
+
+    from fastapi.responses import StreamingResponse
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@app.get("/threads/{thread_id}/runs/{run_id}", tags=["Runs"])
 async def get_run(
         thread_id: str,
         run_id: str,
@@ -296,22 +596,25 @@ async def get_run(
     run = db.get_run(run_id)
     if run is None or run["thread_id"] != thread_id:
         raise HTTPException(status_code=404, detail="Run not found")
-    return run
+    return _api_run(run)
 
 
-@app.get("/threads/{thread_id}")
+@app.get("/threads/{thread_id}", tags=["Threads"])
 async def get_thread(
         thread_id: str,
         current_user: dict[str, Any] = Depends(get_current_user)
 ) -> dict[str, Any]:
     """Get thread state."""
-    return _get_thread_with_auth(thread_id, current_user)
+    thread = _get_thread_with_auth(thread_id, current_user)
+    return _api_thread(thread)
 
 
-@app.post("/threads/{thread_id}/runs/{run_id}/cancel")
+@app.post("/threads/{thread_id}/runs/{run_id}/cancel", tags=["Runs"])
 async def cancel_run(
         thread_id: str,
         run_id: str,
+        wait: bool = Query(default=False),
+        action: str = Query(default="interrupt"),
         current_user: dict[str, Any] = Depends(get_current_user)
 ) -> dict[str, Any]:
     """Cancel a run."""
@@ -328,14 +631,35 @@ async def cancel_run(
             task.cancel()
         db.update_run_status(run_id, "cancelled")
 
-    return {**run, "status": "cancelled"}
+    if wait:
+        # Allow cancellation propagation to settle.
+        await asyncio.sleep(0.05)
+
+    updated = db.get_run(run_id) or {**run, "status": "cancelled"}
+    return _api_run(updated)
 
 
 if __name__ == "__main__":
-    import uvicorn
-
     host = os.environ.get("UPLOAD_HOST", "0.0.0.0")
-    port = int(os.environ.get("UPLOAD_PORT", "8000"))
+    port = int(os.environ.get("UPLOAD_PORT", "2024"))
+    db_type = os.environ.get("DB_TYPE", "sqlite").strip().lower()
+    sqlite_db_path = os.environ.get("SQLITE_DB_PATH", ":memory:")
 
     print(f"🚀 Starting Document Upload & Agent API Server on {host}:{port}")
+    print(f"🚀 API: http://127.0.0.1:{port}")
+    print(f"📚 API Docs: http://127.0.0.1:{port}/docs")
+
+    if db_type in {"cosmosdb", "cosmos"}:
+        print("Using Azure Cosmos DB backend (production deployment mode).")
+    elif db_type in {"postgres", "postgresql"}:
+        print("Using PostgreSQL backend (production deployment mode).")
+    elif db_type == "sqlite" and sqlite_db_path == ":memory:":
+        print("This in-memory database is designed for development and testing.")
+        print("For production use, please use CosmosDB or PostgreSQL deployment.")
+    elif db_type == "sqlite":
+        print(f"Using SQLite file database at: {sqlite_db_path} (development/local mode).")
+        print("For production use, CosmosDB or PostgreSQL is recommended.")
+    else:
+        print(f"Using database backend type: {db_type}.")
+
     uvicorn.run(app, host=host, port=port)

@@ -354,6 +354,23 @@ To start an independent Agent Protocol-compliant server that hosts the `deep_res
 uv run python server.py
 ```
 
+Examples:
+```bash
+# Start on the default port (2024)
+uvicorn server:app --reload
+
+# Start explicitly on 2024
+export UPLOAD_PORT=2024
+uvicorn server:app --reload
+```
+
+Startup output includes:
+- 🚀 API: http://127.0.0.1:2024
+- 📚 API Docs: http://127.0.0.1:2024/docs
+
+This in-memory database is designed for development and testing.
+For production use, please use CosmosDB or PostgreSQL deployment.
+
 ##### 🗄️ Pluggable Database Configuration for Async Server
 The async subagent server (`server.py`) supports multiple pluggable database backends configured via environment variables in your `.env` file:
 

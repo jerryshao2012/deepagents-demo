@@ -24,6 +24,7 @@ output/
 input/
 deep_research_example.egg-info/
 .langgraph_api/
+.scripts/
 
 # Development tools
 .ruff_cache/
