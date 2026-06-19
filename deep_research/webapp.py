@@ -1,6 +1,7 @@
 import asyncio
 import os
 import shutil
+from contextlib import asynccontextmanager
 from pathlib import Path, PurePosixPath
 
 from dotenv import load_dotenv
@@ -41,10 +42,27 @@ except ImportError:
     OAUTH_ENABLED = False
     print("⚠️  OAuth dependencies not installed. OAuth login will be disabled.")
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup logic
+    # Try to import db and init it if it exists (for server.py use case)
+    try:
+        import db
+        db.init_db()
+        print("✅ Database initialized via lifespan")
+    except (ImportError, AttributeError):
+        pass
+
+    yield
+    # Shutdown logic (if any)
+
+
 app = FastAPI(
     title="Document Upload API",
     description="Upload documents to the deep research agent docs folder",
-    version=API_VERSION
+    version=API_VERSION,
+    lifespan=lifespan
 )
 
 frontend_origins = [

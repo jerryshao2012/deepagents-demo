@@ -35,6 +35,7 @@ from typing import Any
 
 from fastapi import Depends, HTTPException, Request, Query
 from fastapi.openapi.utils import get_openapi
+from langgraph_sdk import Auth
 from pydantic import BaseModel, Field
 
 # Import the existing app and settings from webapp
@@ -46,6 +47,9 @@ from research_agent.prompts import RESEARCHER_DESCRIPTION
 
 # Import DB wrapper
 import db
+
+# Import shared authentication logic
+from auth import authenticate_credential
 
 # Track active background tasks to allow cancellation
 _active_tasks: dict[str, asyncio.Task] = {}
@@ -79,11 +83,6 @@ def custom_openapi() -> dict[str, Any]:
 
 
 app.openapi = custom_openapi
-
-
-@app.on_event("startup")
-async def startup_event():
-    db.init_db()
 
 
 # ── Pydantic Request/Response Models ──────────────────────────────────────────
@@ -242,7 +241,7 @@ def _build_thread_history_item(thread: dict[str, Any]) -> dict[str, Any]:
 
 # ── Security Authentication ───────────────────────────────────────────────────
 
-async def get_current_user(request: Request) -> dict[str, Any]:
+async def get_current_user(request: Request) -> Auth.types.MinimalUserDict:
     """Authenticate requests using API key or OAuth session token (matching auth.py logic)."""
     # Check for test mode bypass
     if os.environ.get("ALLOW_ALL_THREADS", "").lower() == "true":
@@ -262,38 +261,12 @@ async def get_current_user(request: Request) -> dict[str, Any]:
             detail="Missing authentication. Please provide 'x-api-key', 'Authorization: Bearer', or OAuth session token."
         )
 
-    # Try to validate as OAuth session token
-    from oauth_handler import user_manager
-    user_data = user_manager.validate_session(api_key)
-    if user_data:
-        return {
-            "identity": user_data["identity"],
-            "display_name": user_data.get("name", user_data["identity"]),
-        }
-
-    # API key authentication
-    expected_key = os.environ.get("LANGCHAIN_API_KEY") or os.environ.get("UPLOAD_API_KEY")
-    if not expected_key:
-        raise HTTPException(
-            status_code=500,
-            detail="Server configuration error: LANGCHAIN_API_KEY not set."
-        )
-
-    if api_key != expected_key:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid API key or session token."
-        )
-
-    return {
-        "identity": "admin",
-        "display_name": "Admin",
-    }
+    return authenticate_credential(api_key)
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
-def _get_thread_with_auth(thread_id: str, current_user: dict[str, Any]) -> dict[str, Any]:
+def _get_thread_with_auth(thread_id: str, current_user: Auth.types.MinimalUserDict) -> dict[str, Any]:
     thread = db.get_thread(thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
@@ -400,7 +373,7 @@ async def health() -> dict[str, bool]:
 async def search_assistants(
         limit: int = Query(default=10, ge=1, le=100),
         offset: int = Query(default=0, ge=0),
-        current_user: dict[str, Any] = Depends(get_current_user),
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
 ) -> list[AssistantResponse]:
     """Search/list available assistants."""
     return _list_assistants(limit=limit, offset=offset)
@@ -409,7 +382,7 @@ async def search_assistants(
 @app.post("/assistants/search", tags=["Assistants"])
 async def search_assistants_post(
         body: AssistantSearchRequest = AssistantSearchRequest(),
-        current_user: dict[str, Any] = Depends(get_current_user),
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
 ) -> list[AssistantResponse]:
     """Search/list available assistants (POST compatibility for frontend clients)."""
     return _list_assistants(
@@ -423,7 +396,7 @@ async def search_assistants_post(
 @app.post("/threads", tags=["Threads"])
 async def create_thread(
         body: ThreadCreateRequest = ThreadCreateRequest(),
-        current_user: dict[str, Any] = Depends(get_current_user),
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Create a thread."""
     thread_id = body.thread_id or str(uuid.uuid4())
@@ -445,7 +418,7 @@ async def create_thread(
 @app.post("/threads/search", tags=["Threads"])
 async def search_threads(
         body: ThreadSearchRequest,
-        current_user: dict[str, Any] = Depends(get_current_user),
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Search/list threads."""
     user_id = None if current_user.get("identity") == "admin" else current_user.get("identity")
@@ -465,7 +438,7 @@ async def search_threads(
 async def patch_thread(
         thread_id: str,
         body: ThreadPatchRequest,
-        current_user: dict[str, Any] = Depends(get_current_user),
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Patch thread metadata."""
     _get_thread_with_auth(thread_id, current_user)
@@ -481,7 +454,7 @@ async def patch_thread(
 @app.delete("/threads/{thread_id}", tags=["Threads"])
 async def delete_thread(
         thread_id: str,
-        current_user: dict[str, Any] = Depends(get_current_user),
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Delete a thread and associated runs."""
     _get_thread_with_auth(thread_id, current_user)
@@ -495,7 +468,7 @@ async def delete_thread(
 async def update_thread_state(
         thread_id: str,
         body: ThreadStateUpdateRequest,
-        current_user: dict[str, Any] = Depends(get_current_user),
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Update thread state values."""
     _get_thread_with_auth(thread_id, current_user)
@@ -527,7 +500,7 @@ async def update_thread_state(
 async def create_run(
         thread_id: str,
         body: RunCreateRequest,
-        current_user: dict[str, Any] = Depends(get_current_user)
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user)
 ) -> dict[str, Any]:
     """Create a run on an existing thread with request payload validation."""
     thread = _get_thread_with_auth(thread_id, current_user)
@@ -580,7 +553,7 @@ async def list_runs(
         thread_id: str,
         limit: int = Query(default=10),
         offset: int = Query(default=0),
-        current_user: dict[str, Any] = Depends(get_current_user),
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """List runs for a thread."""
     _get_thread_with_auth(thread_id, current_user)
@@ -592,7 +565,7 @@ async def list_runs(
 async def stream_run(
         thread_id: str,
         body: RunStreamRequest,
-        current_user: dict[str, Any] = Depends(get_current_user),
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
 ):
     """Create a run and stream output as SSE-compatible event payloads."""
     _get_thread_with_auth(thread_id, current_user)
@@ -682,7 +655,7 @@ async def stream_run(
 async def get_run(
         thread_id: str,
         run_id: str,
-        current_user: dict[str, Any] = Depends(get_current_user)
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user)
 ) -> dict[str, Any]:
     """Get run status."""
     # Ensure thread belongs to authenticated user/is accessible
@@ -697,7 +670,7 @@ async def get_run(
 @app.get("/threads/{thread_id}", tags=["Threads"])
 async def get_thread(
         thread_id: str,
-        current_user: dict[str, Any] = Depends(get_current_user)
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user)
 ) -> dict[str, Any]:
     """Get thread state."""
     thread = _get_thread_with_auth(thread_id, current_user)
@@ -708,7 +681,7 @@ async def get_thread(
 async def get_thread_history(
         thread_id: str,
         limit: int = Query(default=10, ge=1, le=100),
-        current_user: dict[str, Any] = Depends(get_current_user),
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Return thread checkpoint history in a LangGraph-compatible shape."""
     thread = _get_thread_with_auth(thread_id, current_user)
@@ -721,7 +694,7 @@ async def get_thread_history(
 async def get_thread_history_post(
         thread_id: str,
         body: ThreadHistoryRequest = ThreadHistoryRequest(),
-        current_user: dict[str, Any] = Depends(get_current_user),
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Return thread checkpoint history (POST compatibility for frontend clients)."""
     thread = _get_thread_with_auth(thread_id, current_user)
@@ -736,7 +709,7 @@ async def cancel_run(
         run_id: str,
         wait: bool = Query(default=False),
         action: str = Query(default="interrupt"),
-        current_user: dict[str, Any] = Depends(get_current_user)
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user)
 ) -> dict[str, Any]:
     """Cancel a run."""
     # Ensure thread belongs to authenticated user/is accessible

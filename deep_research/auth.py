@@ -1,6 +1,7 @@
 import os
-from typing import Set
+from typing import Set, Any
 
+from fastapi import HTTPException
 from langgraph_sdk import Auth
 
 from logger_utils import setup_logger
@@ -12,6 +13,63 @@ auth = Auth()
 
 # Track users who have already been logged for first-time OAuth authentication
 _logged_oauth_users: Set[str] = set()
+
+
+def authenticate_credential(credential: str) -> Auth.types.MinimalUserDict:
+    """Authenticate a decoded credential string (API key or OAuth session token).
+    
+    Returns user identity with metadata or raises fastapi.HTTPException.
+    """
+    # First, try to validate as OAuth session token
+    user_data = user_manager.validate_session(credential)
+    if user_data:
+        # OAuth authentication successful - return full user metadata
+        identity_ = user_data["identity"]
+        display_name = user_data.get("name", identity_)
+
+        # Log only on first successful authentication for this user
+        if identity_ not in _logged_oauth_users:
+            logger.info(f"OAuth user data: {user_data}")
+            logger.info(f"OAuth authentication successful for provider: {user_data.get('provider')} as {identity_}")
+            _logged_oauth_users.add(identity_)
+
+        return {
+            "identity": identity_,
+            "display_name": display_name,
+            "is_authenticated": True
+        }
+    else:
+        # Session validation failed - clean up logged users tracking if session was expired
+        # Check if this credential was previously a valid session (by checking if it's not an API key)
+        expected_key = os.environ.get("LANGCHAIN_API_KEY") or os.environ.get("UPLOAD_API_KEY")
+        if expected_key and credential != expected_key:
+            # This might have been an expired session token, remove from tracking
+            # We can't directly map token to identity here, but we can trigger cleanup
+            user_manager.cleanup_expired_sessions()
+            logger.debug(f"Session validation failed for credential, cleaned up expired sessions")
+
+    # If not a valid session token, try API key authentication
+    expected_key = os.environ.get("LANGCHAIN_API_KEY") or os.environ.get("UPLOAD_API_KEY")
+
+    if not expected_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Server configuration error: LANGCHAIN_API_KEY not set."
+        )
+
+    if credential != expected_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API key or session token."
+        )
+
+    # API key authentication successful
+    logger.info("API key authentication successful")
+    return {
+        "identity": "admin",
+        "display_name": "Admin",
+        "is_authenticated": True
+    }
 
 
 @auth.authenticate
@@ -31,7 +89,7 @@ async def authenticate(headers: dict) -> Auth.types.MinimalUserDict:
     if os.environ.get("ALLOW_ALL_THREADS", "").lower() == "true":
         logger.warning("TEST MODE: Allowing access to all threads regardless of identity")
         return {"identity": "test-admin", "permissions": ["threads:read:all"]}
-    
+
     # Try to get authentication credentials from headers
     api_key_bytes = headers.get(b"x-api-key") or headers.get(b"X-API-Key")
 
@@ -55,53 +113,10 @@ async def authenticate(headers: dict) -> Auth.types.MinimalUserDict:
             detail="Invalid credential format."
         )
 
-    # First, try to validate as OAuth session token
-    user_data = user_manager.validate_session(credential)
-    if user_data:
-        # OAuth authentication successful - return full user metadata
-        identity_ = user_data["identity"]
-        display_name = user_data.get("name", identity_)
-        
-        # Log only on first successful authentication for this user
-        if identity_ not in _logged_oauth_users:
-            logger.info(f"OAuth user data: {user_data}")
-            logger.info(f"OAuth authentication successful for provider: {user_data.get('provider')} as {identity_}")
-            _logged_oauth_users.add(identity_)
-        
-        return {
-            "identity": identity_,
-            "display_name": display_name,
-            "is_authenticated": True
-        }
-    else:
-        # Session validation failed - clean up logged users tracking if session was expired
-        # Check if this credential was previously a valid session (by checking if it's not an API key)
-        expected_key = os.environ.get("LANGCHAIN_API_KEY") or os.environ.get("UPLOAD_API_KEY")
-        if expected_key and credential != expected_key:
-            # This might have been an expired session token, remove from tracking
-            # We can't directly map token to identity here, but we can trigger cleanup
-            user_manager.cleanup_expired_sessions()
-            logger.debug(f"Session validation failed for credential, cleaned up expired sessions")
-
-    # If not a valid session token, try API key authentication
-    expected_key = os.environ.get("LANGCHAIN_API_KEY") or os.environ.get("UPLOAD_API_KEY")
-
-    if not expected_key:
+    try:
+        return authenticate_credential(credential)
+    except HTTPException as e:
         raise Auth.exceptions.HTTPException(
-            status_code=500,
-            detail="Server configuration error: LANGCHAIN_API_KEY not set."
+            status_code=e.status_code,
+            detail=e.detail
         )
-
-    if credential != expected_key:
-        raise Auth.exceptions.HTTPException(
-            status_code=401,
-            detail="Invalid API key or session token."
-        )
-
-    # API key authentication successful
-    logger.info("API key authentication successful")
-    return {
-        "identity": "admin",
-        "display_name": "Admin",
-        "is_authenticated": True
-    }
