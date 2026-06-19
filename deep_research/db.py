@@ -8,34 +8,7 @@ import threading
 from datetime import UTC, datetime
 from typing import Any
 
-CREATE_THREADS_TABLE = """
-CREATE TABLE IF NOT EXISTS threads (
-    thread_id TEXT PRIMARY KEY,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    state_updated_at TEXT,
-    messages TEXT NOT NULL DEFAULT '[]',
-    values_ TEXT NOT NULL DEFAULT '{}',
-    metadata TEXT NOT NULL DEFAULT '{}',
-    status TEXT NOT NULL DEFAULT 'idle',
-    user_id TEXT
-);
-"""
-
-CREATE_RUNS_TABLE = """
-CREATE TABLE IF NOT EXISTS runs (
-    run_id TEXT PRIMARY KEY,
-    thread_id TEXT NOT NULL REFERENCES threads(thread_id),
-    assistant_id TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    metadata TEXT NOT NULL DEFAULT '{}',
-    kwargs TEXT NOT NULL DEFAULT '{}',
-    multitask_strategy TEXT NOT NULL DEFAULT 'enqueue',
-    error TEXT
-);
-"""
+from . import db_sql
 
 _sqlite_lock = threading.Lock()
 _sqlite_conn = None
@@ -109,29 +82,29 @@ def _get_sqlite_conn():
 def _init_sqlite() -> None:
     with _sqlite_lock:
         conn = _get_sqlite_conn()
-        conn.executescript(f"{CREATE_THREADS_TABLE}{CREATE_RUNS_TABLE}")
+        conn.executescript(f"{db_sql.CREATE_THREADS_TABLE}{db_sql.CREATE_RUNS_TABLE}")
 
         thread_cols = {row[1] for row in conn.execute("PRAGMA table_info(threads)").fetchall()}
         if "updated_at" not in thread_cols:
-            conn.execute("ALTER TABLE threads ADD COLUMN updated_at TEXT")
-            conn.execute("UPDATE threads SET updated_at = created_at WHERE updated_at IS NULL")
+            conn.execute(db_sql.ALTER_THREADS_ADD_UPDATED_AT)
+            conn.execute(db_sql.UPDATE_THREADS_SET_UPDATED_AT)
         if "state_updated_at" not in thread_cols:
-            conn.execute("ALTER TABLE threads ADD COLUMN state_updated_at TEXT")
+            conn.execute(db_sql.ALTER_THREADS_ADD_STATE_UPDATED_AT)
         if "metadata" not in thread_cols:
-            conn.execute("ALTER TABLE threads ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'")
+            conn.execute(db_sql.ALTER_THREADS_ADD_METADATA)
         if "status" not in thread_cols:
-            conn.execute("ALTER TABLE threads ADD COLUMN status TEXT NOT NULL DEFAULT 'idle'")
+            conn.execute(db_sql.ALTER_THREADS_ADD_STATUS)
 
         run_cols = {row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
         if "updated_at" not in run_cols:
-            conn.execute("ALTER TABLE runs ADD COLUMN updated_at TEXT")
-            conn.execute("UPDATE runs SET updated_at = created_at WHERE updated_at IS NULL")
+            conn.execute(db_sql.ALTER_RUNS_ADD_UPDATED_AT)
+            conn.execute(db_sql.UPDATE_RUNS_SET_UPDATED_AT)
         if "metadata" not in run_cols:
-            conn.execute("ALTER TABLE runs ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'")
+            conn.execute(db_sql.ALTER_RUNS_ADD_METADATA)
         if "kwargs" not in run_cols:
-            conn.execute("ALTER TABLE runs ADD COLUMN kwargs TEXT NOT NULL DEFAULT '{}'")
+            conn.execute(db_sql.ALTER_RUNS_ADD_KWARGS)
         if "multitask_strategy" not in run_cols:
-            conn.execute("ALTER TABLE runs ADD COLUMN multitask_strategy TEXT NOT NULL DEFAULT 'enqueue'")
+            conn.execute(db_sql.ALTER_RUNS_ADD_MULTITASK_STRATEGY)
 
         conn.commit()
 
@@ -160,18 +133,18 @@ def _init_postgres() -> None:
 
     with _postgres_pool.connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(CREATE_THREADS_TABLE)
-            cur.execute(CREATE_RUNS_TABLE)
-            cur.execute("ALTER TABLE threads ADD COLUMN IF NOT EXISTS updated_at TEXT")
-            cur.execute("UPDATE threads SET updated_at = created_at WHERE updated_at IS NULL")
-            cur.execute("ALTER TABLE threads ADD COLUMN IF NOT EXISTS state_updated_at TEXT")
-            cur.execute("ALTER TABLE threads ADD COLUMN IF NOT EXISTS metadata TEXT NOT NULL DEFAULT '{}'")
-            cur.execute("ALTER TABLE threads ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'idle'")
-            cur.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS updated_at TEXT")
-            cur.execute("UPDATE runs SET updated_at = created_at WHERE updated_at IS NULL")
-            cur.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS metadata TEXT NOT NULL DEFAULT '{}'")
-            cur.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS kwargs TEXT NOT NULL DEFAULT '{}'")
-            cur.execute("ALTER TABLE runs ADD COLUMN IF NOT EXISTS multitask_strategy TEXT NOT NULL DEFAULT 'enqueue'")
+            cur.execute(db_sql.CREATE_THREADS_TABLE)
+            cur.execute(db_sql.CREATE_RUNS_TABLE)
+            cur.execute(db_sql.ALTER_THREADS_ADD_UPDATED_AT_IF_NOT_EXISTS)
+            cur.execute(db_sql.UPDATE_THREADS_SET_UPDATED_AT)
+            cur.execute(db_sql.ALTER_THREADS_ADD_STATE_UPDATED_AT_IF_NOT_EXISTS)
+            cur.execute(db_sql.ALTER_THREADS_ADD_METADATA_IF_NOT_EXISTS)
+            cur.execute(db_sql.ALTER_THREADS_ADD_STATUS_IF_NOT_EXISTS)
+            cur.execute(db_sql.ALTER_RUNS_ADD_UPDATED_AT_IF_NOT_EXISTS)
+            cur.execute(db_sql.UPDATE_RUNS_SET_UPDATED_AT)
+            cur.execute(db_sql.ALTER_RUNS_ADD_METADATA_IF_NOT_EXISTS)
+            cur.execute(db_sql.ALTER_RUNS_ADD_KWARGS_IF_NOT_EXISTS)
+            cur.execute(db_sql.ALTER_RUNS_ADD_MULTITASK_STRATEGY_IF_NOT_EXISTS)
 
 
 def _init_cosmos_db() -> None:
@@ -222,11 +195,7 @@ def get_thread(thread_id: str) -> dict[str, Any] | None:
     if db_type == "sqlite":
         with _sqlite_lock:
             conn = _get_sqlite_conn()
-            row = conn.execute(
-                "SELECT thread_id, created_at, updated_at, state_updated_at, messages, values_ AS values_json, metadata, status, user_id "
-                "FROM threads WHERE thread_id = ?",
-                (thread_id,),
-            ).fetchone()
+            row = conn.execute(db_sql.GET_THREAD_BY_ID_SQLITE, (thread_id,)).fetchone()
         if row is None:
             return None
         return _thread_to_dict(dict(row))
@@ -237,11 +206,7 @@ def get_thread(thread_id: str) -> dict[str, Any] | None:
         with _postgres_pool.connection() as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT thread_id, created_at, updated_at, state_updated_at, messages, values_ AS values_json, metadata, status, user_id "
-                    "FROM threads WHERE thread_id = %s",
-                    (thread_id,),
-                )
+                cur.execute(db_sql.GET_THREAD_BY_ID_POSTGRES, (thread_id,))
                 row = cur.fetchone()
         if row is None:
             return None
@@ -284,8 +249,7 @@ def create_thread(
         with _sqlite_lock:
             conn = _get_sqlite_conn()
             conn.execute(
-                "INSERT INTO threads (thread_id, created_at, updated_at, state_updated_at, messages, values_, metadata, status, user_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                db_sql.INSERT_THREAD_SQLITE,
                 (
                     thread_id,
                     created_at,
@@ -305,8 +269,7 @@ def create_thread(
         with _postgres_pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO threads (thread_id, created_at, updated_at, state_updated_at, messages, values_, metadata, status, user_id) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    db_sql.INSERT_THREAD_POSTGRES,
                     (
                         thread_id,
                         created_at,
@@ -359,7 +322,7 @@ def update_thread(
         with _sqlite_lock:
             conn = _get_sqlite_conn()
             conn.execute(
-                "UPDATE threads SET messages = ?, values_ = ?, metadata = ?, status = ?, updated_at = ?, state_updated_at = ? WHERE thread_id = ?",
+                db_sql.UPDATE_THREAD_SQLITE,
                 (
                     json.dumps(messages),
                     json.dumps(next_values),
@@ -377,7 +340,7 @@ def update_thread(
         with _postgres_pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE threads SET messages = %s, values_ = %s, metadata = %s, status = %s, updated_at = %s, state_updated_at = %s WHERE thread_id = %s",
+                    db_sql.UPDATE_THREAD_POSTGRES,
                     (
                         json.dumps(messages),
                         json.dumps(next_values),
@@ -413,18 +376,12 @@ def update_thread_metadata(thread_id: str, metadata: dict[str, Any]) -> bool:
     if db_type == "sqlite":
         with _sqlite_lock:
             conn = _get_sqlite_conn()
-            conn.execute(
-                "UPDATE threads SET metadata = ?, updated_at = ? WHERE thread_id = ?",
-                (json.dumps(merged), now, thread_id),
-            )
+            conn.execute(db_sql.UPDATE_THREAD_METADATA_SQLITE, (json.dumps(merged), now, thread_id))
             conn.commit()
     elif db_type == "postgres":
         with _postgres_pool.connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE threads SET metadata = %s, updated_at = %s WHERE thread_id = %s",
-                    (json.dumps(merged), now, thread_id),
-                )
+                cur.execute(db_sql.UPDATE_THREAD_METADATA_POSTGRES, (json.dumps(merged), now, thread_id))
     else:
         item = _cosmos_threads_container.read_item(item=thread_id, partition_key=thread_id)
         item["metadata"] = merged
@@ -461,20 +418,21 @@ def delete_thread(thread_id: str) -> bool:
     if db_type == "sqlite":
         with _sqlite_lock:
             conn = _get_sqlite_conn()
-            conn.execute("DELETE FROM runs WHERE thread_id = ?", (thread_id,))
-            conn.execute("DELETE FROM threads WHERE thread_id = ?", (thread_id,))
+            conn.execute(db_sql.DELETE_RUNS_BY_THREAD_ID_SQLITE, (thread_id,))
+            conn.execute(db_sql.DELETE_THREAD_BY_ID_SQLITE, (thread_id,))
             conn.commit()
     elif db_type == "postgres":
         with _postgres_pool.connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM runs WHERE thread_id = %s", (thread_id,))
-                cur.execute("DELETE FROM threads WHERE thread_id = %s", (thread_id,))
+                cur.execute(db_sql.DELETE_RUNS_BY_THREAD_ID_POSTGRES, (thread_id,))
+                cur.execute(db_sql.DELETE_THREAD_BY_ID_POSTGRES, (thread_id,))
     else:
         _cosmos_threads_container.delete_item(item=thread_id, partition_key=thread_id)
-        query = "SELECT c.id FROM c WHERE c.thread_id = @thread_id"
         parameters = [{"name": "@thread_id", "value": thread_id}]
         for item in _cosmos_runs_container.query_items(
-                query=query, parameters=parameters, enable_cross_partition_query=True
+                query=db_sql.COSMOS_GET_RUN_IDS_BY_THREAD_ID,
+                parameters=parameters,
+                enable_cross_partition_query=True,
         ):
             _cosmos_runs_container.delete_item(item=item["id"], partition_key=item["id"])
 
@@ -504,10 +462,7 @@ def search_threads(
     if db_type == "sqlite":
         with _sqlite_lock:
             conn = _get_sqlite_conn()
-            rows = conn.execute(
-                f"SELECT thread_id, created_at, updated_at, state_updated_at, messages, values_ AS values_json, metadata, status, user_id "
-                f"FROM threads ORDER BY {sort_by} {sort_order}"
-            ).fetchall()
+            rows = conn.execute(f"{db_sql.SEARCH_THREADS_BASE_SQL} ORDER BY {sort_by} {sort_order}").fetchall()
         items = [_thread_to_dict(dict(row)) for row in rows]
     elif db_type == "postgres":
         from psycopg.rows import dict_row
@@ -515,14 +470,12 @@ def search_threads(
         with _postgres_pool.connection() as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT thread_id, created_at, updated_at, state_updated_at, messages, values_ AS values_json, metadata, status, user_id "
-                    f"FROM threads ORDER BY {sort_by} {sort_order}"
-                )
+                cur.execute(f"{db_sql.SEARCH_THREADS_BASE_SQL} ORDER BY {sort_by} {sort_order}")
                 rows = cur.fetchall()
         items = [_thread_to_dict(dict(row)) for row in rows]
     else:
-        rows = list(_cosmos_threads_container.query_items(query="SELECT * FROM c", enable_cross_partition_query=True))
+        rows = list(_cosmos_threads_container.query_items(query=db_sql.COSMOS_SEARCH_THREADS,
+                                                          enable_cross_partition_query=True))
         items = [
             _thread_to_dict(
                 {
@@ -561,11 +514,7 @@ def get_run(run_id: str) -> dict[str, Any] | None:
     if db_type == "sqlite":
         with _sqlite_lock:
             conn = _get_sqlite_conn()
-            row = conn.execute(
-                "SELECT run_id, thread_id, assistant_id, status, created_at, updated_at, metadata, kwargs, multitask_strategy, error "
-                "FROM runs WHERE run_id = ?",
-                (run_id,),
-            ).fetchone()
+            row = conn.execute(db_sql.GET_RUN_BY_ID_SQLITE, (run_id,)).fetchone()
         if row is None:
             return None
         return _run_to_dict(dict(row))
@@ -576,11 +525,7 @@ def get_run(run_id: str) -> dict[str, Any] | None:
         with _postgres_pool.connection() as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT run_id, thread_id, assistant_id, status, created_at, updated_at, metadata, kwargs, multitask_strategy, error "
-                    "FROM runs WHERE run_id = %s",
-                    (run_id,),
-                )
+                cur.execute(db_sql.GET_RUN_BY_ID_POSTGRES, (run_id,))
                 row = cur.fetchone()
         if row is None:
             return None
@@ -615,11 +560,7 @@ def list_runs(thread_id: str, limit: int = 10, offset: int = 0) -> list[dict[str
     if db_type == "sqlite":
         with _sqlite_lock:
             conn = _get_sqlite_conn()
-            rows = conn.execute(
-                "SELECT run_id, thread_id, assistant_id, status, created_at, updated_at, metadata, kwargs, multitask_strategy, error "
-                "FROM runs WHERE thread_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (thread_id, limit, offset),
-            ).fetchall()
+            rows = conn.execute(db_sql.LIST_RUNS_BY_THREAD_ID_SQLITE, (thread_id, limit, offset)).fetchall()
         return [_run_to_dict(dict(row)) for row in rows]
 
     if db_type == "postgres":
@@ -628,17 +569,13 @@ def list_runs(thread_id: str, limit: int = 10, offset: int = 0) -> list[dict[str
         with _postgres_pool.connection() as conn:
             conn.row_factory = dict_row
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT run_id, thread_id, assistant_id, status, created_at, updated_at, metadata, kwargs, multitask_strategy, error "
-                    "FROM runs WHERE thread_id = %s ORDER BY created_at DESC LIMIT %s OFFSET %s",
-                    (thread_id, limit, offset),
-                )
+                cur.execute(db_sql.LIST_RUNS_BY_THREAD_ID_POSTGRES, (thread_id, limit, offset))
                 rows = cur.fetchall()
         return [_run_to_dict(dict(row)) for row in rows]
 
     items = list(
         _cosmos_runs_container.query_items(
-            query="SELECT * FROM c WHERE c.thread_id = @thread_id",
+            query=db_sql.COSMOS_LIST_RUNS_BY_THREAD_ID,
             parameters=[{"name": "@thread_id", "value": thread_id}],
             enable_cross_partition_query=True,
         )
@@ -677,8 +614,7 @@ def create_run(
         with _sqlite_lock:
             conn = _get_sqlite_conn()
             conn.execute(
-                "INSERT INTO runs (run_id, thread_id, assistant_id, status, created_at, updated_at, metadata, kwargs, multitask_strategy, error) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                db_sql.INSERT_RUN_SQLITE,
                 (
                     run_id,
                     thread_id,
@@ -699,8 +635,7 @@ def create_run(
         with _postgres_pool.connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO runs (run_id, thread_id, assistant_id, status, created_at, updated_at, metadata, kwargs, multitask_strategy, error) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    db_sql.INSERT_RUN_POSTGRES,
                     (
                         run_id,
                         thread_id,
@@ -739,20 +674,14 @@ def update_run_status(run_id: str, status: str, error: str | None = None) -> Non
     if db_type == "sqlite":
         with _sqlite_lock:
             conn = _get_sqlite_conn()
-            conn.execute(
-                "UPDATE runs SET status = ?, error = ?, updated_at = ? WHERE run_id = ?",
-                (status, error, now, run_id),
-            )
+            conn.execute(db_sql.UPDATE_RUN_STATUS_SQLITE, (status, error, now, run_id))
             conn.commit()
         return
 
     if db_type == "postgres":
         with _postgres_pool.connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE runs SET status = %s, error = %s, updated_at = %s WHERE run_id = %s",
-                    (status, error, now, run_id),
-                )
+                cur.execute(db_sql.UPDATE_RUN_STATUS_POSTGRES, (status, error, now, run_id))
         return
 
     item = _cosmos_runs_container.read_item(item=run_id, partition_key=run_id)
@@ -769,25 +698,19 @@ def cancel_running_runs(thread_id: str) -> None:
     if db_type == "sqlite":
         with _sqlite_lock:
             conn = _get_sqlite_conn()
-            conn.execute(
-                "UPDATE runs SET status = 'cancelled', updated_at = ? WHERE thread_id = ? AND status = 'running'",
-                (_now_iso(), thread_id),
-            )
+            conn.execute(db_sql.CANCEL_RUNNING_RUNS_SQLITE, (_now_iso(), thread_id))
             conn.commit()
         return
 
     if db_type == "postgres":
         with _postgres_pool.connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE runs SET status = 'cancelled', updated_at = %s WHERE thread_id = %s AND status = 'running'",
-                    (_now_iso(), thread_id),
-                )
+                cur.execute(db_sql.CANCEL_RUNNING_RUNS_POSTGRES, (_now_iso(), thread_id))
         return
 
     items = list(
         _cosmos_runs_container.query_items(
-            query="SELECT * FROM c WHERE c.thread_id = @thread_id AND c.status = 'running'",
+            query=db_sql.COSMOS_CANCEL_RUNNING_RUNS,
             parameters=[{"name": "@thread_id", "value": thread_id}],
             enable_cross_partition_query=True,
         )

@@ -243,6 +243,31 @@ Run a local [LangGraph server](https://langchain-ai.github.io/langgraph/tutorial
 langgraph dev
 ```
 
+If you hit continuous restart loops with messages like `WatchFiles detected changes in .venv/Lib/site-packages/...`, use this immediate workaround:
+
+```powershell
+.\.venv\Scripts\langgraph.exe dev --no-reload --no-browser
+```
+
+Why this happens:
+- `langgraph dev` watches the project tree recursively.
+- When dependencies are being updated (or files under `.venv` are touched by sync/indexing tools), WatchFiles sees `.venv` changes and repeatedly reloads.
+
+Recommended durable fix on Windows:
+- Move the virtual environment outside the project folder (especially if the repo is inside OneDrive).
+- Recreate dependencies there, then run `langgraph dev` again.
+
+Example:
+
+```powershell
+# Pick a venv location outside the repo
+$env:UV_PROJECT_ENVIRONMENT = "$env:LOCALAPPDATA\uv\venvs\deep_research"
+uv sync --reinstall
+
+# Then start normally
+& "$env:UV_PROJECT_ENVIRONMENT\Scripts\langgraph.exe" dev --no-browser
+```
+
 LangGraph server will open a new browser window with the Studio interface, which you can submit your search query to:
 
 <img width="1915" alt="Screenshot 2026-04-03 at 10 27 11 AM" src="./resources/Screenshot 2026-04-03 at 10 27 11 AM.png" />
@@ -351,17 +376,20 @@ uv run python webapp.py
 To start an independent Agent Protocol-compliant server that hosts the `deep_research` agent in the background and also reuses the upload API:
 ```bash
 # Start the async subagent server
-uv run python server.py
+uv run python run.py
 ```
 
 Examples:
 ```bash
 # Start on the default port (2024)
-uvicorn server:app --reload
+uv run python run.py
 
 # Start explicitly on 2024
 export UPLOAD_PORT=2024
-uvicorn server:app --reload
+uv run python run.py
+
+# If you use uvicorn directly, pass the port explicitly because __main__ is not executed
+uvicorn server:app --reload --port 2024
 ```
 
 Startup output includes:

@@ -7,19 +7,20 @@ concurrency-safe task execution and cancellation, and Pydantic request validatio
 
 Examples:
 # Start on the default port (2024)
-uvicorn server:app --reload
+uv run python run.py
 
 # Start explicitly on 2024
 export UPLOAD_PORT=2024
-uvicorn server:app --reload
+uv run python run.py
+
+# If you use uvicorn directly, pass the port explicitly because __main__ is not executed
+uvicorn server:app --reload --port 2024
 """
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
-
-import uvicorn
 
 # Ensure local imports work correctly
 sys.path.append(str(Path(__file__).parent))
@@ -40,6 +41,7 @@ from webapp import app
 
 # Import the actual deep_research agent
 from agent import agent
+from research_agent.prompts import RESEARCHER_DESCRIPTION
 
 # Import DB wrapper
 import db
@@ -65,6 +67,7 @@ def custom_openapi() -> dict[str, Any]:
         routes=app.routes,
         tags=[
             {"name": "Health", "description": "Service health endpoints."},
+            {"name": "Assistants", "description": "Assistant discovery and metadata endpoints."},
             {"name": "Threads", "description": "Thread lifecycle and state endpoints."},
             {"name": "Runs", "description": "Background run execution and cancellation endpoints."},
             {"name": "Documents", "description": "Document upload and management endpoints."},
@@ -127,6 +130,19 @@ class RunStreamRequest(BaseModel):
     assistant_id: str = "researcher"
     input: dict[str, Any] | list[Any] | str | int | float | bool | None = None
     multitask_strategy: str | None = None
+
+
+class AssistantResponse(BaseModel):
+    """Response model for an assistant."""
+    id: str
+    name: str
+    description: str
+    model: str | None = None
+    instructions: str | None = None
+    tools: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: str | None = None
+    updated_at: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 def _sse_frame(event: str, data: Any, event_id: int | None = None) -> str:
@@ -323,6 +339,31 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
 async def health() -> dict[str, bool]:
     """Health check."""
     return {"ok": True}
+
+
+@app.get("/assistants/search", tags=["Assistants"])
+async def search_assistants(
+        limit: int = Query(default=10, ge=1, le=100),
+        offset: int = Query(default=0, ge=0),
+        current_user: dict[str, Any] = Depends(get_current_user),
+) -> list[AssistantResponse]:
+    """Search/list available assistants."""
+    # Currently, we have a single built-in "researcher" assistant
+    # This endpoint is extensible for future multi-assistant support
+    assistants = [
+        AssistantResponse(
+            id="researcher",
+            name="Research Assistant",
+            description=RESEARCHER_DESCRIPTION or "Deep research agent for comprehensive multi-source information gathering and analysis.",
+            model=os.environ.get("MODEL_NAME", "unknown"),
+            created_at=None,
+            updated_at=None,
+            metadata={},
+        )
+    ]
+
+    # Apply pagination
+    return assistants[offset: offset + limit]
 
 
 @app.post("/threads", tags=["Threads"])
@@ -640,26 +681,7 @@ async def cancel_run(
 
 
 if __name__ == "__main__":
-    host = os.environ.get("UPLOAD_HOST", "0.0.0.0")
-    port = int(os.environ.get("UPLOAD_PORT", "2024"))
-    db_type = os.environ.get("DB_TYPE", "sqlite").strip().lower()
-    sqlite_db_path = os.environ.get("SQLITE_DB_PATH", ":memory:")
-
-    print(f"🚀 Starting Document Upload & Agent API Server on {host}:{port}")
-    print(f"🚀 API: http://127.0.0.1:{port}")
-    print(f"📚 API Docs: http://127.0.0.1:{port}/docs")
-
-    if db_type in {"cosmosdb", "cosmos"}:
-        print("Using Azure Cosmos DB backend (production deployment mode).")
-    elif db_type in {"postgres", "postgresql"}:
-        print("Using PostgreSQL backend (production deployment mode).")
-    elif db_type == "sqlite" and sqlite_db_path == ":memory:":
-        print("This in-memory database is designed for development and testing.")
-        print("For production use, please use CosmosDB or PostgreSQL deployment.")
-    elif db_type == "sqlite":
-        print(f"Using SQLite file database at: {sqlite_db_path} (development/local mode).")
-        print("For production use, CosmosDB or PostgreSQL is recommended.")
-    else:
-        print(f"Using database backend type: {db_type}.")
-
-    uvicorn.run(app, host=host, port=port)
+    # For direct execution: python server.py
+    # For development with uvicorn: python run.py
+    # For production: uvicorn server:app --port 2024
+    pass
