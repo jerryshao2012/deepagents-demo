@@ -183,3 +183,42 @@ def test_health_and_auth_contract_basics(client):
 
     logout = client.post("/auth/logout")
     assert logout.status_code in {401, 503}
+
+
+def test_assistants_search_post_contract(client):
+    response = client.post(
+        "/assistants/search",
+        json={
+            "graph_id": "researcher",
+            "limit": 10,
+            "offset": 0,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert isinstance(payload, list)
+    assert payload
+    assert payload[0]["id"] == "researcher"
+
+
+def test_thread_history_contract(client):
+    created = client.post("/threads", json={"metadata": {"assistant_id": "researcher"}})
+    assert created.status_code == 200
+    thread_id = created.json()["thread_id"]
+
+    state_resp = client.post(
+        f"/threads/{thread_id}/state",
+        json={"values": {"messages": [{"role": "user", "content": "hi"}]}}
+    )
+    assert state_resp.status_code == 200
+
+    history = client.get(f"/threads/{thread_id}/history")
+    assert history.status_code == 200
+    payload = history.json()
+    assert isinstance(payload, list)
+    assert payload
+    first = payload[0]
+    assert "checkpoint" in first
+    assert "values" in first
+    assert "metadata" in first
+    assert "created_at" in first

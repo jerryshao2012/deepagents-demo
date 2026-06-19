@@ -127,6 +127,19 @@ class ThreadStateUpdateRequest(BaseModel):
     values: dict[str, Any] | list[Any] | None = None
 
 
+class AssistantSearchRequest(BaseModel):
+    limit: int = 10
+    offset: int = 0
+    graph_id: str | None = None
+    assistant_id: str | None = None
+
+
+class ThreadHistoryRequest(BaseModel):
+    limit: int = 10
+    before: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
 class RunStreamRequest(BaseModel):
     assistant_id: str = "researcher"
     input: dict[str, Any] | list[Any] | str | int | float | bool | None = None
@@ -183,6 +196,47 @@ def _api_run(run: dict[str, Any]) -> dict[str, Any]:
         "kwargs": run.get("kwargs") or {},
         "multitask_strategy": run.get("multitask_strategy") or "enqueue",
         "error": run.get("error"),
+    }
+
+
+def _list_assistants(*, limit: int, offset: int, graph_id: str | None = None, assistant_id: str | None = None) -> list[
+    AssistantResponse]:
+    assistants = [
+        AssistantResponse(
+            id="researcher",
+            name="Research Assistant",
+            description=RESEARCHER_DESCRIPTION or "Deep research agent for comprehensive multi-source information gathering and analysis.",
+            model=os.environ.get("MODEL_NAME", "unknown"),
+            created_at=None,
+            updated_at=None,
+            metadata={},
+        )
+    ]
+
+    selected_id = assistant_id or graph_id
+    if selected_id:
+        assistants = [a for a in assistants if a.id == selected_id]
+
+    safe_limit = max(1, min(int(limit or 10), 100))
+    safe_offset = max(0, int(offset or 0))
+    return assistants[safe_offset: safe_offset + safe_limit]
+
+
+def _build_thread_history_item(thread: dict[str, Any]) -> dict[str, Any]:
+    checkpoint_time = thread.get("state_updated_at") or thread.get("updated_at") or thread.get("created_at")
+    checkpoint_id = str(checkpoint_time or uuid.uuid4())
+
+    return {
+        "checkpoint": {
+            "thread_id": thread.get("thread_id"),
+            "checkpoint_ns": "",
+            "checkpoint_id": checkpoint_id,
+        },
+        "values": thread.get("values") or {},
+        "metadata": thread.get("metadata") or {},
+        "created_at": checkpoint_time,
+        "next": [],
+        "tasks": [],
     }
 
 
@@ -349,22 +403,21 @@ async def search_assistants(
         current_user: dict[str, Any] = Depends(get_current_user),
 ) -> list[AssistantResponse]:
     """Search/list available assistants."""
-    # Currently, we have a single built-in "researcher" assistant
-    # This endpoint is extensible for future multi-assistant support
-    assistants = [
-        AssistantResponse(
-            id="researcher",
-            name="Research Assistant",
-            description=RESEARCHER_DESCRIPTION or "Deep research agent for comprehensive multi-source information gathering and analysis.",
-            model=os.environ.get("MODEL_NAME", "unknown"),
-            created_at=None,
-            updated_at=None,
-            metadata={},
-        )
-    ]
+    return _list_assistants(limit=limit, offset=offset)
 
-    # Apply pagination
-    return assistants[offset: offset + limit]
+
+@app.post("/assistants/search", tags=["Assistants"])
+async def search_assistants_post(
+        body: AssistantSearchRequest = AssistantSearchRequest(),
+        current_user: dict[str, Any] = Depends(get_current_user),
+) -> list[AssistantResponse]:
+    """Search/list available assistants (POST compatibility for frontend clients)."""
+    return _list_assistants(
+        limit=body.limit,
+        offset=body.offset,
+        graph_id=body.graph_id,
+        assistant_id=body.assistant_id,
+    )
 
 
 @app.post("/threads", tags=["Threads"])
@@ -649,6 +702,32 @@ async def get_thread(
     """Get thread state."""
     thread = _get_thread_with_auth(thread_id, current_user)
     return _api_thread(thread)
+
+
+@app.get("/threads/{thread_id}/history", tags=["Threads"])
+async def get_thread_history(
+        thread_id: str,
+        limit: int = Query(default=10, ge=1, le=100),
+        current_user: dict[str, Any] = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    """Return thread checkpoint history in a LangGraph-compatible shape."""
+    thread = _get_thread_with_auth(thread_id, current_user)
+    if limit <= 0:
+        return []
+    return [_build_thread_history_item(thread)]
+
+
+@app.post("/threads/{thread_id}/history", tags=["Threads"])
+async def get_thread_history_post(
+        thread_id: str,
+        body: ThreadHistoryRequest = ThreadHistoryRequest(),
+        current_user: dict[str, Any] = Depends(get_current_user),
+) -> list[dict[str, Any]]:
+    """Return thread checkpoint history (POST compatibility for frontend clients)."""
+    thread = _get_thread_with_auth(thread_id, current_user)
+    if body.limit <= 0:
+        return []
+    return [_build_thread_history_item(thread)]
 
 
 @app.post("/threads/{thread_id}/runs/{run_id}/cancel", tags=["Runs"])
