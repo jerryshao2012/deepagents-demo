@@ -90,8 +90,13 @@ end_step
 
 # 2. Verify image exists in ACR
 start_step "Verify Container Image"
-if ! az acr repository show-tags --name $ACR_NAME --repository deep-research-agent --query "contains(@, 'latest')" -o tsv 2>/dev/null | grep -q "true"; then
-  echo "⚠️  WARNING: Image 'deep-research-agent:latest' not found in ACR!"
+if [ ! -f .build_version ]; then
+    echo "⚠️ .build_version not found. Please run ./build.sh first."
+    exit 1
+fi
+BUILD_VERSION=$(cat .build_version)
+if ! az acr repository show-tags --name $ACR_NAME --repository deep-research-agent --query "contains(@, '$BUILD_VERSION')" -o tsv 2>/dev/null | grep -q "true"; then
+  echo "⚠️  WARNING: Image 'deep-research-agent:$BUILD_VERSION' not found in ACR!"
   echo "   Please run './build.sh' first to build and push the image."
   exit 1
 fi
@@ -227,7 +232,7 @@ else
     --name $AGENT_NAME \
     --resource-group $RESOURCE_GROUP \
     --environment $ENV_NAME \
-    --image $ACR_NAME.azurecr.io/deep-research-agent:latest \
+    --image $ACR_NAME.azurecr.io/deep-research-agent:$BUILD_VERSION \
     --registry-server $ACR_NAME.azurecr.io \
     --target-port 2024 \
     --ingress internal \
@@ -283,7 +288,7 @@ properties:
         storageType: AzureFile
     containers:
       - name: deep-research-agent
-        image: ${ACR_NAME}.azurecr.io/deep-research-agent:latest
+        image: ${ACR_NAME}.azurecr.io/deep-research-agent:$BUILD_VERSION
         resources:
           cpu: 2.0
           memory: 4Gi
@@ -342,6 +347,8 @@ properties:
             value: ${MOUNT_PATH}/docs
           - name: INPUT_FOLDER
             value: ${MOUNT_PATH}/input
+          - name: SQLITE_DB_PATH
+            value: /deps/deep_research/deep_research.db
           - name: TAVILY_API_KEY
             secretRef: tavily-api-key
           - name: LANGCHAIN_API_KEY

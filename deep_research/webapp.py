@@ -15,7 +15,7 @@ load_dotenv()
 DOCS_ROOT = Path(__file__).resolve().parent / "docs"
 
 # API version - increment this with each new build
-API_VERSION = "1.8.53"
+API_VERSION = "1.8.57"
 
 # API Key for authentication (from environment variable)
 API_KEY = os.environ.get("UPLOAD_API_KEY") or os.environ.get("LANGCHAIN_API_KEY", "")
@@ -41,6 +41,24 @@ try:
 except ImportError:
     OAUTH_ENABLED = False
     print("⚠️  OAuth dependencies not installed. OAuth login will be disabled.")
+
+
+def _is_authenticated(x_api_key: str | None, request: Request = None) -> bool:
+    # 1. Check static API Key
+    if x_api_key and x_api_key == API_KEY:
+        return True
+    
+    # 2. Check OAuth session token if enabled
+    if OAUTH_ENABLED:
+        token = x_api_key
+        if not token and request:
+            auth_header = request.headers.get("authorization")
+            if auth_header and auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+        if token and user_manager.validate_session(token):
+            return True
+            
+    return False
 
 
 @asynccontextmanager
@@ -136,6 +154,7 @@ def _safe_filename(filename: str | None) -> str:
 
 @app.post("/documents/upload", status_code=status.HTTP_201_CREATED)
 async def upload_documents(
+        request: Request,
         folder: str = Form("policy"),
         files: list[UploadFile] = File(...),
         x_api_key: str | None = Header(None),
@@ -145,11 +164,11 @@ async def upload_documents(
     Requires API key authentication via X-API-Key header.
     Returns uploaded file info and remaining free storage space.
     """
-    # Validate API key
-    if not x_api_key or x_api_key != API_KEY:
+    # Validate API key / session token
+    if not _is_authenticated(x_api_key, request):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key. Provide X-API-Key header.",
+            detail="Invalid or missing API key. Provide X-API-Key header or Authorization header.",
         )
 
     relative_folder = _safe_relative_folder(folder)
@@ -219,12 +238,16 @@ async def health_check():
 
 
 @app.get("/storage/info")
-async def storage_info(x_api_key: str | None = Header(None)):
-    """Get storage information. Requires API key authentication."""
-    if not x_api_key or x_api_key != API_KEY:
+async def storage_info(request: Request, x_api_key: str | None = Header(None)):
+    """Get server storage details.
+
+    Requires API key authentication via X-API-Key header.
+    """
+    # Validate API key / session token
+    if not _is_authenticated(x_api_key, request):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key. Provide X-API-Key header.",
+            detail="Invalid or missing API key. Provide X-API-Key header or Authorization header.",
         )
 
     total, used, free = await asyncio.to_thread(shutil.disk_usage, str(DOCS_ROOT.parent))
@@ -243,6 +266,7 @@ async def storage_info(x_api_key: str | None = Header(None)):
 
 @app.get("/documents/list")
 async def list_documents(
+        request: Request,
         folder: str = "policy",
         x_api_key: str | None = Header(None),
 ) -> dict:
@@ -251,11 +275,11 @@ async def list_documents(
     Requires API key authentication via X-API-Key header.
     Returns array of files with name and size.
     """
-    # Validate API key
-    if not x_api_key or x_api_key != API_KEY:
+    # Validate API key / session token
+    if not _is_authenticated(x_api_key, request):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key. Provide X-API-Key header.",
+            detail="Invalid or missing API key. Provide X-API-Key header or Authorization header.",
         )
 
     relative_folder = _safe_relative_folder(folder)
@@ -307,6 +331,7 @@ async def list_documents(
 
 @app.get("/documents/download/{filename}")
 async def download_document(
+        request: Request,
         filename: str,
         folder: str = "policy",
         x_api_key: str | None = Header(None),
@@ -316,11 +341,11 @@ async def download_document(
     Requires API key authentication via X-API-Key header.
     Returns the file as a downloadable response.
     """
-    # Validate API key
-    if not x_api_key or x_api_key != API_KEY:
+    # Validate API key / session token
+    if not _is_authenticated(x_api_key, request):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key. Provide X-API-Key header.",
+            detail="Invalid or missing API key. Provide X-API-Key header or Authorization header.",
         )
 
     # Validate filename
@@ -378,6 +403,7 @@ async def download_document(
 
 @app.delete("/documents/{filename}", status_code=status.HTTP_200_OK)
 async def delete_document(
+        request: Request,
         filename: str,
         folder: str = "policy",
         x_api_key: str | None = Header(None),
@@ -387,11 +413,11 @@ async def delete_document(
     Requires API key authentication via X-API-Key header.
     Returns confirmation of deletion.
     """
-    # Validate API key
-    if not x_api_key or x_api_key != API_KEY:
+    # Validate API key / session token
+    if not _is_authenticated(x_api_key, request):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key. Provide X-API-Key header.",
+            detail="Invalid or missing API key. Provide X-API-Key header or Authorization header.",
         )
 
     # Validate filename
@@ -434,6 +460,7 @@ async def delete_document(
 
 @app.delete("/documents/folder/{folder}", status_code=status.HTTP_200_OK)
 async def delete_folder_contents(
+        request: Request,
         folder: str,
         x_api_key: str | None = Header(None),
 ) -> dict:
@@ -442,11 +469,11 @@ async def delete_folder_contents(
     Requires API key authentication via X-API-Key header.
     Returns count of deleted files.
     """
-    # Validate API key
-    if not x_api_key or x_api_key != API_KEY:
+    # Validate API key / session token
+    if not _is_authenticated(x_api_key, request):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key. Provide X-API-Key header.",
+            detail="Invalid or missing API key. Provide X-API-Key header or Authorization header.",
         )
 
     relative_folder = _safe_relative_folder(folder)

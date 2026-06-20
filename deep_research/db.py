@@ -74,8 +74,13 @@ def _get_sqlite_conn():
         import sqlite3
 
         db_path = os.environ.get("SQLITE_DB_PATH", ":memory:")
-        _sqlite_conn = sqlite3.connect(db_path, check_same_thread=False)
+        _sqlite_conn = sqlite3.connect(db_path, check_same_thread=False, timeout=30.0)
         _sqlite_conn.row_factory = sqlite3.Row
+        try:
+            _sqlite_conn.execute("PRAGMA journal_mode=WAL")
+            _sqlite_conn.execute("PRAGMA busy_timeout=30000")
+        except Exception:
+            pass
     return _sqlite_conn
 
 

@@ -53,6 +53,7 @@ setup.md
 *.tmp
 *.bak
 .langgraph_api
+.build_version
 
 # Projet data
 docs/

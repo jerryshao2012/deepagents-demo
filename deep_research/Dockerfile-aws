@@ -37,5 +37,5 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # Launch using langgraph dev
-CMD ["langgraph", "dev", "--host", "0.0.0.0", "--port", "2024"]
+CMD ["langgraph", "dev", "--host", "0.0.0.0", "--port", "2024", "--no-reload", "--no-browser"]
 

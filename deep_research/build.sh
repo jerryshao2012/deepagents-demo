@@ -86,13 +86,16 @@ end_step
 
 # 6. Build and push image
 start_step "Docker Image Build & Push"
-echo "🔨 Building Docker image..."
+BUILD_VERSION=$(date +%Y%m%d%H%M%S)
+echo $BUILD_VERSION > .build_version
+echo "🔨 Building Docker image with tags: latest, $BUILD_VERSION"
 # Ensure we're in the correct directory (where Dockerfile is located)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
-docker build --platform linux/amd64 -t $ACR_NAME.azurecr.io/deep-research-agent:latest .
+docker build --platform linux/amd64 -t $ACR_NAME.azurecr.io/deep-research-agent:latest -t $ACR_NAME.azurecr.io/deep-research-agent:$BUILD_VERSION .
 az acr login --name $ACR_NAME
 docker push $ACR_NAME.azurecr.io/deep-research-agent:latest
+docker push $ACR_NAME.azurecr.io/deep-research-agent:$BUILD_VERSION
 echo "✅ Image built and pushed successfully"
 end_step
 
