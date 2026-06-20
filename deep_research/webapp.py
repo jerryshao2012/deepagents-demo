@@ -15,7 +15,7 @@ load_dotenv()
 DOCS_ROOT = Path(__file__).resolve().parent / "docs"
 
 # API version - increment this with each new build
-API_VERSION = "1.8.58"
+API_VERSION = "1.8.59"
 
 # API Key for authentication (from environment variable)
 API_KEY = os.environ.get("UPLOAD_API_KEY") or os.environ.get("LANGCHAIN_API_KEY", "")
@@ -47,7 +47,7 @@ def _is_authenticated(x_api_key: str | None, request: Request = None) -> bool:
     # 1. Check static API Key
     if x_api_key and x_api_key == API_KEY:
         return True
-    
+
     # 2. Check OAuth session token if enabled
     if OAUTH_ENABLED:
         token = x_api_key
@@ -57,7 +57,7 @@ def _is_authenticated(x_api_key: str | None, request: Request = None) -> bool:
                 token = auth_header[7:]
         if token and user_manager.validate_session(token):
             return True
-            
+
     return False
 
 
@@ -239,9 +239,11 @@ async def health_check():
 
 @app.get("/storage/info")
 async def storage_info(request: Request, x_api_key: str | None = Header(None)):
-    """Get server storage details.
+    """Get server storage details and model factory diagnostics.
 
     Requires API key authentication via X-API-Key header.
+    Returns storage info, detected model provider configuration, and a
+    quick connectivity test (single short prompt) for fast diagnosis.
     """
     # Validate API key / session token
     if not _is_authenticated(x_api_key, request):
@@ -252,16 +254,185 @@ async def storage_info(request: Request, x_api_key: str | None = Header(None)):
 
     total, used, free = await asyncio.to_thread(shutil.disk_usage, str(DOCS_ROOT.parent))
 
+    # --- Model factory diagnostics ---
+    model_diagnostics = await _run_model_diagnostics()
+
     return {
-        "total_space_bytes": total,
-        "used_space_bytes": used,
-        "free_space_bytes": free,
-        "total_space_human": _format_bytes(total),
-        "used_space_human": _format_bytes(used),
-        "free_space_human": _format_bytes(free),
-        "usage_percentage": round((used / total) * 100, 2) if total > 0 else 0,
-        "environment_variables": dict(os.environ)
+        "storage": {
+            "total_space_bytes": total,
+            "used_space_bytes": used,
+            "free_space_bytes": free,
+            "total_space_human": _format_bytes(total),
+            "used_space_human": _format_bytes(used),
+            "free_space_human": _format_bytes(free),
+            "usage_percentage": round((used / total) * 100, 2) if total > 0 else 0,
+        },
+        "model_factory": model_diagnostics,
+        "environment_variables": dict(os.environ),
     }
+
+
+async def _run_model_diagnostics() -> dict:
+    """Run a quick diagnostic on model_factory: detect provider, show config,
+    and send a minimal test prompt to verify end-to-end connectivity."""
+    import time
+
+    diagnostics: dict = {
+        "detected_provider": None,
+        "configuration": {},
+        "model_creation": {"success": False, "error": None, "elapsed_seconds": None},
+        "test_request": {"success": False, "prompt": None, "response": None, "error": None, "elapsed_seconds": None},
+    }
+
+    # --- Detect provider & collect relevant config ---
+    provider, config = _detect_model_provider()
+    diagnostics["detected_provider"] = provider
+    diagnostics["configuration"] = config
+
+    if provider == "none":
+        diagnostics["model_creation"]["error"] = "No supported model provider environment variables found."
+        return diagnostics
+
+    # --- Try to create the model ---
+    try:
+        t0 = time.monotonic()
+        model = await asyncio.to_thread(_create_model_safe)
+        elapsed = round(time.monotonic() - t0, 3)
+        diagnostics["model_creation"] = {
+            "success": True,
+            "error": None,
+            "elapsed_seconds": elapsed,
+            "model_type": type(model).__name__,
+            "model_repr": repr(model)[:500],
+        }
+    except Exception as exc:
+        elapsed = round(time.monotonic() - t0, 3)
+        diagnostics["model_creation"] = {
+            "success": False,
+            "error": str(exc),
+            "elapsed_seconds": elapsed,
+        }
+        return diagnostics  # cannot proceed to test request
+
+    # --- Send a minimal test prompt ---
+    test_prompt = "Reply with exactly: OK"
+    try:
+        t0 = time.monotonic()
+        response = await asyncio.to_thread(model.invoke, test_prompt)
+        elapsed = round(time.monotonic() - t0, 3)
+        diagnostics["test_request"] = {
+            "success": True,
+            "prompt": test_prompt,
+            "response": str(response.content)[:500] if hasattr(response, "content") else str(response)[:500],
+            "response_metadata": _extract_response_metadata(response),
+            "error": None,
+            "elapsed_seconds": elapsed,
+        }
+    except Exception as exc:
+        elapsed = round(time.monotonic() - t0, 3)
+        diagnostics["test_request"] = {
+            "success": False,
+            "prompt": test_prompt,
+            "response": None,
+            "error": str(exc),
+            "elapsed_seconds": elapsed,
+        }
+
+    return diagnostics
+
+
+def _detect_model_provider() -> tuple[str, dict]:
+    """Detect which model provider is configured based on env vars and
+    return the relevant configuration values (secrets masked)."""
+
+    def _mask(value: str | None, visible: int = 4) -> str | None:
+        if not value:
+            return None
+        if len(value) <= visible:
+            return "****"
+        return value[:visible] + "*" * (len(value) - visible)
+
+    # AWS Bedrock
+    if os.getenv("AWS_BEDROCK_ENDPOINT") and os.getenv("AWS_BEARER_TOKEN_BEDROCK") and os.getenv("MODEL_NAME"):
+        return "aws_bedrock", {
+            "AWS_BEDROCK_ENDPOINT": os.getenv("AWS_BEDROCK_ENDPOINT"),
+            "AWS_BEARER_TOKEN_BEDROCK": _mask(os.getenv("AWS_BEARER_TOKEN_BEDROCK")),
+            "MODEL_NAME": os.getenv("MODEL_NAME"),
+        }
+
+    # Azure OpenAI (legacy with API version)
+    if (
+            os.getenv("AZURE_OPENAI_ENDPOINT")
+            and os.getenv("AZURE_OPENAI_DEPLOYMENT")
+            and (os.getenv("AZURE_OPENAI_API_KEY")
+                 or (os.getenv("AZURE_CLIENT_ID") and os.getenv("AZURE_OPENAI_SCOPE")))
+            and os.getenv("AZURE_OPENAI_API_VERSION")
+    ):
+        auth_type = os.getenv("AZURE_AUTH_TYPE", "api_key")
+        return "azure_openai_legacy", {
+            "AZURE_OPENAI_ENDPOINT": os.getenv("AZURE_OPENAI_ENDPOINT"),
+            "AZURE_OPENAI_DEPLOYMENT": os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+            "AZURE_OPENAI_API_VERSION": os.getenv("AZURE_OPENAI_API_VERSION"),
+            "AZURE_AUTH_TYPE": auth_type,
+            "AZURE_OPENAI_API_KEY": _mask(os.getenv("AZURE_OPENAI_API_KEY")),
+            "AZURE_CLIENT_ID": os.getenv("AZURE_CLIENT_ID"),
+            "AZURE_OPENAI_SCOPE": os.getenv("AZURE_OPENAI_SCOPE"),
+        }
+
+    # Azure OpenAI (new, without explicit API version)
+    if (
+            os.getenv("AZURE_OPENAI_ENDPOINT")
+            and os.getenv("AZURE_OPENAI_DEPLOYMENT")
+            and os.getenv("AZURE_OPENAI_API_KEY")
+    ):
+        return "azure_openai", {
+            "AZURE_OPENAI_ENDPOINT": os.getenv("AZURE_OPENAI_ENDPOINT"),
+            "AZURE_OPENAI_DEPLOYMENT": os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+            "AZURE_OPENAI_API_KEY": _mask(os.getenv("AZURE_OPENAI_API_KEY")),
+        }
+
+    # Google Gemini
+    if os.getenv("GOOGLE_API_KEY") and os.getenv("MODEL_NAME"):
+        return "google_gemini", {
+            "GOOGLE_API_KEY": _mask(os.getenv("GOOGLE_API_KEY")),
+            "MODEL_NAME": os.getenv("MODEL_NAME"),
+        }
+
+    # Anthropic
+    if os.getenv("ANTHROPIC_API_KEY") and os.getenv("MODEL_NAME"):
+        return "anthropic", {
+            "ANTHROPIC_API_KEY": _mask(os.getenv("ANTHROPIC_API_KEY")),
+            "MODEL_NAME": os.getenv("MODEL_NAME"),
+        }
+
+    # Ollama
+    if os.getenv("OLLAMA_API_BASE") and os.getenv("MODEL_NAME"):
+        return "ollama", {
+            "OLLAMA_API_BASE": os.getenv("OLLAMA_API_BASE"),
+            "MODEL_NAME": os.getenv("MODEL_NAME"),
+        }
+
+    return "none", {}
+
+
+def _create_model_safe():
+    """Import and call model_factory.get_configured_model()."""
+    from model_factory import get_configured_model
+    return get_configured_model()
+
+
+def _extract_response_metadata(response) -> dict:
+    """Safely extract useful metadata from a LangChain response."""
+    meta: dict = {}
+    if hasattr(response, "response_metadata") and response.response_metadata:
+        # Keep only serializable, non-sensitive fields
+        rm = response.response_metadata
+        for key in ("model_name", "model_provider", "finish_reason", "usage"):
+            if key in rm:
+                meta[key] = rm[key]
+    if hasattr(response, "usage_metadata") and response.usage_metadata:
+        meta["usage_metadata"] = response.usage_metadata
+    return meta
 
 
 @app.get("/documents/list")
