@@ -45,8 +45,9 @@ env/
 !.env.example
 secrets.sh
 secrets-aws.sh
-test_azure_connectivity.py
+test_azure_init.py
 test_bedrock_init.py
+test_gemini_init.py
 setup.md
 
 # Temporary files

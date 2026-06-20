@@ -150,8 +150,10 @@ def get_configured_model():
         from langchain_google_genai import ChatGoogleGenerativeAI
 
         model = ChatGoogleGenerativeAI(
-            model=os.getenv("MODEL_NAME", "gemini-3-pro-preview"),
+            model=os.getenv("MODEL_NAME", "gemini-2.5-pro"),
             temperature=0.0,
+            http_client=httpx.Client(verify=verify_ssl),
+            streaming=True,
         )
         return wrap_model_with_rate_limiting(model)
 
@@ -159,6 +161,7 @@ def get_configured_model():
         model = init_chat_model(
             model=f"anthropic:{os.getenv("MODEL_NAME", "claude-sonnet-4-5-20250929")}",
             temperature=0.0,
+            http_client=httpx.Client(verify=verify_ssl),
         )
         return wrap_model_with_rate_limiting(model)
 

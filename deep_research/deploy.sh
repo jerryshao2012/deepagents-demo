@@ -245,6 +245,22 @@ else
 fi
 
 echo "⚙️  Applying comprehensive configuration update..."
+#      - name: azure-openai-endpoint
+#        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/AZURE-OPENAI-ENDPOINT
+#        identity: ${USER_IDENTITY_ID}
+#      - name: azure-openai-deployment
+#        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/AZURE-OPENAI-DEPLOYMENT
+#        identity: ${USER_IDENTITY_ID}
+#      - name: azure-openai-api-key
+#        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/AZURE-OPENAI-API-KEY
+#        identity: ${USER_IDENTITY_ID}
+
+#          - name: AZURE_OPENAI_ENDPOINT
+#            secretRef: azure-openai-endpoint
+#          - name: AZURE_OPENAI_DEPLOYMENT
+#            secretRef: azure-openai-deployment
+#          - name: AZURE_OPENAI_API_KEY
+#            secretRef: azure-openai-api-key
 UPDATE_YAML=$(mktemp /tmp/update-config-XXXXXX.yaml 2>/dev/null || mktemp)
 RESTART_TRIGGER=$(date +%s)
 cat > "$UPDATE_YAML" <<EOF
@@ -257,15 +273,6 @@ properties:
       - name: langchain-api-key
         keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/LANGCHAIN-API-KEY
         identity: ${USER_IDENTITY_ID}
-      - name: azure-openai-endpoint
-        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/AZURE-OPENAI-ENDPOINT
-        identity: ${USER_IDENTITY_ID}
-      - name: azure-openai-deployment
-        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/AZURE-OPENAI-DEPLOYMENT
-        identity: ${USER_IDENTITY_ID}
-      - name: azure-openai-api-key
-        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/AZURE-OPENAI-API-KEY
-        identity: ${USER_IDENTITY_ID}
       - name: upload-api-key
         keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/UPLOAD-API-KEY
         identity: ${USER_IDENTITY_ID}
@@ -277,6 +284,9 @@ properties:
         identity: ${USER_IDENTITY_ID}
       - name: file-share-name
         keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/FILE-SHARE-NAME
+        identity: ${USER_IDENTITY_ID}
+      - name: google-api-key
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/GOOGLE-API-KEY
         identity: ${USER_IDENTITY_ID}
     registries:
       - server: ${ACR_NAME}.azurecr.io
@@ -361,12 +371,8 @@ properties:
             secretRef: storage-account-key
           - name: FILE_SHARE_NAME
             secretRef: file-share-name
-          - name: AZURE_OPENAI_ENDPOINT
-            secretRef: azure-openai-endpoint
-          - name: AZURE_OPENAI_DEPLOYMENT
-            secretRef: azure-openai-deployment
-          - name: AZURE_OPENAI_API_KEY
-            secretRef: azure-openai-api-key
+          - name: GOOGLE_API_KEY
+            secretRef: google-api-key
         volumeMounts:
           - volumeName: persistent-storage
             mountPath: $MOUNT_PATH
