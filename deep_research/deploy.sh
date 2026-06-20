@@ -36,15 +36,10 @@ print_timing_summary() {
 }
 
 # Parse command-line arguments
-SYNC_FILES=false
 SKIP_KV_ACCESS=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --sync-files)
-      SYNC_FILES=true
-      shift
-      ;;
     --skip-kv-access)
       SKIP_KV_ACCESS=true
       shift
@@ -53,16 +48,14 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: ./deploy.sh [OPTIONS]"
       echo ""
       echo "Options:"
-      echo "  --sync-files     Sync local files (docs/, output/, input/) to Azure File Share"
       echo "  --skip-kv-access Skip Key Vault access policy updates (faster re-deployment)"
       echo "  --help, -h       Show this help message"
       echo ""
       echo "Examples:"
       echo "  ./deploy.sh                                    # Full deployment using existing image"
-      echo "  ./deploy.sh --sync-files                       # Deploy and sync files"
       echo "  ./deploy.sh --skip-kv-access                   # Fast re-deployment (no KV access check)"
       echo ""
-      echo "Note: For manual file sync after deployment, use:"
+      echo "Note: For bi-directional file sync with Azure File Share, use:"
       echo "  ./sync-files.sh"
       echo "Note: To build the image, run:"
       echo "  ./build.sh"
@@ -190,15 +183,7 @@ for dir in "docs" "docs/policy" "output" "output/eval_history" "input" ".langgra
   fi
 done
 
-if [ "$SYNC_FILES" = true ]; then
-  echo "🔄 Syncing local files to Azure File Share..."
-  az storage file upload-batch --source docs --destination docs --account-name $STORAGE_ACCOUNT_NAME --account-key $STORAGE_KEY --share-name $FILE_SHARE_NAME --overwrite 2>/dev/null || true
-  az storage file upload-batch --source output --destination output --account-name $STORAGE_ACCOUNT_NAME --account-key $STORAGE_KEY --share-name $FILE_SHARE_NAME --overwrite 2>/dev/null || true
-  az storage file upload-batch --source input --destination input --account-name $STORAGE_ACCOUNT_NAME --account-key $STORAGE_KEY --share-name $FILE_SHARE_NAME --overwrite 2>/dev/null || true
-  echo "✅ File sync complete"
-else
-  echo "💡 Tip: Use --sync-files flag to upload local files to Azure File Share"
-fi
+echo "💡 Tip: Run './sync-files.sh' separately for bi-directional file sync with Azure File Share"
 
 echo "🔐 Storing storage credentials in Key Vault..."
 az keyvault secret set --vault-name $KV_NAME --name STORAGE-ACCOUNT-NAME --value $STORAGE_ACCOUNT_NAME > /dev/null
