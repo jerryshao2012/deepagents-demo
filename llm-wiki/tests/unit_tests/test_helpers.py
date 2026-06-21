@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
-import tempfile
 import sys
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 # Add sibling deepagents repo path to sys.path to bypass editable install issues
@@ -15,16 +16,8 @@ sys.path.insert(0, str(deepagents_path))
 
 import helpers
 
-
 import lint as lint_helpers
 import query as query_helpers
-
-
-@pytest.fixture(autouse=True)
-def mock_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Set a dummy LANGSMITH_API_KEY for tests."""
-    monkeypatch.setenv("LANGSMITH_API_KEY", "fake-key")
-
 
 
 def _make_deps(
@@ -45,24 +38,6 @@ def _log_headings(log_text: str) -> list[str]:
     """Return parseable timeline heading lines from log markdown."""
     return [line for line in log_text.splitlines() if line.startswith("## [")]
 
-
-def test_ensure_mode_prerequisites_requires_api_key_for_ingest(
-        monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Require `LANGSMITH_API_KEY` for sandbox-backed modes."""
-    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
-
-    with pytest.raises(helpers.WikiError, match="LANGSMITH_API_KEY is required"):
-        helpers._ensure_mode_prerequisites("ingest")
-
-
-def test_ensure_mode_prerequisites_allows_init_without_api_key(
-        monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Do not require `LANGSMITH_API_KEY` for init mode."""
-    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
-
-    helpers._ensure_mode_prerequisites("init")
 
 
 def test_parse_config_accepts_wiki_dir(tmp_path: Path) -> None:

@@ -725,14 +725,12 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "deepagents" },
-    { name = "langsmith" },
     { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "deepagents", editable = "../../deepagents/libs/deepagents" },
-    { name = "langsmith", extras = ["sandbox"], specifier = ">=0.8.11" },
     { name = "pytest", specifier = ">=8.0.0" },
 ]
 

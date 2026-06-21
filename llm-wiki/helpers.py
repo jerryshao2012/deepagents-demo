@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 from contextlib import contextmanager, suppress
 from deepagents import create_deep_agent
-from deepagents.backends import CompositeBackend, FilesystemBackend, LangSmithSandbox
+from deepagents.backends import CompositeBackend, FilesystemBackend, LocalShellBackend
 from deepagents.middleware.filesystem import FilesystemPermission
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -28,11 +28,7 @@ if TYPE_CHECKING:
     from ingest import IngestResult
 
 _ALLOWED_TEXT_SUFFIXES = {".md", ".txt", ".json", ".yaml", ".yml", ".csv"}
-_DEFAULT_SNAPSHOT_NAME = "deepagents-wiki"
-_DEFAULT_DOCKER_IMAGE = "python:3"
-_DEFAULT_FS_CAPACITY = 16 * 1024 ** 3
-_LANGSMITH_BINARY_CANDIDATES = ("langsmith",)
-_HUB_COMPATIBLE_BINARIES: set[str] = set()
+
 _BASE_SYSTEM_PROMPT = """You are an expert research synthesizer building a long-lived topic knowledge base.
 
 Mission:
@@ -158,14 +154,6 @@ def parse_config(argv: Sequence[str] | None = None) -> RunnerConfig:
     )
 
 
-def _ensure_mode_prerequisites(mode: Mode) -> None:
-    """Validate mode-specific environment prerequisites."""
-    if mode in {"ingest", "query", "lint"} and not os.getenv("LANGSMITH_API_KEY"):
-        msg = (
-            "LANGSMITH_API_KEY is required for ingest/query/lint modes because they run agent "
-            "operations inside `langsmith.sandbox`."
-        )
-        raise WikiError(msg)
 
 
 
@@ -412,48 +400,10 @@ def _review_permissions() -> list[FilesystemPermission]:
 
 
 @contextmanager
-def _create_langsmith_sandbox_backend() -> Iterator[SandboxBackendProtocol]:
-    """Create and clean up a LangSmith sandbox-backed execution backend."""
-    env_key = os.getenv("LANGSMITH_API_KEY")
-    if not env_key:
-        msg = "LANGSMITH_API_KEY is required to create the LangSmith sandbox backend."
-        raise WikiError(msg)
+def _create_local_sandbox_backend(workspace_dir: Path) -> Iterator[SandboxBackendProtocol]:
+    """Create a local shell-backed execution backend."""
+    yield LocalShellBackend(root_dir=workspace_dir, virtual_mode=False)
 
-    try:
-        from langsmith.sandbox import SandboxClient  # noqa: PLC0415
-    except ModuleNotFoundError as exc:
-        msg = "langsmith.sandbox is unavailable. Install with `pip install 'langsmith[sandbox]'`."
-        raise WikiError(msg) from exc
-
-    resolved_snapshot = os.getenv("WIKI_SANDBOX_SNAPSHOT", _DEFAULT_SNAPSHOT_NAME)
-    docker_image = os.getenv("WIKI_SANDBOX_IMAGE", _DEFAULT_DOCKER_IMAGE)
-    fs_capacity_raw = os.getenv(
-        "WIKI_SANDBOX_FS_CAPACITY_BYTES", str(_DEFAULT_FS_CAPACITY)
-    )
-    try:
-        fs_capacity = int(fs_capacity_raw)
-    except ValueError as exc:
-        msg = "WIKI_SANDBOX_FS_CAPACITY_BYTES must be an integer"
-        raise WikiError(msg) from exc
-
-    client = SandboxClient(api_key=env_key)
-    snapshots = client.list_snapshots(name_contains=resolved_snapshot)
-    has_ready_snapshot = any(
-        snap.name == resolved_snapshot and snap.status == "ready" for snap in snapshots
-    )
-    if not has_ready_snapshot:
-        client.create_snapshot(
-            name=resolved_snapshot,
-            docker_image=docker_image,
-            fs_capacity_bytes=fs_capacity,
-        )
-
-    sandbox = client.create_sandbox(snapshot_name=resolved_snapshot)
-    try:
-        yield LangSmithSandbox(sandbox=sandbox)
-    finally:
-        with suppress(Exception):
-            client.delete_sandbox(sandbox.name)
 
 
 def _run_agent_mode(
@@ -465,7 +415,7 @@ def _run_agent_mode(
         permissions: list[FilesystemPermission],
 ) -> str:
     """Execute one agent operation against the pulled workspace."""
-    with _create_langsmith_sandbox_backend() as sandbox_backend:
+    with _create_local_sandbox_backend(workspace_dir) as sandbox_backend:
         workspace_backend = FilesystemBackend(root_dir=workspace_dir, virtual_mode=True)
         backend = CompositeBackend(
             default=sandbox_backend,
@@ -599,7 +549,6 @@ def _run_local_mode(config: RunnerConfig, deps: CliDeps) -> RunResult:
 
 def run(config: RunnerConfig, deps: CliDeps | None = None) -> RunResult:
     """Execute the requested wiki workflow."""
-    _ensure_mode_prerequisites(config.mode)
     resolved_deps = deps or CliDeps(
         run_agent_mode=_run_agent_apply_mode,
         run_agent_review_mode=_run_agent_review_mode,

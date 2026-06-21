@@ -44,7 +44,7 @@ back into `wiki/query/` when useful.
 ## Requirements
 
 - Python 3.11+
-- `LANGSMITH_API_KEY` set for `ingest`, `query`, and `lint` modes (required for sandbox execution)
+- Appropriate model provider API keys (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) configured in your environment
 
 ## Setup
 
@@ -53,12 +53,6 @@ back into `wiki/query/` when useful.
 uv sync --project llm-wiki
 ```
 
-## Preflight checks
-
-```bash
-# Verify auth env var for sandbox-backed modes.
-echo "${LANGSMITH_API_KEY:+set}"
-```
 
 ## Usage
 
