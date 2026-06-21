@@ -26,7 +26,7 @@ def build_lint_prompt(topic: str, note: str | None) -> str:
         "- Detect orphan pages with no inbound links and add/repair cross-references or merge them.\n"
         "- Add missing cross-references between related pages and concepts.\n"
         "- When an important concept lacks a dedicated page, create a canonical page and link it.\n"
-        "- Identify data gaps and missing evidence that block confidence.\n"
+        "- Identify docs gaps and missing evidence that block confidence.\n"
         "- Suggest high-value follow-up questions and source leads for unresolved gaps.\n\n"
         "External verification policy:\n"
         "- Use model-native web browsing/search only if available in this model/runtime.\n"

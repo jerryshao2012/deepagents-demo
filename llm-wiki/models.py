@@ -1,4 +1,4 @@
-"""Shared data models for LLM wiki workflows."""
+"""Shared docs models for LLM wiki workflows."""
 
 from __future__ import annotations
 

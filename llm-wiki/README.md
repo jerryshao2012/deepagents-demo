@@ -10,7 +10,7 @@ The agent is given source material and questions, then gathers information, orga
 reusable wiki that future agents can reference. Over time, the wiki evolves through ingest, query, and lint passes
 instead of restarting from scratch on every run.
 
-`ingest`, `query`, and `lint` are powered by Deep Agents (`create_deep_agent`) running in LangSmith Sandbox: the query
+`ingest`, `query`, and `lint` are powered by Deep Agents (`create_deep_agent`) running in local server: the query
 pass reads the current wiki state, reasons over relevant pages, produces a grounded answer, and can file durable results
 back into `wiki/query/` when useful.
 
@@ -59,32 +59,27 @@ source .venv/bin/activate
 
 ```bash
 # Initialize a wiki directory layout
-uv run --project llm-wiki \
-  python llm-wiki/runner.py \
+uv run python runner.py \
   --mode init \
-  --wiki-dir ./my-ada-wiki \
-  --topic "Ada Lovelace"
+  --wiki-dir ./data/my-data-wiki \
+  --topic "BMO Financial Group 2025 Annual Report to Shareholders"
 
 # Ingest source notes into canonical wiki pages (file + folder)
-uv run --project llm-wiki \
-  python llm-wiki/runner.py \
+uv run python runner.py \
   --mode ingest \
-  --wiki-dir ./my-ada-wiki \
-  --source ./notes/ada.md \
-  --source ./notes/speeches/
+  --wiki-dir ./data/my-data-wiki \
+  --source ./data/source/
 
 # Ask grounded questions against the maintained wiki
-uv run --project llm-wiki \
-  python llm-wiki/runner.py \
+uv run python runner.py \
   --mode query \
-  --wiki-dir ./my-ada-wiki \
-  --question "What did Ada contribute to computing?"
+  --wiki-dir ./data/my-data-wiki \
+  --question "What was BMO's overall financial performance in fiscal 2025, and how did key metrics such as net income, EPS, and ROE change compared to fiscal 2024?"
 
 # Run a wiki maintenance pass (fix links, deduplicate pages, refresh index.md, append log.md entry)
-uv run --project llm-wiki \
-  python llm-wiki/runner.py \
+uv run python runner.py \
   --mode lint \
-  --wiki-dir ./my-ada-wiki
+  --wiki-dir ./data/my-data-wiki
 
 # Optional flags:
 #   --review             # ingest only: review before apply

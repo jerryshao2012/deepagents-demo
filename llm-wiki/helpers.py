@@ -33,6 +33,7 @@ def _resolve_model():
 
 
 _ALLOWED_TEXT_SUFFIXES = {".md", ".txt", ".json", ".yaml", ".yml", ".csv"}
+_ALLOWED_SOURCE_SUFFIXES = _ALLOWED_TEXT_SUFFIXES | {".pdf"}
 
 _BASE_SYSTEM_PROMPT = """You are an expert research synthesizer building a long-lived topic knowledge base.
 
@@ -283,6 +284,30 @@ def _validate_text_only_directory(root_dir: Path) -> None:
             raise WikiError(msg) from exc
 
 
+def _extract_pdf_text(file_path: Path) -> str:
+    """Extract PDF content as markdown, falling back to pypdf text extraction if needed."""
+    try:
+        import pymupdf4llm
+        markdown_content = pymupdf4llm.to_markdown(str(file_path))
+        if isinstance(markdown_content, list):
+            return "\n\n".join(str(item) for item in markdown_content)
+        if markdown_content.strip():
+            return markdown_content
+    except Exception:
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(file_path)
+            page_texts: list[str] = []
+            for index, page in enumerate(reader.pages, start=1):
+                text = (page.extract_text() or "").strip()
+                if text:
+                    page_texts.append(f"## Page {index}:\n\n{text}")
+            return "\n\n".join(page_texts)
+        except Exception as e:
+            return f"Error extracting PDF text: {e}"
+    return ""
+
+
 def _stage_sources(sources: Sequence[Path], workspace_dir: Path) -> list[Path]:
     """Copy and de-duplicate source files into the workspace raw directory."""
     staged: list[Path] = []
@@ -293,22 +318,31 @@ def _stage_sources(sources: Sequence[Path], workspace_dir: Path) -> list[Path]:
         if not source.exists() or not source.is_file():
             msg = f"Source file not found: {source}"
             raise WikiError(msg)
-        if source.suffix.lower() not in _ALLOWED_TEXT_SUFFIXES:
+
+        if source.suffix.lower() not in _ALLOWED_SOURCE_SUFFIXES:
             msg = (
                 f"Unsupported source file type for {source}. "
-                "Use text files with extensions: md, txt, json, yaml, yml, csv."
+                f"Use files with extensions: {', '.join(sorted(ext.strip('.') for ext in _ALLOWED_SOURCE_SUFFIXES))}."
             )
             raise WikiError(msg)
 
-        try:
-            text = source.read_text(encoding="utf-8")
-        except UnicodeDecodeError as exc:
-            msg = f"Source file must be UTF-8 text: {source}"
-            raise WikiError(msg) from exc
+        is_pdf = source.suffix.lower() == ".pdf"
 
-        destination = raw_dir / source.name
-        suffix = source.suffix
-        stem = source.stem
+        if is_pdf:
+            text = _extract_pdf_text(source)
+            destination = raw_dir / f"{source.name}.md"
+            suffix = ".md"
+            stem = f"{source.stem}.pdf"
+        else:
+            try:
+                text = source.read_text(encoding="utf-8")
+            except UnicodeDecodeError as exc:
+                msg = f"Source file must be UTF-8 text: {source}"
+                raise WikiError(msg) from exc
+            destination = raw_dir / source.name
+            suffix = source.suffix
+            stem = source.stem
+
         counter = 2
         while destination.exists() or destination.is_symlink():
             destination = raw_dir / f"{stem}-{counter}{suffix}"
@@ -327,11 +361,13 @@ def _extract_text(content: object) -> str:
     if isinstance(content, list):
         chunks: list[str] = []
         for item in content:
-            if isinstance(item, dict) and item.get("type") == "text":
+            if isinstance(item, str):
+                chunks.append(item)
+            elif isinstance(item, dict) and item.get("type") == "text":
                 text = item.get("text")
                 if isinstance(text, str):
                     chunks.append(text)
-        return "\n".join(chunks)
+        return "".join(chunks)
     return str(content)
 
 

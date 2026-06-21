@@ -7,6 +7,8 @@ dependencies = [
     "deepagents>=0.6.8",
     "python-dotenv>=1.0.0",
     "pytest>=8.0.0",
+    "pymupdf4llm>=1.27.2.3",
+    "pypdf>=6.13.3",
 ]
 
 [project.optional-dependencies]
@@ -19,5 +21,3 @@ all-providers = [
     "langchain-anthropic>=0.3.0",
 ]
 
-[tool.uv.sources]
-deepagents = { path = "../../deepagents/libs/deepagents", editable = true }

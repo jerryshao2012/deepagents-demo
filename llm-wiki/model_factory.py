@@ -48,9 +48,9 @@ def get_configured_model():
 
     # ── 1. AWS Bedrock (OpenAI-compatible) ────────────────────────────────────
     if (
-        os.getenv("AWS_BEDROCK_ENDPOINT")
-        and os.getenv("AWS_BEARER_TOKEN_BEDROCK")
-        and os.getenv("MODEL_NAME")
+            os.getenv("AWS_BEDROCK_ENDPOINT")
+            and os.getenv("AWS_BEARER_TOKEN_BEDROCK")
+            and os.getenv("MODEL_NAME")
     ):
         import httpx
         from langchain_openai import ChatOpenAI
@@ -66,10 +66,10 @@ def get_configured_model():
 
     # ── 2. Azure OpenAI (explicit API version → AzureChatOpenAI) ─────────────
     if (
-        os.getenv("AZURE_OPENAI_ENDPOINT")
-        and os.getenv("AZURE_OPENAI_DEPLOYMENT")
-        and os.getenv("AZURE_OPENAI_API_KEY")
-        and os.getenv("AZURE_OPENAI_API_VERSION")
+            os.getenv("AZURE_OPENAI_ENDPOINT")
+            and os.getenv("AZURE_OPENAI_DEPLOYMENT")
+            and os.getenv("AZURE_OPENAI_API_KEY")
+            and os.getenv("AZURE_OPENAI_API_VERSION")
     ):
         import httpx
         from langchain_openai import AzureChatOpenAI
@@ -86,9 +86,9 @@ def get_configured_model():
 
     # ── 3. Azure OpenAI (simple → ChatOpenAI with base_url) ──────────────────
     if (
-        os.getenv("AZURE_OPENAI_ENDPOINT")
-        and os.getenv("AZURE_OPENAI_DEPLOYMENT")
-        and os.getenv("AZURE_OPENAI_API_KEY")
+            os.getenv("AZURE_OPENAI_ENDPOINT")
+            and os.getenv("AZURE_OPENAI_DEPLOYMENT")
+            and os.getenv("AZURE_OPENAI_API_KEY")
     ):
         import httpx
         from langchain_openai import ChatOpenAI
@@ -104,15 +104,23 @@ def get_configured_model():
 
     # ── 4. Google Gemini ──────────────────────────────────────────────────────
     if os.getenv("GOOGLE_API_KEY") and os.getenv("MODEL_NAME"):
-        import httpx
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        return ChatGoogleGenerativeAI(
-            model=os.environ["MODEL_NAME"],
-            temperature=0.0,
-            http_client=httpx.Client(verify=verify_ssl),
-            streaming=True,
-        )
+        kwargs = {
+            "model": os.environ["MODEL_NAME"],
+            "temperature": 0.0,
+            "streaming": True,
+        }
+
+        if verify_ssl is not True:
+            import httpx
+            from google import genai
+            kwargs["client"] = genai.Client(
+                api_key=os.environ["GOOGLE_API_KEY"],
+                http_options={"httpx_client": httpx.Client(verify=verify_ssl)},
+            )
+
+        return ChatGoogleGenerativeAI(**kwargs)
 
     # ── 5. Anthropic Claude ───────────────────────────────────────────────────
     if os.getenv("ANTHROPIC_API_KEY") and os.getenv("MODEL_NAME"):

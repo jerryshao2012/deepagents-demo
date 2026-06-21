@@ -460,3 +460,23 @@ def test_run_query_workspace_files_durable_answer(tmp_path: Path) -> None:
     log_text = (workspace_dir / "log.md").read_text(encoding="utf-8")
     assert "query.review | outcome=file" in log_text
     assert "query.apply | outcome=filed" in log_text
+
+
+def test_stage_sources_with_pdf(tmp_path: Path) -> None:
+    """Stage a PDF file and verify it is converted to a text markdown file in raw."""
+    from pypdf import PdfWriter
+    writer = PdfWriter()
+    writer.add_blank_page(width=72, height=72)
+    pdf_path = tmp_path / "test.pdf"
+    with open(pdf_path, "wb") as f:
+        writer.write(f)
+
+    workspace_dir = tmp_path / "workspace"
+    staged = helpers._stage_sources([pdf_path], workspace_dir)
+    assert len(staged) == 1
+    staged_file = staged[0]
+    assert staged_file.name == "test.pdf.md"
+    assert staged_file.exists()
+    # The file should be a valid text file containing either empty/extracted content
+    content = staged_file.read_text(encoding="utf-8")
+    assert isinstance(content, str)
