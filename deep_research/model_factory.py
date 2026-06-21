@@ -12,8 +12,9 @@ from langchain.chat_models import init_chat_model
 from langchain.embeddings import init_embeddings
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph_checkpoint_cosmosdb import CosmosDBSaver
-from logger_utils import setup_logger
 from pydantic import SecretStr
+
+from logger_utils import setup_logger
 from retry_utils import wrap_model_with_rate_limiting
 from utils import get_ssl_verify_config
 
@@ -149,12 +150,20 @@ def get_configured_model():
     if os.getenv("GOOGLE_API_KEY") and os.getenv("MODEL_NAME"):
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        model = ChatGoogleGenerativeAI(
-            model=os.getenv("MODEL_NAME", "gemini-2.5-pro"),
-            temperature=0.0,
-            http_client=httpx.Client(verify=verify_ssl),
-            streaming=True,
-        )
+        kwargs = {
+            "model": os.getenv("MODEL_NAME", "gemini-2.5-pro"),
+            "temperature": 0.0,
+            "streaming": True,
+        }
+
+        if verify_ssl is not True:
+            from google import genai
+            kwargs["client"] = genai.Client(
+                api_key=os.getenv("GOOGLE_API_KEY"),
+                http_options={"httpx_client": httpx.Client(verify=verify_ssl)},
+            )
+
+        model = ChatGoogleGenerativeAI(**kwargs)
         return wrap_model_with_rate_limiting(model)
 
     if os.getenv("ANTHROPIC_API_KEY") and os.getenv("MODEL_NAME"):

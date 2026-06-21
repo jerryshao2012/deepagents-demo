@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 
 import httpx
+import sys
 from pydantic import SecretStr
 
 # Add parent directories to path to import retry_utils
@@ -78,12 +78,20 @@ def get_configured_model():
     if os.getenv("GOOGLE_API_KEY") and os.getenv("MODEL_NAME"):
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        model = ChatGoogleGenerativeAI(
-            model=os.getenv("MODEL_NAME", "gemini-2.5-pro"),
-            temperature=0.0,
-            http_client=httpx.Client(verify=verify_ssl),
-            streaming=True,
-        )
+        kwargs = {
+            "model": os.getenv("MODEL_NAME", "gemini-2.5-pro"),
+            "temperature": 0.0,
+            "streaming": True,
+        }
+
+        if verify_ssl is not True:
+            from google import genai
+            kwargs["client"] = genai.Client(
+                api_key=os.getenv("GOOGLE_API_KEY"),
+                http_options={"httpx_client": httpx.Client(verify=verify_ssl)},
+            )
+
+        model = ChatGoogleGenerativeAI(**kwargs)
         return wrap_model_with_rate_limiting(model)
 
     if os.getenv("ANTHROPIC_API_KEY") and os.getenv("MODEL_NAME"):
