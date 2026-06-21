@@ -413,8 +413,8 @@ async def _run_model_diagnostics() -> dict:
         return diagnostics
 
     # --- Try to create the model ---
+    t0 = time.monotonic()
     try:
-        t0 = time.monotonic()
         model = await asyncio.to_thread(_create_model_safe)
         elapsed = round(time.monotonic() - t0, 3)
         diagnostics["model_creation"] = {

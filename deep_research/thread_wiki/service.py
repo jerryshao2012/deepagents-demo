@@ -358,13 +358,14 @@ def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
         read_only: If True, deny all write permissions (review-only mode).
     """
     from deepagents import create_deep_agent
-    from deepagents.backends import CompositeBackend, FilesystemBackend, LocalShellBackend
+    from deepagents.backends import CompositeBackend, FilesystemBackend
     from deepagents.middleware.filesystem import FilesystemPermission
 
-    sandbox_backend = LocalShellBackend(root_dir=wiki_dir, virtual_mode=False)
+    # For server environments, we MUST NOT give the wiki synthesizer a shell.
+    # It only needs to read/write files in the wiki directory.
     workspace_backend = FilesystemBackend(root_dir=wiki_dir, virtual_mode=True)
     backend = CompositeBackend(
-        default=sandbox_backend,
+        default=workspace_backend,
         routes={
             "/raw/": workspace_backend,
             "/wiki/": workspace_backend,
