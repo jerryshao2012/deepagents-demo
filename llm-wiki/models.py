@@ -15,17 +15,14 @@ Mode = Literal["init", "ingest", "query", "lint"]
 @dataclass(frozen=True)
 class RunnerConfig:
     """Parsed runner configuration."""
-    
+
     mode: Mode
     topic: str
-    repo: str
-    owner: str | None
-    topic_dir: Path
+    wiki_dir: Path
     sources: tuple[Path, ...]
     note: str | None
     question: str | None
     model: str | None
-    description: str | None
     review: bool
 
 
@@ -33,7 +30,6 @@ class RunnerConfig:
 class CliDeps:
     """Injectable dependencies for tests."""
 
-    run_langsmith_cli: Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
     run_agent_mode: Callable[[Path, str, str, str | None], str]
     run_agent_review_mode: Callable[[Path, str, str, str | None], str]
     ask_user: Callable[[str], str]
@@ -45,4 +41,4 @@ class RunResult:
     """Output from a runner invocation."""
 
     answer: str | None
-    hub_url: str | None
+

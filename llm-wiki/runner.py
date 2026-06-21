@@ -18,9 +18,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if run_result.answer:
         print(run_result.answer)  # noqa: T201
-    if run_result.hub_url:
-        print(f"Context Hub: {run_result.hub_url}")  # noqa: T201
     return 0
+
 
 
 if __name__ == "__main__":

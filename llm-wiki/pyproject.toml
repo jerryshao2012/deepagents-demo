@@ -6,7 +6,10 @@ requires-python = ">=3.11"
 dependencies = [
     "deepagents>=0.6.8",
     "langsmith[sandbox]>=0.8.11",
+    "pytest>=8.0.0",
 ]
 
+
 [tool.uv.sources]
-deepagents = { path = "../../libs/deepagents", editable = true }
+deepagents = { path = "../../deepagents/libs/deepagents", editable = true }
+

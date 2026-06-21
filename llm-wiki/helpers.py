@@ -86,73 +86,28 @@ def _slugify_topic(topic: str) -> str:
     return slug or "topic"
 
 
-def _topic_dir_for(topic: str, explicit: str | None) -> Path:
-    """Resolve the local wiki directory path."""
-    if explicit:
-        return Path(explicit).expanduser().resolve()
-    return (Path.cwd() / "wikis" / _slugify_topic(topic)).resolve()
-
-
-def _default_topic_from_repo(repo: str) -> str:
-    """Create a display topic from a repo name."""
-    return repo.replace("-", " ").replace("_", " ").strip().title() or repo
-
-
-def _normalize_repo_and_owner(
-        parser: argparse.ArgumentParser, repo: str, owner: str | None
-) -> tuple[str, str | None]:
-    """Normalize repo and owner arguments into canonical pieces."""
-    candidate_repo = repo.strip()
-    candidate_owner = owner.strip() if owner is not None else None
-
-    if not candidate_repo:
-        parser.error("--repo must be non-empty")
-
-    if "/" in candidate_repo:
-        parsed_owner, sep, parsed_repo = candidate_repo.partition("/")
-        if sep == "" or not parsed_owner or not parsed_repo or "/" in parsed_repo:
-            parser.error("--repo must be REPO or OWNER/REPO")
-        if candidate_owner and candidate_owner != parsed_owner:
-            parser.error("--owner must match owner in --repo when both are provided")
-        candidate_owner = parsed_owner
-        candidate_repo = parsed_repo
-
-    if "/" in candidate_repo:
-        parser.error("--repo must not contain additional '/' segments")
-
-    if candidate_owner == "":
-        parser.error("--owner must be non-empty when provided")
-
-    return candidate_repo, candidate_owner
-
-
-def _hub_identifier(owner: str | None, repo: str) -> str:
-    """Build a canonical hub identifier string."""
-    if owner:
-        return f"{owner}/{repo}"
-    return f"-/{repo}"
+def _default_topic_from_dir(wiki_dir: Path) -> str:
+    """Create a display topic from a directory name."""
+    return wiki_dir.name.replace("-", " ").replace("_", " ").strip().title() or wiki_dir.name
 
 
 def _build_parser() -> argparse.ArgumentParser:
     """Create the CLI argument parser."""
     parser = argparse.ArgumentParser(
-        description="LLM wiki (Deep Agents + LangSmith Hub CLI)"
+        description="LLM wiki (Deep Agents + Local directory)"
     )
     parser.add_argument(
         "--mode", required=True, choices=["init", "ingest", "query", "lint"]
     )
     parser.add_argument(
-        "--repo",
+        "--wiki-dir",
         required=True,
-        help="Context Hub repo name or owner/name handle",
+        help="Local wiki directory containing wiki files",
     )
     parser.add_argument(
-        "--owner",
+        "--topic",
         default=None,
-        help="Optional Context Hub owner when --repo is only a repo name",
-    )
-    parser.add_argument(
-        "--topic-dir", default=None, help="Local wiki directory for init mode"
+        help="The topic name of the wiki (defaults to the name of the wiki directory)",
     )
     parser.add_argument(
         "--source",
@@ -168,11 +123,6 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--model", default=None, help="Optional model override for create_deep_agent"
-    )
-    parser.add_argument(
-        "--description",
-        default=None,
-        help="Optional hub repo description to set during init (if supported by CLI)",
     )
     parser.add_argument(
         "--review",
@@ -193,59 +143,19 @@ def parse_config(argv: Sequence[str] | None = None) -> RunnerConfig:
     if mode == "query" and not args.question:
         parser.error("--question is required in query mode")
 
-    repo, owner = _normalize_repo_and_owner(parser, args.repo, args.owner)
-    topic = _default_topic_from_repo(repo)
+    wiki_dir = Path(args.wiki_dir).expanduser().resolve()
+    topic = args.topic or _default_topic_from_dir(wiki_dir)
 
     return RunnerConfig(
         mode=mode,
         topic=topic,
-        repo=repo,
-        owner=owner,
-        topic_dir=_topic_dir_for(topic, args.topic_dir),
+        wiki_dir=wiki_dir,
         sources=tuple(Path(source).expanduser().resolve() for source in args.source),
         note=args.note,
         question=args.question,
         model=args.model,
-        description=args.description,
         review=bool(args.review),
     )
-
-
-def _resolve_langsmith_binary() -> str:
-    """Find an installed LangSmith CLI binary."""
-    for candidate in _LANGSMITH_BINARY_CANDIDATES:
-        binary = shutil.which(candidate)
-        if binary:
-            return binary
-    msg = (
-        "LangSmith CLI was not found on PATH. Install `langsmith` before running "
-        "wiki sync."
-    )
-    raise WikiError(msg)
-
-
-def _ensure_hub_command_support(binary: str) -> None:
-    """Validate that an installed LangSmith CLI provides `hub` commands."""
-    if binary in _HUB_COMPATIBLE_BINARIES:
-        return
-
-    check = subprocess.run(  # noqa: S603
-        [binary, "hub", "--help"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if check.returncode == 0:
-        _HUB_COMPATIBLE_BINARIES.add(binary)
-        return
-
-    output = (check.stderr or check.stdout).strip()
-    cmd = Path(binary).name
-    msg = (
-        f"`{cmd}` is installed but does not support `hub` commands required by this example. "
-        f"Verify with `{cmd} hub --help` and install a hub-capable LangSmith CLI.\n{output}"
-    )
-    raise WikiError(msg)
 
 
 def _ensure_mode_prerequisites(mode: Mode) -> None:
@@ -257,71 +167,6 @@ def _ensure_mode_prerequisites(mode: Mode) -> None:
         )
         raise WikiError(msg)
 
-
-def _run_langsmith_cli(args: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    """Execute a langsmith CLI command and raise on failures."""
-    binary = _resolve_langsmith_binary()
-    _ensure_hub_command_support(binary)
-    cmd = Path(binary).name
-
-    result = subprocess.run(
-        [binary, *args], capture_output=True, text=True, check=False
-    )  # noqa: S603
-    if result.returncode == 0:
-        return result
-
-    output = (result.stderr or result.stdout).strip()
-    if "LANGSMITH_API_KEY" in output or "unauthorized" in output.lower():
-        msg = (
-            "LangSmith authentication failed. Set LANGSMITH_API_KEY and confirm CLI auth. "
-            f"Command: {cmd} {' '.join(args)}\n{output}"
-        )
-        raise WikiError(msg)
-
-    msg = f"{cmd} {' '.join(args)} failed with exit code {result.returncode}:\n{output}"
-    raise WikiError(msg)
-
-
-def _parse_cli_json_output(
-        result: subprocess.CompletedProcess[str],
-) -> dict[str, object] | None:
-    """Parse JSON stdout from a langsmith CLI response."""
-    stdout = (result.stdout or "").strip()
-    if not stdout:
-        return None
-    try:
-        payload = json.loads(stdout)
-    except json.JSONDecodeError:
-        return None
-    if isinstance(payload, dict):
-        return payload
-    return None
-
-
-def _app_base_url() -> str:
-    """Compute the LangSmith app base URL from endpoint environment variables."""
-    endpoint = os.getenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
-    parsed = urlparse(endpoint)
-    scheme = parsed.scheme or "https"
-    host = parsed.netloc or parsed.path
-    if host.startswith("api."):
-        host = host[4:]
-    return f"{scheme}://{host}"
-
-
-def _resolve_hub_url(owner: str | None, repo: str) -> str:
-    """Resolve a browser URL for the hub repo."""
-    base = _app_base_url()
-    if owner:
-        return f"{base}/hub/{owner}/{repo}"
-    return f"{base}/hub/{repo}"
-
-
-def _hub_cli_repo_arg(hub_identifier: str) -> str:
-    """Normalize hub id values for cobra-based CLI parsing."""
-    if hub_identifier.startswith("-/"):
-        return hub_identifier[2:]
-    return hub_identifier
 
 
 def _iter_tree_paths(root_dir: Path) -> Iterator[Path]:
@@ -671,29 +516,8 @@ def _run_agent_review_mode(
     )
 
 
-def _resolve_internal_source_flag(deps: CliDeps) -> tuple[str, ...]:
-    """Resolve an init flag set that enforces internal repo source."""
-    from init import resolve_internal_source_flag
-
-    return resolve_internal_source_flag(deps)
-
-
-def _extract_repo_source(payload: dict[str, object]) -> str | None:
-    """Extract repo source metadata from hub get payload."""
-    from init import extract_repo_source
-
-    return extract_repo_source(payload)
-
-
-def _verify_internal_repo_source(hub_identifier: str, deps: CliDeps) -> None:
-    """Verify that the target hub repo source is internal."""
-    from init import verify_internal_repo_source
-
-    verify_internal_repo_source(hub_identifier, deps)
-
-
 def _run_init(config: RunnerConfig, deps: CliDeps) -> RunResult:
-    """Initialize a local topic repo and push its first hub revision."""
+    """Initialize a local topic repo directory layout."""
     from init import run_init
 
     return run_init(config, deps)
@@ -750,65 +574,33 @@ def _run_ingest_workspace(
     return run_ingest_workspace(config, workspace_dir, deps)
 
 
-def _run_pull_mode(config: RunnerConfig, deps: CliDeps) -> RunResult:
-    """Pull a hub repo, run the selected mode, and push updates."""
-    hub_identifier = _hub_identifier(config.owner, config.repo)
+def _run_local_mode(config: RunnerConfig, deps: CliDeps) -> RunResult:
+    """Run the selected mode directly on the local wiki directory."""
+    workspace_dir = config.wiki_dir
 
-    with deps.tempdir_factory() as temp_dir:
-        workspace_dir = Path(temp_dir)
+    _ensure_no_symlinks(workspace_dir)
+    _ensure_scaffold(workspace_dir, config.topic)
 
-        deps.run_langsmith_cli(
-            [
-                "hub",
-                "pull",
-                _hub_cli_repo_arg(hub_identifier),
-                "--dir",
-                str(workspace_dir),
-            ]
-        )
+    if config.mode == "ingest":
+        ingest_result = _run_ingest_workspace(config, workspace_dir, deps)
+        answer = ingest_result.answer
+    elif config.mode == "query":
+        from query import run_query_workspace
 
-        _ensure_no_symlinks(workspace_dir)
-        _ensure_scaffold(workspace_dir, config.topic)
+        query_result = run_query_workspace(config, workspace_dir, deps)
+        answer = query_result.answer
+    else:
+        from lint import run_lint_workspace
 
-        if config.mode == "ingest":
-            ingest_result = _run_ingest_workspace(config, workspace_dir, deps)
-            answer = ingest_result.answer
-            should_push = ingest_result.should_push
-        elif config.mode == "query":
-            from query import run_query_workspace
+        answer = run_lint_workspace(config, workspace_dir, deps)
 
-            query_result = run_query_workspace(config, workspace_dir, deps)
-            answer = query_result.answer
-            should_push = query_result.should_push
-        else:
-            from lint import run_lint_workspace
-
-            answer = run_lint_workspace(config, workspace_dir, deps)
-            should_push = True
-
-        if should_push:
-            _validate_text_only_directory(workspace_dir)
-            deps.run_langsmith_cli(
-                [
-                    "hub",
-                    "push",
-                    _hub_cli_repo_arg(hub_identifier),
-                    "--type",
-                    "agent",
-                    "--dir",
-                    str(workspace_dir),
-                ]
-            )
-
-        hub_url = _resolve_hub_url(config.owner, config.repo)
-        return RunResult(answer=answer, hub_url=hub_url)
+    return RunResult(answer=answer)
 
 
 def run(config: RunnerConfig, deps: CliDeps | None = None) -> RunResult:
     """Execute the requested wiki workflow."""
     _ensure_mode_prerequisites(config.mode)
     resolved_deps = deps or CliDeps(
-        run_langsmith_cli=_run_langsmith_cli,
         run_agent_mode=_run_agent_apply_mode,
         run_agent_review_mode=_run_agent_review_mode,
         ask_user=input,
@@ -817,7 +609,7 @@ def run(config: RunnerConfig, deps: CliDeps | None = None) -> RunResult:
 
     if config.mode == "init":
         return _run_init(config, resolved_deps)
-    return _run_pull_mode(config, resolved_deps)
+    return _run_local_mode(config, resolved_deps)
 
 
 __all__ = [

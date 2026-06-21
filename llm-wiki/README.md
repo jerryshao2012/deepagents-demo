@@ -1,10 +1,10 @@
 # LLM Wiki
 
-A script-first Deep Agents example that builds a persistent wiki and syncs it through `langsmith hub` commands.
+A script-first Deep Agents example that builds a persistent local wiki.
 
 ## How it works
 
-This example implements a workflow where an agent researches a topic and writes the result into a Context Hub entry.
+This example implements a workflow where an agent researches a topic and writes the result into a local directory workspace.
 
 The agent is given source material and questions, then gathers information, organizes it, and incrementally builds a
 reusable wiki that future agents can reference. Over time, the wiki evolves through ingest, query, and lint passes
@@ -14,8 +14,6 @@ instead of restarting from scratch on every run.
 pass reads the current wiki state, reasons over relevant pages, produces a grounded answer, and can file durable results
 back into `wiki/query/` when useful.
 
-Each run syncs updates to Context Hub so teammates can review changes, comment, and promote versions.
-
 ## Structure
 
 - `runner.py` - thin CLI entrypoint
@@ -23,7 +21,7 @@ Each run syncs updates to Context Hub so teammates can review changes, comment, 
 - `index.py` - `wiki/index.md` catalog builder and categorization logic
 - `log.py` - `log.md` append-only timeline formatter and writer
 - `models.py` - shared config/dependency/result dataclasses
-- `init.py` - `init` mode workflow and internal-source enforcement
+- `init.py` - `init` mode workflow
 - `ingest.py` - `ingest` mode source expansion + review/apply flow
 - `query.py` - `query` mode analysis + optional durable filing flow
 - `lint.py` - `lint` mode health-check reconciliation flow
@@ -32,7 +30,7 @@ Each run syncs updates to Context Hub so teammates can review changes, comment, 
 
 ## Workspace layout
 
-`init` creates this top-level layout in the wiki repo:
+`init` creates this top-level layout in the wiki directory:
 
 - `AGENTS.md` - wiki schema/config and workflow rules the LLM follows for ingest/query/lint. `init` creates it when
   missing and preserves existing edits on re-runs.
@@ -46,66 +44,56 @@ Each run syncs updates to Context Hub so teammates can review changes, comment, 
 ## Requirements
 
 - Python 3.11+
-- `langsmith[sandbox]` with `hub` commands available (installed in the example env by `uv sync`)
-- `LANGSMITH_API_KEY` set for `ingest`, `query`, and `lint` modes
+- `LANGSMITH_API_KEY` set for `ingest`, `query`, and `lint` modes (required for sandbox execution)
 
 ## Setup
 
 ```bash
-# From the deepagents repo root:
-uv sync --project examples/llm-wiki
+# From the deepagents-demo root directory:
+uv sync --project llm-wiki
 ```
 
 ## Preflight checks
 
 ```bash
-# Verify Hub commands from the example environment.
-uv run --project examples/llm-wiki langsmith hub --help
-
 # Verify auth env var for sandbox-backed modes.
 echo "${LANGSMITH_API_KEY:+set}"
 ```
 
-`init` auto-detects available source flags from `hub init --help`, and also
-pre-creates/verifies the repo through `/api/v1/repos` with `source=internal`
-before the first push. If an existing repo is not internal, init fails fast
-with an actionable error.
-
 ## Usage
 
 ```bash
-# Initialize a wiki and publish first Context Hub revision
-uv run --project examples/llm-wiki \
-  python examples/llm-wiki/runner.py \
+# Initialize a wiki directory layout
+uv run --project llm-wiki \
+  python llm-wiki/runner.py \
   --mode init \
-  --repo "ada-lovelace-wiki"
+  --wiki-dir ./my-ada-wiki \
+  --topic "Ada Lovelace"
 
 # Ingest source notes into canonical wiki pages (file + folder)
-uv run --project examples/llm-wiki \
-  python examples/llm-wiki/runner.py \
+uv run --project llm-wiki \
+  python llm-wiki/runner.py \
   --mode ingest \
-  --repo "ada-lovelace-wiki" \
+  --wiki-dir ./my-ada-wiki \
   --source ./notes/ada.md \
   --source ./notes/speeches/
 
 # Ask grounded questions against the maintained wiki
-uv run --project examples/llm-wiki \
-  python examples/llm-wiki/runner.py \
+uv run --project llm-wiki \
+  python llm-wiki/runner.py \
   --mode query \
-  --repo "ada-lovelace-wiki" \
+  --wiki-dir ./my-ada-wiki \
   --question "What did Ada contribute to computing?"
 
-# Run a wiki maintenance pass and publish an updated Context Hub revision
-# (fix links, deduplicate pages, refresh index.md, append log.md entry)
-uv run --project examples/llm-wiki \
-  python examples/llm-wiki/runner.py \
+# Run a wiki maintenance pass (fix links, deduplicate pages, refresh index.md, append log.md entry)
+uv run --project llm-wiki \
+  python llm-wiki/runner.py \
   --mode lint \
-  --repo "ada-lovelace-wiki"
+  --wiki-dir ./my-ada-wiki
 
 # Optional flags:
-#   --owner "acme"       # when repo is under an explicit owner
 #   --review             # ingest only: review before apply
-#   --description "..."  # init only: set Hub repo description
+#   --topic "Name"       # set custom topic name (defaults to folder name)
 ```
 
 ## Ingest workflow
@@ -121,7 +109,7 @@ If you pass `--review`, ingest becomes a two-phase, operator-in-the-loop flow:
 3. The runner refreshes `wiki/index.md` and appends structured `ingest.review` / `ingest.apply` timeline entries in
    `log.md`.
 4. In `--review` mode, declining confirmation skips wiki edits, but still appends an `ingest.apply | outcome=canceled`
-   entry and pushes so the timeline remains complete.
+   entry.
 
 Batch ingest is the default. A single run can process multiple files and directories.
 
@@ -136,7 +124,7 @@ Batch ingest is the default. A single run can process multiple files and directo
 2. Filing phase (write, conditional): if the answer is durable, the runner files it into `wiki/query/<question-slug>.md`
    and refreshes `wiki/index.md`.
 3. The runner always appends structured query timeline entries (`query.review` and optionally `query.apply`) to `log.md`
-   and pushes so query history is complete, even on `skip`.
+   so query history is complete, even on `skip`.
 
 ## Lint workflow
 
@@ -147,7 +135,7 @@ Batch ingest is the default. A single run can process multiple files and directo
    `/wiki/` (creating new canonical pages when needed).
 2. Gap reporting phase (in response): the model returns a concise summary with reconciled changes, remaining gaps, and
    suggested next questions/sources.
-3. The runner refreshes `wiki/index.md`, appends a structured `lint.apply` entry to `log.md`, and pushes.
+3. The runner refreshes `wiki/index.md`, appends a structured `lint.apply` entry to `log.md`.
 
 ## Log timeline
 
@@ -171,9 +159,3 @@ grep "^## \\[" log.md | tail -5
 # Show the latest query review outcomes.
 grep "^## \\[.*\\] query.review \\|" log.md | tail -10
 ```
-
-## Resources
-
-- [LangChain Academy](https://academy.langchain.com/) — Comprehensive, free courses on LangChain libraries and products,
-  made by the LangChain team.
-- [Code of Conduct](https://github.com/langchain-ai/langchain/?tab=coc-ov-file) — community guidelines and standards
