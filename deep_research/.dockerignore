@@ -43,12 +43,9 @@ sync-files.sh
 # Documentation
 document/
 README.md
+AGENTS.md
 
 # Azure deployment configs
-
-# Postman collections
-postman_collection.json
-postman_environment.json
 
 # Resources and screenshots
 resources/
