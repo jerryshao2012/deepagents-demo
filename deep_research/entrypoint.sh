@@ -1,17 +1,71 @@
 #!/bin/bash
 set -e
 
-# Path where Azure File Share is mounted
+# ── Storage backend detection ────────────────────────────────────────────────
+# This entrypoint works identically for Azure and AWS:
+#   Azure: Azure File Share is mounted at MOUNT_PATH by the platform
+#   AWS:   S3 bucket is mounted at MOUNT_PATH via s3fs-fuse
+# After mounting, both backends use the same symlink logic below.
+
 MOUNT_PATH="/deps/deep_research/mnt"
 
 echo "═══════════════════════════════════════════════════════"
 echo "🔧 Entrypoint: Configuring persistent storage..."
+
+# ── Detect and mount storage backend ───────────────────────────────────────
+
+if [ -n "$S3_BUCKET_NAME" ] && command -v s3fs &>/dev/null; then
+    # ── AWS mode: mount S3 bucket via s3fs ───────────────────────────────────
+    echo "☁️  AWS mode detected (S3_BUCKET_NAME=$S3_BUCKET_NAME)"
+    echo "   Region: ${AWS_REGION:-us-east-1}"
+
+    mkdir -p "$MOUNT_PATH"
+
+    # s3fs requires a passwd file (can be empty when using IAM role)
+    touch /etc/passwd-s3fs
+    chmod 640 /etc/passwd-s3fs
+
+    echo "   Mounting s3://${S3_BUCKET_NAME} → $MOUNT_PATH ..."
+    s3fs "$S3_BUCKET_NAME" "$MOUNT_PATH" \
+        -o iam_role=auto \
+        -o url="https://s3.${AWS_REGION:-us-east-1}.amazonaws.com" \
+        -o use_path_request_style \
+        -o allow_other \
+        -o nonempty \
+        -o umask=022 \
+        2>&1 || {
+        echo "⚠️  s3fs mount failed. Directories will remain ephemeral."
+        echo "   Check: IAM role has s3:ListBucket + s3:GetObject + s3:PutObject permissions"
+        rm -rf "$MOUNT_PATH"
+    }
+
+    if mountpoint -q "$MOUNT_PATH" 2>/dev/null; then
+        echo "✅ S3 bucket mounted at $MOUNT_PATH"
+    else
+        echo "⚠️  $MOUNT_PATH is not a mount point — falling back to ephemeral storage"
+    fi
+
+elif mountpoint -q "$MOUNT_PATH" 2>/dev/null || [ -d "$MOUNT_PATH" ]; then
+    # ── Azure mode: File Share already mounted by the platform ───────────────
+    if mountpoint -q "$MOUNT_PATH" 2>/dev/null; then
+        echo "🔵 Azure mode detected (File Share mounted at $MOUNT_PATH)"
+    else
+        echo "🔵 Mount path exists at $MOUNT_PATH (local dev or pre-mounted)"
+    fi
+else
+    echo "⚠️  No persistent storage backend detected."
+    echo "   Set S3_BUCKET_NAME (AWS) or mount Azure File Share at $MOUNT_PATH."
+    echo "   Directories will be ephemeral."
+fi
+
+echo ""
 echo "   Mount path: $MOUNT_PATH"
 echo "   Mount exists: $([ -d "$MOUNT_PATH" ] && echo 'YES' || echo 'NO')"
-echo "   Mount contents: $(ls -la "$MOUNT_PATH" 2>/dev/null || echo 'N/A')"
+echo "   Mount is mountpoint: $(mountpoint -q "$MOUNT_PATH" 2>/dev/null && echo 'YES' || echo 'NO')"
 echo "═══════════════════════════════════════════════════════"
 
-# Function to setup persistent directory using symlinks
+# ── Function to setup persistent directory using symlinks ────────────────────
+
 setup_persistent_dir() {
     local dir_name=$1
     local local_path="/deps/deep_research/$dir_name"

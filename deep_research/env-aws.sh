@@ -8,18 +8,14 @@ export AWS_PAGER=""
 # 1. Build and push Docker image (ECR)
 export ECR_REPO_NAME="deep-research-agent-$SEED"
 
-# 2. ECS Cluster Environment
-export ECS_CLUSTER_NAME="cluster-deep-agents-$SEED"
+# 2. App Runner Service
+export APP_RUNNER_SERVICE_NAME="deep-research-agent-$SEED"
 
-# 3. ECS Service and Task deployment
-export ECS_SERVICE_NAME="deep-research-agent-$SEED"
-export ECS_TASK_FAMILY="deep-research-agent-$SEED"
-
-# Secrets Management (Secrets Manager)
+# 3. Secrets Management (Secrets Manager)
 export SECRETS_MANAGER_NAME="kv-deep-agents-$SEED"
 
-# Persistent Storage (Elastic File System - EFS)
-export EFS_FILE_SYSTEM_NAME="efs-deep-agents-$SEED"
+# 4. File Sync (S3 Bucket for bi-directional sync with ./sync-aws/)
+export S3_BUCKET_NAME="deep-research-files-$SEED"
 
-# 4. Agent URL (automatically populated by deploy-aws.sh)
+# 5. Agent URL (automatically populated by deploy-aws.sh)
 export DEEP_RESEARCH_AGENT_URL="https://bh3z333bky.us-east-1.awsapprunner.com"

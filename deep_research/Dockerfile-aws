@@ -4,7 +4,7 @@ FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
-    cifs-utils \
+    s3fs \
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -16,8 +16,10 @@ WORKDIR /deps/deep_research
 ADD . /deps/deep_research
 RUN cp /deps/deep_research/.env-aws.docker /deps/deep_research/.env
 
-# Note: Runtime directories (docs/, output/, input/) are mounted via Azure Files at runtime
-# No need to create them in the Docker image - they will be provided by the volume mount
+# Note: Runtime directories (docs/, output/, input/) are mounted by the entrypoint:
+#   Azure: Azure File Share → /deps/deep_research/mnt
+#   AWS:   S3 bucket (via s3fs) → /deps/deep_research/mnt
+# No need to create them in the Docker image
 
 # Use standard pip install to ensure cross-architecture builds (AMD64 on ARM64) resolve wheels correctly
 RUN pip install --no-cache-dir -e .

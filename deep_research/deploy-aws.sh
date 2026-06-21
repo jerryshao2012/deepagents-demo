@@ -200,9 +200,53 @@ EOF
 else
   echo "⏭️  Skipping infrastructure setup (--skip-infra-setup)"
   ACCESS_ROLE_ARN=$(aws iam get-role --role-name "AppRunnerECRAccessRole-$SEED" --query "Role.Arn" --output text --region "$AWS_REGION")
-  INSTANCE_ROLE_ARN=$(aws iam get-role --role-name "AppRunnerInstanceRole-$SEED" --query "Role.Arn" --output text --region "$AWS_REGION")
+  INSTANCE_ROLE_NAME="AppRunnerInstanceRole-$SEED"
+  INSTANCE_ROLE_ARN=$(aws iam get-role --role-name "$INSTANCE_ROLE_NAME" --query "Role.Arn" --output text --region "$AWS_REGION")
   SECRET_ARN=$(aws secretsmanager describe-secret --secret-id "$SECRETS_MANAGER_NAME" --query ARN --output text --region "$AWS_REGION")
 fi
+
+# S3 Bucket for file sync
+start_step "S3 Bucket Setup"
+if aws s3api head-bucket --bucket "$S3_BUCKET_NAME" --region "$AWS_REGION" 2>/dev/null; then
+  echo "✅ S3 bucket already exists: $S3_BUCKET_NAME"
+else
+  echo "✨ Creating S3 bucket: $S3_BUCKET_NAME ..."
+  if [ "$AWS_REGION" = "us-east-1" ]; then
+    aws s3api create-bucket --bucket "$S3_BUCKET_NAME" --region "$AWS_REGION" > /dev/null
+  else
+    aws s3api create-bucket --bucket "$S3_BUCKET_NAME" --region "$AWS_REGION" \
+      --create-bucket-configuration LocationConstraint="$AWS_REGION" > /dev/null
+  fi
+  echo "✅ S3 bucket created: $S3_BUCKET_NAME"
+fi
+
+# Grant Instance Role access to the S3 bucket
+S3_POLICY_FILE=$(mktemp)
+cat > "$S3_POLICY_FILE" <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${S3_BUCKET_NAME}",
+        "arn:aws:s3:::${S3_BUCKET_NAME}/*"
+      ]
+    }
+  ]
+}
+EOF
+aws iam put-role-policy --role-name "$INSTANCE_ROLE_NAME" --policy-name "AppRunnerS3Access" \
+  --policy-document "file://$S3_POLICY_FILE" --region "$AWS_REGION"
+rm -f "$S3_POLICY_FILE"
+echo "✅ Instance Role granted S3 access to bucket"
+end_step
 
 # 4. App Runner Service Deployment
 start_step "App Runner Service Deployment"
@@ -239,7 +283,9 @@ cat > "$SOURCE_CONFIG_FILE" <<EOF
         "REPORTS_OUTPUT_FOLDER": "/deps/deep_research/output",
         "EVAL_HISTORY_FILE": "/deps/deep_research/output/eval_history/server_runs.jsonl",
         "DOC_FOLDER": "/deps/deep_research/docs",
-        "INPUT_FOLDER": "/deps/deep_research/input"
+        "INPUT_FOLDER": "/deps/deep_research/input",
+        "S3_BUCKET_NAME": "${S3_BUCKET_NAME}",
+        "AWS_REGION": "${AWS_REGION}"
       },
       "RuntimeEnvironmentSecrets": {
         "TAVILY_API_KEY": "${SECRET_ARN}:TAVILY-API-KEY::",
@@ -346,6 +392,7 @@ echo ""
 echo "📊 Next Steps:"
 echo "   • Test API: curl -s $EXTERNAL_URL/health"
 echo "   • Monitor Service: open https://console.aws.amazon.com/apprunner/home?region=$AWS_REGION#/services/$APP_NAME/service"
+echo "   • Sync files: ./sync-files-aws.sh  (bi-directional sync with s3://${S3_BUCKET_NAME})"
 echo "═══════════════════════════════════════════════════════"
 
 # 7. Health verification
