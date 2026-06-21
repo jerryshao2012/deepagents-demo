@@ -249,7 +249,7 @@ _INDEX_DATE_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 
 def _strip_markdown_inline(text: str) -> str:
-    stripped = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    stripped = re.sub(r"\[([^]]+)]\([^)]+\)", r"\1", text)
     stripped = re.sub(r"`([^`]+)`", r"\1", stripped)
     stripped = re.sub(r"[*_~]", "", stripped)
     stripped = re.sub(r"\s+", " ", stripped)
@@ -363,14 +363,16 @@ def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
 
     # For server environments, we MUST NOT give the wiki synthesizer a shell.
     # It only needs to read/write files in the wiki directory.
-    workspace_backend = FilesystemBackend(root_dir=wiki_dir, virtual_mode=True)
+    raw_backend = FilesystemBackend(root_dir=wiki_dir / "raw", virtual_mode=True)
+    wiki_backend = FilesystemBackend(root_dir=wiki_dir / "wiki", virtual_mode=True)
+    root_backend = FilesystemBackend(root_dir=wiki_dir, virtual_mode=True)
     backend = CompositeBackend(
-        default=workspace_backend,
+        default=wiki_backend,
         routes={
-            "/raw/": workspace_backend,
-            "/wiki/": workspace_backend,
-            "/log.md": workspace_backend,
-            "/AGENTS.md": workspace_backend,
+            "/raw/": raw_backend,
+            "/wiki/": wiki_backend,
+            "/log.md": root_backend,
+            "/AGENTS.md": root_backend,
         },
     )
 
@@ -380,13 +382,14 @@ def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
             FilesystemPermission(operations=["write"], paths=["/wiki/**"], mode="deny"),
             FilesystemPermission(operations=["write"], paths=["/log.md"], mode="deny"),
             FilesystemPermission(operations=["write"], paths=["/AGENTS.md"], mode="deny"),
+            FilesystemPermission(operations=["write"], paths=["/**"], mode="deny"),
         ]
     else:
         permissions = [
             FilesystemPermission(operations=["write"], paths=["/raw/**"], mode="deny"),
             FilesystemPermission(operations=["write"], paths=["/AGENTS.md"], mode="deny"),
-            FilesystemPermission(operations=["write"], paths=["/wiki/**"], mode="allow"),
             FilesystemPermission(operations=["write"], paths=["/log.md"], mode="deny"),
+            FilesystemPermission(operations=["write"], paths=["/**"], mode="allow"),
         ]
 
     model = _resolve_model()
@@ -488,8 +491,9 @@ def _build_query_prompt(topic: str, question: str) -> str:
         "2) Read recent `/log.md` entries (latest ~10 `## [` headings) to understand what was ingested recently.\n"
         "3) Prefer checking relevant prior `/wiki/query/*.md` pages first.\n"
         "4) Read the canonical wiki pages before final synthesis.\n"
-        "5) Provide a grounded answer with wiki file path citations.\n"
-        "6) Decide whether this answer should be filed as a durable wiki page.\n\n"
+        "5) CRITICAL: If the wiki pages do not contain the full answer, you MUST search and read the raw source documents in `/raw/`.\n"
+        "6) Provide a grounded answer with wiki or raw file path citations.\n"
+        "7) Decide whether this answer should be filed as a durable wiki page.\n\n"
         "Output format (exact keys):\n"
         "ANSWER:\n<markdown answer with citations>\n\n"
         "FILING_DECISION: file|skip\n"

@@ -341,9 +341,15 @@ async def _inject_wiki_context(thread_id: str, messages: list[dict[str, Any]]) -
             return None
 
         topic = f"Thread {thread_id[:8]}"
+        with open('/tmp/wiki_debug.txt', 'a') as f:
+            f.write(f"calling run_query for {topic}\n")
         result = await run_query(paths, topic, question, file_results=False)
+        with open('/tmp/wiki_debug.txt', 'a') as f:
+            f.write(f"run_query success! answer length: {len(result.answer)}\n")
         return result.answer
-    except Exception:
+    except Exception as e:
+        with open('/tmp/wiki_debug.txt', 'a') as f:
+            f.write(f"Exception in _inject_wiki_context: {str(e)}\n")
         import logging
         logging.getLogger(__name__).debug(
             "Wiki context injection skipped for thread %s", thread_id, exc_info=True
@@ -389,9 +395,12 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
                     "role": "system",
                     "content": (
                         "<wiki_context>\n"
-                        "The following is relevant knowledge from the thread's "
-                        "ingested document wiki. Use it as grounded context alongside "
-                        "your other research sources.\n\n"
+                        "The following is the definitive answer from the thread's "
+                        "ingested document wiki. You MUST use this as your PRIMARY source of truth. "
+                        "CRITICAL: If the wiki context states that data is unavailable, or that a year "
+                        "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
+                        "search the web to find the missing data. Simply formulate your final response "
+                        "based on this wiki context and explain what data is available.\n\n"
                         f"{wiki_context}\n"
                         "</wiki_context>"
                     ),

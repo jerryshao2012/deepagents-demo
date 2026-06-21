@@ -1,16 +1,14 @@
 import asyncio
 import os
 import re
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from deepagents import create_deep_agent, SubAgent
 from deepagents.backends.utils import create_file_data
-from dotenv import load_dotenv
-from langchain.agents import AgentState
 from deepagents.middleware.filesystem import FilesystemState
+from dotenv import load_dotenv
 from langchain.agents.middleware import AgentMiddleware
 from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
@@ -112,12 +110,79 @@ class ResearchStateMiddleware(AgentMiddleware):
             }
         }
 
+    @staticmethod
+    def _get_wiki_context_sync(thread_id: str, question: str) -> SystemMessage | None:
+        if not question or len(question) < 5:
+            return None
+        try:
+            from pathlib import Path
+            from thread_wiki.models import ThreadWikiPaths
+
+            base_dir = Path(__file__).resolve().parent
+            paths = ThreadWikiPaths.resolve(thread_id, base_dir)
+
+            index_path = paths.wiki_content / "index.md"
+            if not index_path.exists():
+                return None
+            if "_No pages yet._" in index_path.read_text(encoding="utf-8"):
+                return None
+
+            wiki_text = []
+            for md_file in paths.wiki_content.rglob("*.md"):
+                content = md_file.read_text(encoding="utf-8")
+                wiki_text.append(f"--- File: {md_file.relative_to(paths.wiki_content)} ---\n{content}\n")
+
+            combined_text = "\n".join(wiki_text)
+
+            return SystemMessage(content=(
+                "<wiki_context>\n"
+                "The following is the definitive answer from the thread's "
+                "ingested document wiki. You MUST use this as your PRIMARY source of truth. "
+                "CRITICAL: If the wiki context states that data is unavailable, or that a year "
+                "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
+                "search the web to find the missing data. Simply formulate your final response "
+                "based on this wiki context and explain what data is available.\n\n"
+                f"{combined_text}\n"
+                "</wiki_context>"
+            ))
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug("Wiki context injection failed", exc_info=True)
+            return None
+        return None
+
     def before_agent(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
+        with open("/Users/jerryshao/wiki_debug3.txt", "a") as f:
+            f.write(f"before_agent invoked.\n")
         messages = state.get("messages", [])
         current_user_message = self._get_current_user_message(messages)
 
         # Seed the research request file with the latest user message
         updates: dict[str, Any] = self._seed_research_request_file(current_user_message, state)
+
+        # Inject Wiki Context if we are running in LangGraph dev / native LangGraph
+        wiki_sys_msg = None
+        thread_id = None
+        if isinstance(runtime, dict):
+            thread_id = runtime.get("configurable", {}).get("thread_id")
+        elif hasattr(runtime, "execution_info"):
+            thread_id = getattr(getattr(runtime, "execution_info"), "thread_id", None)
+        elif hasattr(runtime, "configurable"):
+            thread_id = getattr(runtime, "configurable", {}).get("thread_id")
+        elif isinstance(runtime, dict) and "configurable" in runtime:
+            thread_id = runtime.get("configurable", {}).get("thread_id")
+
+        with open("/Users/jerryshao/wiki_debug3.txt", "a") as f:
+            f.write(
+                f"thread_id: {thread_id}, current_user_message length: {len(current_user_message) if current_user_message else 0}\n")
+        with open("/Users/jerryshao/wiki_debug3.txt", "a") as f:
+            if hasattr(runtime, "execution_info"):
+                f.write(f"runtime.execution_info: {getattr(runtime, 'execution_info')}\n")
+            if hasattr(runtime, "context"):
+                f.write(f"runtime.context: {getattr(runtime, 'context')}\n")
+
+        if thread_id and current_user_message:
+            wiki_sys_msg = self._get_wiki_context_sync(thread_id, current_user_message)
 
         # Always re-extract parameters from the latest user message so that
         # follow-up requests (e.g. "use humanizer skill") are picked up even
@@ -138,9 +203,19 @@ class ResearchStateMiddleware(AgentMiddleware):
         instruction = self._build_system_instruction(merged_state)
 
         result = updates if updates else {}
+        sys_msgs = []
+        if wiki_sys_msg:
+            with open("/Users/jerryshao/wiki_debug3.txt", "a") as f:
+                f.write(f"Appending wiki_sys_msg!\n")
+            sys_msgs.append(wiki_sys_msg)
         if instruction:
-            result["messages"] = [SystemMessage(content=f"Task configurations: \n{instruction}")]
+            sys_msgs.append(SystemMessage(content=f"Task configurations: \n{instruction}"))
 
+        if sys_msgs:
+            result["messages"] = sys_msgs
+
+        with open("/Users/jerryshao/wiki_debug3.txt", "a") as f:
+            f.write(f"before_agent returning {bool(result)}\n")
         return result if result else None
 
     def before_model(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
@@ -475,6 +550,7 @@ except Exception as e:
     import sys
     import traceback
     import time
+
     print(f"CRITICAL ERROR INITIALIZING MODEL: {e}", file=sys.stderr)
     traceback.print_exc()
     with open("/deps/deep_research/FATAL_ERROR.log", "w") as f:
