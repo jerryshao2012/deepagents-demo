@@ -39,7 +39,6 @@ def _log_headings(log_text: str) -> list[str]:
     return [line for line in log_text.splitlines() if line.startswith("## [")]
 
 
-
 def test_parse_config_accepts_wiki_dir(tmp_path: Path) -> None:
     """Parse direct wiki_dir input into configuration."""
     config = helpers.parse_config(

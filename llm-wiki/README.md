@@ -49,8 +49,9 @@ back into `wiki/query/` when useful.
 ## Setup
 
 ```bash
-# From the deepagents-demo root directory:
-uv sync --project llm-wiki
+# From the llm-wiki directory:
+uv sync
+source .venv/bin/activate
 ```
 
 

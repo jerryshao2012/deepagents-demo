@@ -5,11 +5,19 @@ description = "LLM wiki using Deep Agents (local offline execution)"
 requires-python = ">=3.11"
 dependencies = [
     "deepagents>=0.6.8",
+    "python-dotenv>=1.0.0",
     "pytest>=8.0.0",
 ]
 
-
+[project.optional-dependencies]
+google = ["langchain-google-genai>=2.0.0"]
+openai = ["langchain-openai>=0.3.0"]
+anthropic = ["langchain-anthropic>=0.3.0"]
+all-providers = [
+    "langchain-google-genai>=2.0.0",
+    "langchain-openai>=0.3.0",
+    "langchain-anthropic>=0.3.0",
+]
 
 [tool.uv.sources]
 deepagents = { path = "../../deepagents/libs/deepagents", editable = true }
-

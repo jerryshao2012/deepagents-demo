@@ -4,28 +4,33 @@ from __future__ import annotations
 
 import argparse
 import errno
-import json
 import os
-import shutil
-import subprocess
 import tempfile
 from contextlib import contextmanager, suppress
+from pathlib import Path
+from typing import TYPE_CHECKING
+
 from deepagents import create_deep_agent
 from deepagents.backends import CompositeBackend, FilesystemBackend, LocalShellBackend
 from deepagents.middleware.filesystem import FilesystemPermission
-from pathlib import Path
-from typing import TYPE_CHECKING
-from urllib.parse import urlparse
 
 import index as index_helpers
 import log as log_helpers
-from models import CliDeps, Mode, RunResult, RunnerConfig
+from models import CliDeps, RunResult, RunnerConfig
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
 
     from deepagents.backends.protocol import SandboxBackendProtocol
     from ingest import IngestResult
+
+
+def _resolve_model():
+    """Return a LangChain chat model from the environment via model_factory."""
+    from model_factory import get_configured_model
+
+    return get_configured_model()
+
 
 _ALLOWED_TEXT_SUFFIXES = {".md", ".txt", ".json", ".yaml", ".yml", ".csv"}
 
@@ -152,9 +157,6 @@ def parse_config(argv: Sequence[str] | None = None) -> RunnerConfig:
         model=args.model,
         review=bool(args.review),
     )
-
-
-
 
 
 def _iter_tree_paths(root_dir: Path) -> Iterator[Path]:
@@ -405,7 +407,6 @@ def _create_local_sandbox_backend(workspace_dir: Path) -> Iterator[SandboxBacken
     yield LocalShellBackend(root_dir=workspace_dir, virtual_mode=False)
 
 
-
 def _run_agent_mode(
         workspace_dir: Path,
         topic: str,
@@ -426,8 +427,9 @@ def _run_agent_mode(
                 "/AGENTS.md": workspace_backend,
             },
         )
+        model_arg = model if model is not None else _resolve_model()
         agent = create_deep_agent(
-            model=model,
+            model=model_arg,
             backend=backend,
             permissions=permissions,
             system_prompt=_BASE_SYSTEM_PROMPT,

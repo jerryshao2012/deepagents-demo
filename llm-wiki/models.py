@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import subprocess
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -41,4 +40,3 @@ class RunResult:
     """Output from a runner invocation."""
 
     answer: str | None
-
