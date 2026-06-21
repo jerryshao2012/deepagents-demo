@@ -20,8 +20,9 @@ uvicorn server:app --reload --port 2024
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+
+import sys
 
 # Ensure local imports work correctly
 sys.path.append(str(Path(__file__).parent))
@@ -44,6 +45,9 @@ from webapp import app
 # Import the actual deep_research agent
 from agent import agent
 from research_agent.prompts import RESEARCHER_DESCRIPTION
+
+# Register thread wiki routes (lazy import to avoid circular dependency)
+from thread_wiki.routes import router as wiki_router
 
 # Import DB wrapper
 import db
@@ -76,6 +80,8 @@ def custom_openapi() -> dict[str, Any]:
             {"name": "Threads", "description": "Thread lifecycle and state endpoints."},
             {"name": "Runs", "description": "Background run execution and cancellation endpoints."},
             {"name": "Documents", "description": "Document upload and management endpoints."},
+            {"name": "Wiki",
+             "description": "Thread-level wiki knowledge base management (ingest, query, lint, progress)."},
             {"name": "Auth", "description": "Authentication and authorization endpoints."},
         ],
     )
@@ -299,6 +305,52 @@ def serialize_message(m: Any) -> dict[str, Any]:
 
 # ── Run executor ──────────────────────────────────────────────────────────────
 
+async def _inject_wiki_context(thread_id: str, messages: list[dict[str, Any]]) -> str | None:
+    """Query thread wiki for context relevant to the latest user message.
+
+    Returns wiki context text if the thread has a ready wiki and a meaningful
+    question, otherwise returns ``None``. Failures are logged and swallowed so
+    wiki issues never block research runs.
+    """
+    try:
+        from thread_wiki.models import ThreadWikiPaths
+        from thread_wiki.service import run_query
+
+        base_dir = Path(__file__).resolve().parent
+        paths = ThreadWikiPaths.resolve(thread_id, base_dir)
+
+        # Only inject when wiki has been built (index exists and has real pages).
+        index_path = paths.wiki_content / "index.md"
+        if not index_path.exists():
+            return None
+        index_content = index_path.read_text(encoding="utf-8")
+        if "_No pages yet._" in index_content:
+            return None
+
+        # Extract the latest user message as the wiki query.
+        question = ""
+        for msg in reversed(messages):
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                question = str(msg.get("content", ""))
+                break
+            if hasattr(msg, "type") and getattr(msg, "type", None) == "human":
+                question = str(getattr(msg, "content", ""))
+                break
+
+        if not question or len(question) < 5:
+            return None
+
+        topic = f"Thread {thread_id[:8]}"
+        result = await run_query(paths, topic, question, file_results=False)
+        return result.answer
+    except Exception:
+        import logging
+        logging.getLogger(__name__).debug(
+            "Wiki context injection skipped for thread %s", thread_id, exc_info=True
+        )
+        return None
+
+
 async def _execute_run(run_id: str, thread_id: str) -> None:
     """Invoke the agent and persist the result; called as a fire-and-forget task."""
     db.update_run_status(run_id, "running")
@@ -323,6 +375,29 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
 
         # Clean None values
         input_state = {k: v for k, v in input_state.items() if v is not None}
+
+        # ── Wiki context injection ─────────────────────────────────────────
+        # If the thread has a ready wiki, query it for context relevant to
+        # the latest user message and inject the result as a system message.
+        # This enriches the research agent with thread-level RAG knowledge.
+        wiki_context = await _inject_wiki_context(thread_id, messages)
+        if wiki_context:
+            existing_msgs = input_state.get("messages", [])
+            existing_msgs.insert(
+                0,
+                {
+                    "role": "system",
+                    "content": (
+                        "<wiki_context>\n"
+                        "The following is relevant knowledge from the thread's "
+                        "ingested document wiki. Use it as grounded context alongside "
+                        "your other research sources.\n\n"
+                        f"{wiki_context}\n"
+                        "</wiki_context>"
+                    ),
+                },
+            )
+            input_state["messages"] = existing_msgs
 
         # Invoke the deep_research agent
         result = await agent.ainvoke(input_state)
@@ -732,6 +807,10 @@ async def cancel_run(
     updated = db.get_run(run_id) or {**run, "status": "cancelled"}
     return _api_run(updated)
 
+
+# ── Register Thread Wiki Routes ──────────────────────────────────────────────
+
+app.include_router(wiki_router)
 
 if __name__ == "__main__":
     # For direct execution: python server.py

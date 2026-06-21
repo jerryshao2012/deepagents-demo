@@ -11,6 +11,7 @@
 - [🛡️ Reliability & Rate Limiting](#-reliability--rate-limiting)
 - [🛡️ Rate Limit Handling](#-rate-limit-handling)
 - [Multi-Agent Complex Workflows Evaluation & Regression Tracking](#multi-agent-complex-workflows-evaluation--regression-tracking)
+- [📖 Thread Wiki (Document RAG)](#-thread-wiki-document-rag)
 
 ## 🚀 Quickstart
 
@@ -570,6 +571,94 @@ curl -H 'X-API-Key: your_secure_api_key_here' http://localhost:8000/storage/info
 - **API Key Authentication**: All upload and storage endpoints require a valid API key in the `X-API-Key` header
 - **Path Validation**: Folder paths are validated to prevent directory traversal attacks
 - **Filename Sanitization**: Uploaded filenames are sanitized to prevent security issues
+
+---
+
+## 📖 Thread Wiki (Document RAG)
+
+The Thread Wiki feature provides **per-thread RAG without a vector database**. When documents are uploaded to a thread folder (`docs/threads/<thread-id>/`), they are automatically ingested into a wiki knowledge base at `docs/threads-wiki/<thread-id>/`. The deep research agent then automatically queries this wiki for grounded context when answering questions.
+
+### Architecture
+
+```
+Upload documents         Auto-ingest            Wiki workspace          Research agent
+docs/threads/<id>/  →   LLM review+apply   →   docs/threads-wiki/<id>/  →  Wiki context injected
+  .pdf, .docx,              (background)         wiki/, raw/, log.md         into agent runs
+  .pptx, .xlsx,
+  .md, .txt, .csv
+```
+
+### Supported File Types
+
+| Format | Extensions | Extraction |
+|--------|-----------|------------|
+| PDF | `.pdf` | PyMuPDF4LLM → Markdown (fallback: pypdf) |
+| Word | `.docx` | python-docx (paragraphs + tables) |
+| PowerPoint | `.pptx` | python-pptx (slides + speaker notes) |
+| Excel | `.xlsx` | openpyxl (sheets → text) |
+| Text | `.md`, `.txt`, `.json`, `.yaml`, `.yml`, `.csv` | Direct read |
+
+### Automatic Behaviors
+
+- **Auto-ingest on upload**: Uploading to `threads/<thread-id>/` triggers background wiki ingest automatically.
+- **Auto-cancel + lint on delete**: Deleting documents cancels any active ingest and runs lint reconciliation to clean up stale wiki references.
+- **Wiki context in research agent**: When a thread has a ready wiki, the research agent automatically queries it for context relevant to the user's question. The wiki knowledge is injected as grounded context alongside web search and other tools.
+
+### Wiki API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/threads/{id}/wiki/ingest` | POST | Trigger wiki ingest for uploaded documents |
+| `/threads/{id}/wiki/status` | GET | Poll ingest progress (phase, percentage) |
+| `/threads/{id}/wiki/progress` | GET | SSE stream for real-time ingest progress |
+| `/threads/{id}/wiki/ingest/cancel` | POST | Cancel an in-progress ingest |
+| `/threads/{id}/wiki/query` | POST | Query wiki knowledge base directly |
+| `/threads/{id}/wiki/lint` | POST | Run lint reconciliation (auto-triggered on delete) |
+
+### Ingest Lifecycle
+
+```
+idle → initializing (5%) → staging_sources (15%) → analyzing (40%) → applying (70%) → refreshing_index (90%) → ready (100%)
+                                                                                                                  ↓
+                                                                                                        error / cancelled
+```
+
+### Quick Examples
+
+**Trigger ingest manually:**
+```bash
+curl -X POST http://localhost:2024/threads/abc-123/wiki/ingest \
+  -H 'x-api-key: your_api_key'
+```
+
+**Poll ingest progress:**
+```bash
+curl -H 'x-api-key: your_api_key' \
+  'http://localhost:2024/threads/abc-123/wiki/status'
+# {"phase": "analyzing", "progress": 40, "is_active": true, "wiki_ready": false}
+```
+
+**Stream progress via SSE:**
+```bash
+curl -N -H 'x-api-key: your_api_key' \
+  'http://localhost:2024/threads/abc-123/wiki/progress'
+```
+
+**Query the wiki:**
+```bash
+curl -X POST http://localhost:2024/threads/abc-123/wiki/query \
+  -H 'x-api-key: your_api_key' \
+  -H 'Content-Type: application/json' \
+  -d '{"question": "What are the key findings across all documents?"}'
+```
+
+**Cancel ingest:**
+```bash
+curl -X POST http://localhost:2024/threads/abc-123/wiki/ingest/cancel \
+  -H 'x-api-key: your_api_key'
+```
+
+> **Full API reference**: See [WIKI_API_GUIDE.md](./document/WIKI_API_GUIDE.md) for detailed request/response schemas, frontend integration examples, and troubleshooting.
 
 #### Configuration
 

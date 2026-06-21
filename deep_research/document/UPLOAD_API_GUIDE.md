@@ -193,6 +193,12 @@ curl http://localhost:2024/health
 | `/documents/download/{filename}` | GET | ✅ Yes | Download a specific file |
 | `/storage/info` | GET | ✅ Yes | Get detailed storage information |
 | `/health` | GET | ❌ No | Health check endpoint |
+| `/threads/{id}/wiki/ingest` | POST | ✅ Yes | Trigger wiki ingest for thread documents |
+| `/threads/{id}/wiki/status` | GET | ✅ Yes | Poll wiki ingest progress |
+| `/threads/{id}/wiki/progress` | GET | ✅ Yes | SSE stream for real-time ingest progress |
+| `/threads/{id}/wiki/ingest/cancel` | POST | ✅ Yes | Cancel an in-progress wiki ingest |
+| `/threads/{id}/wiki/query` | POST | ✅ Yes | Query the wiki knowledge base |
+| `/threads/{id}/wiki/lint` | POST | ✅ Yes | Run lint reconciliation on the wiki |
 
 ## 🔐 Security Best Practices
 
@@ -328,3 +334,58 @@ langgraph dev
 ```
 
 Then reference the uploaded documents in your queries!
+
+---
+
+## 📖 Thread Wiki Integration
+
+When documents are uploaded to a **thread folder** (`threads/<thread-id>/`), the system automatically builds a per-thread wiki knowledge base for RAG without a vector database.
+
+### How It Works
+
+1. **Upload** documents to `docs/threads/<thread-id>/`
+2. **Auto-ingest** triggers automatically — documents are staged, reviewed by LLM, and applied to wiki pages
+3. **Query** the wiki via API or let the research agent use it automatically as grounded context
+4. **Delete** documents → ingest is cancelled and lint reconciliation runs automatically
+
+### Supported File Types
+
+PDF (`.pdf`), Word (`.docx`), PowerPoint (`.pptx`), Excel (`.xlsx`), Markdown (`.md`), Text (`.txt`), JSON (`.json`), YAML (`.yaml`, `.yml`), CSV (`.csv`)
+
+### Upload to Thread Folder
+
+```bash
+# Upload documents — wiki ingest starts automatically
+curl -X POST http://localhost:2024/documents/upload \
+  -H 'X-API-Key: your_key' \
+  -F 'folder=threads/abc-123' \
+  -F 'files=@report.pdf' \
+  -F 'files=@data.xlsx'
+```
+
+### Check Ingest Progress
+
+```bash
+# Poll status
+curl -H 'X-API-Key: your_key' \
+  'http://localhost:2024/threads/abc-123/wiki/status'
+
+# Stream real-time progress via SSE
+curl -N -H 'X-API-Key: your_key' \
+  'http://localhost:2024/threads/abc-123/wiki/progress'
+```
+
+### Query the Wiki
+
+```bash
+curl -X POST http://localhost:2024/threads/abc-123/wiki/query \
+  -H 'X-API-Key: your_key' \
+  -H 'Content-Type: application/json' \
+  -d '{"question": "Summarize the key points from all uploaded documents"}'
+```
+
+### Research Agent + Wiki
+
+When a thread has a ready wiki, the research agent **automatically queries the wiki** for context relevant to the user's question. No explicit wiki call is needed — the wiki knowledge is injected alongside web search results.
+
+> **Full Wiki API reference**: See [WIKI_API_GUIDE.md](./WIKI_API_GUIDE.md) for detailed endpoints, frontend integration, and troubleshooting.

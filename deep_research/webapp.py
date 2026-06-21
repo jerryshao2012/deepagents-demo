@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import shutil
 from contextlib import asynccontextmanager
@@ -8,6 +9,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -195,6 +198,14 @@ async def upload_documents(
     # Calculate free storage space
     free_space = await asyncio.to_thread(_get_free_space, DOCS_ROOT.parent)
 
+    # Auto-trigger wiki ingest if uploading to a thread folder
+    thread_id = _extract_thread_id_from_folder(str(relative_folder))
+    if thread_id:
+        asyncio.create_task(
+            _trigger_wiki_auto_ingest(thread_id),
+            name=f"wiki-auto-ingest-trigger-{thread_id}",
+        )
+
     return {
         "folder": str(relative_folder),
         "count": len(saved),
@@ -222,6 +233,114 @@ def _get_free_space(path: Path) -> int:
     except Exception:
         # Fallback: return -1 if unable to determine
         return -1
+
+
+# ── Thread Wiki auto-ingest hooks ────────────────────────────────────────────
+
+def _extract_thread_id_from_folder(folder_str: str) -> str | None:
+    """Extract thread_id if the folder matches 'threads/<thread-id>' pattern."""
+    parts = PurePosixPath(folder_str.replace("\\", "/").strip("/")).parts
+    if len(parts) == 2 and parts[0] == "threads":
+        return parts[1]
+    return None
+
+
+async def _trigger_wiki_auto_ingest(thread_id: str) -> None:
+    """Trigger background wiki ingest for a thread after document upload.
+
+    Runs non-blocking; failures are logged but do not affect the upload response.
+    """
+    try:
+        from thread_wiki import progress as wiki_progress
+        from thread_wiki.models import ThreadWikiPaths
+        from thread_wiki.service import run_ingest
+
+        base_dir = Path(__file__).resolve().parent
+        paths = ThreadWikiPaths.resolve(thread_id, base_dir)
+        topic = f"Thread {thread_id[:8]}"
+
+        # Register progress first with a placeholder task.
+        placeholder = asyncio.create_task(asyncio.sleep(0))
+        prog = await wiki_progress.register_ingest(thread_id, placeholder)
+        cancel_event = wiki_progress._active_ingests[thread_id].cancel_event
+
+        # Create the real background task.
+        task = asyncio.create_task(
+            _wiki_ingest_background(paths, topic, prog, cancel_event),
+            name=f"wiki-auto-ingest-{thread_id}",
+        )
+
+        # Replace placeholder with the real task.
+        wiki_progress._active_ingests[thread_id] = wiki_progress._IngestEntry(
+            progress=prog, task=task, cancel_event=cancel_event,
+        )
+        prog.advance(prog.phase, "Auto-ingest queued after upload.")
+        logger.info("Auto-ingest triggered for thread %s", thread_id)
+    except Exception:
+        logger.exception("Failed to trigger wiki auto-ingest for thread %s", thread_id)
+
+
+async def _wiki_ingest_background(paths, topic: str, progress_obj, cancel_event) -> None:
+    """Background wrapper for auto-ingest."""
+    from thread_wiki import progress as wiki_progress
+    from thread_wiki.service import run_ingest
+
+    try:
+        await run_ingest(paths, topic, progress_obj, cancel_event)
+    except asyncio.CancelledError:
+        logger.info("Auto-ingest cancelled for thread %s", paths.thread_id)
+    except Exception:
+        logger.exception("Auto-ingest failed for thread %s", paths.thread_id)
+    finally:
+        await wiki_progress.cleanup_terminal(paths.thread_id)
+
+
+async def _trigger_wiki_delete_hooks(thread_id: str, deleted_filename: str | None = None) -> None:
+    """Cancel any active ingest and trigger lint after document deletion.
+
+    Steps:
+    1. Cancel any running ingest for this thread (to prevent stale writes).
+    2. Trigger a background lint reconciliation to clean up wiki references.
+    """
+    try:
+        from thread_wiki import progress as wiki_progress
+        from thread_wiki.models import ThreadWikiPaths
+        from thread_wiki.service import run_lint
+
+        # Step 1: Cancel active ingest.
+        cancelled = await wiki_progress.cancel_ingest(
+            thread_id, reason=f"Document deleted: {deleted_filename or 'multiple'}"
+        )
+        if cancelled:
+            logger.info("Cancelled active ingest for thread %s due to deletion", thread_id)
+
+        # Step 2: Trigger lint reconciliation in background.
+        base_dir = Path(__file__).resolve().parent
+        paths = ThreadWikiPaths.resolve(thread_id, base_dir)
+        if paths.wiki_dir.exists():
+            topic = f"Thread {thread_id[:8]}"
+            note = (
+                f"Source file '{deleted_filename}' was deleted. "
+                "Reconcile wiki pages that reference it."
+                if deleted_filename
+                else "Multiple source files were deleted. Reconcile wiki pages."
+            )
+            asyncio.create_task(
+                _wiki_lint_background(paths, topic, note),
+                name=f"wiki-lint-{thread_id}",
+            )
+            logger.info("Lint triggered for thread %s after deletion", thread_id)
+    except Exception:
+        logger.exception("Failed to trigger wiki delete hooks for thread %s", thread_id)
+
+
+async def _wiki_lint_background(paths, topic: str, note: str) -> None:
+    """Background wrapper for lint after deletion."""
+    from thread_wiki.service import run_lint
+    try:
+        await run_lint(paths, topic, note=note)
+    except Exception:
+        logger.exception("Lint failed for thread %s", paths.thread_id)
 
 
 @app.get("/health")
@@ -622,6 +741,14 @@ async def delete_document(
 
     await asyncio.to_thread(_delete_file)
 
+    # Trigger wiki delete hooks (cancel ingest + lint) for thread folders
+    thread_id = _extract_thread_id_from_folder(str(relative_folder))
+    if thread_id:
+        asyncio.create_task(
+            _trigger_wiki_delete_hooks(thread_id, deleted_filename=safe_name),
+            name=f"wiki-delete-hook-{thread_id}",
+        )
+
     return {
         "message": f"File '{filename}' deleted successfully",
         "folder": str(relative_folder),
@@ -672,6 +799,14 @@ async def delete_folder_contents(
         return deleted_count
 
     deleted_count = await asyncio.to_thread(_delete_files)
+
+    # Trigger wiki delete hooks (cancel ingest + lint) for thread folders
+    thread_id = _extract_thread_id_from_folder(str(relative_folder))
+    if thread_id:
+        asyncio.create_task(
+            _trigger_wiki_delete_hooks(thread_id),
+            name=f"wiki-folder-delete-hook-{thread_id}",
+        )
 
     return {
         "message": f"All files deleted from folder '{folder}'",
