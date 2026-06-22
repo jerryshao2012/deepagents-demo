@@ -1,6 +1,9 @@
 import asyncio
+import concurrent.futures
 import os
 import re
+import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -15,6 +18,8 @@ from langchain_core.runnables import RunnableConfig
 
 from logger_utils import setup_logger
 from model_factory import get_configured_model
+from thread_wiki.models import ThreadWikiPaths, WikiQueryResult
+from thread_wiki.service import run_query
 from research_agent import (
     RESEARCH_WORKFLOW_INSTRUCTIONS,
     RESEARCHER_INSTRUCTIONS,
@@ -111,49 +116,240 @@ class ResearchStateMiddleware(AgentMiddleware):
         }
 
     @staticmethod
+    def _build_wiki_context_from_files(paths: "ThreadWikiPaths") -> str | None:
+        """Build wiki context by directly reading wiki files (no LLM query).
+
+        Used as a fallback when the wiki query agent cannot run (e.g. when
+        called from within an already-running event loop).  Reads both the
+        synthesised wiki pages and a truncated excerpt of raw source documents
+        so the research agent still has grounded context with key facts.
+        """
+        try:
+            wiki_dir = paths.wiki_content
+            if not wiki_dir.exists():
+                return None
+
+            parts: list[str] = []
+
+            # 1) Wiki pages (synthesised summaries)
+            for md_file in sorted(wiki_dir.rglob("*.md")):
+                content = md_file.read_text(encoding="utf-8")
+                relative = md_file.relative_to(wiki_dir)
+                parts.append(f"--- wiki/{relative} ---\n{content}")
+
+            # 2) Raw source excerpts (first ~80 000 chars of each file so
+            #    key financial tables and executive summaries are captured).
+            raw_dir = paths.raw_dir
+            if raw_dir.exists():
+                _MAX_RAW_CHARS = 80_000
+                for raw_file in sorted(raw_dir.rglob("*.md")):
+                    raw_content = raw_file.read_text(encoding="utf-8")
+                    relative = raw_file.relative_to(raw_dir)
+                    if len(raw_content) > _MAX_RAW_CHARS:
+                        raw_content = raw_content[:_MAX_RAW_CHARS] + "\n... [truncated]"
+                    parts.append(f"--- raw/{relative} (excerpt) ---\n{raw_content}")
+
+            combined = "\n\n".join(parts)
+            return combined if combined.strip() else None
+        except Exception:
+            logger.debug("Direct wiki file reading fallback failed", exc_info=True)
+            return None
+
+    @staticmethod
+    def _run_wiki_query(paths: "ThreadWikiPaths", topic: str, question: str) -> WikiQueryResult | None:
+        """Run a wiki query, handling both sync and async caller contexts.
+
+        When called from a sync context (no running event loop), uses
+        ``asyncio.run()`` directly.  When called from within a running event
+        loop (e.g. LangGraph dev ``ainvoke``), spawns a separate thread with
+        its own event loop via ``ThreadPoolExecutor`` — mirroring the pattern
+        proven to work in ``test_get_wiki.py``.
+        """
+
+        async def _query():
+            return await asyncio.wait_for(
+                run_query(paths, topic, question, file_results=False),
+                timeout=120,
+            )
+
+        def _run_in_new_loop():
+            """Run the async query in a fresh event loop (new thread)."""
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(_query())
+            finally:
+                loop.close()
+
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if current_loop is not None and current_loop.is_running():
+            # Inside a running event loop (e.g. LangGraph Platform ainvoke).
+            # Spawn a separate thread with its own event loop to avoid the
+            # "asyncio.run() cannot be called from a running event loop" error.
+            logger.info("Running wiki query in separate thread (inside running event loop)")
+            try:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    return pool.submit(_run_in_new_loop).result(timeout=130)
+            except concurrent.futures.TimeoutError:
+                logger.warning("Wiki query timed out after 130s (thread pool)")
+                return None
+            except Exception:
+                logger.debug("Wiki query failed in thread pool", exc_info=True)
+                return None
+
+        # No running event loop — safe to use asyncio.run() directly.
+        try:
+            return asyncio.run(_query())
+        except RuntimeError:
+            logger.debug("asyncio.run() failed for wiki query", exc_info=True)
+            return None
+
+    @staticmethod
+    def _build_context_from_docs(docs_dir: Path) -> str | None:
+        """Build context by reading uploaded documents directly.
+
+        Used as a fallback when the wiki hasn't been built yet (ingest still
+        running or not started). Extracts text from PDFs and reads text files
+        directly so the agent has grounded context from uploaded documents.
+        """
+        if not docs_dir.exists():
+            return None
+
+        # Text-based formats: read directly
+        _TEXT_SUFFIXES = {".md", ".txt", ".json", ".yaml", ".yml", ".csv"}
+        # Binary formats: require extraction
+        _BINARY_SUFFIXES = {".pdf", ".docx", ".pptx", ".xlsx"}
+        _MAX_CHARS_PER_FILE = 80_000
+
+        parts: list[str] = []
+
+        for file_path in sorted(docs_dir.rglob("*")):
+            if not file_path.is_file():
+                continue
+
+            suffix = file_path.suffix.lower()
+            content: str | None = None
+
+            if suffix in _TEXT_SUFFIXES:
+                try:
+                    content = file_path.read_text(encoding="utf-8")
+                except Exception:
+                    continue
+            elif suffix in _BINARY_SUFFIXES:
+                try:
+                    # Try the same extraction used by wiki ingest
+                    from research_agent.utils.content_extractors import (
+                        extract_supported_document,
+                    )
+                    content = extract_supported_document(file_path)
+                except ImportError:
+                    # Fallback to minimal PDF extraction
+                    try:
+                        from thread_wiki.service import _fallback_pdf_extract
+                        content = _fallback_pdf_extract(file_path)
+                    except Exception:
+                        continue
+                except Exception:
+                    continue
+
+            if content and content.strip():
+                if len(content) > _MAX_CHARS_PER_FILE:
+                    content = content[:_MAX_CHARS_PER_FILE] + "\n... [truncated]"
+                parts.append(f"--- {file_path.name} ---\n{content}")
+
+        combined = "\n\n".join(parts)
+        return combined if combined.strip() else None
+
+    @staticmethod
     def _get_wiki_context_sync(thread_id: str, question: str) -> SystemMessage | None:
+        """Query the thread's wiki and return a SystemMessage with the answer.
+
+        Uses direct Python API calls to the thread_wiki service instead of
+        spawning a subprocess, avoiding process overhead and JSON parsing.
+        Falls back to directly reading wiki files when the LLM query agent
+        cannot run (e.g. inside a running event loop).
+        If wiki hasn't been built yet, falls back to reading uploaded documents
+        directly (extracting text from PDFs).
+        """
         if not question or len(question) < 5:
             return None
         try:
-            from pathlib import Path
-            from thread_wiki.models import ThreadWikiPaths
-
             base_dir = Path(__file__).resolve().parent
             paths = ThreadWikiPaths.resolve(thread_id, base_dir)
 
+            # Check if wiki is ready (index.md exists with actual pages)
+            wiki_ready = False
             index_path = paths.wiki_content / "index.md"
-            if not index_path.exists():
-                return None
-            if "_No pages yet._" in index_path.read_text(encoding="utf-8"):
-                return None
+            if index_path.exists():
+                if "_No pages yet._" not in index_path.read_text(encoding="utf-8"):
+                    wiki_ready = True
 
-            wiki_text = []
-            for md_file in paths.wiki_content.rglob("*.md"):
-                content = md_file.read_text(encoding="utf-8")
-                wiki_text.append(f"--- File: {md_file.relative_to(paths.wiki_content)} ---\n{content}\n")
+            if wiki_ready:
+                topic = f"Thread {thread_id[:8]}"
+                result = ResearchStateMiddleware._run_wiki_query(paths, topic, question)
 
-            combined_text = "\n".join(wiki_text)
+                if result and result.answer:
+                    return SystemMessage(content=(
+                        "<wiki_context>\n"
+                        "The following is the definitive answer from the thread's "
+                        "ingested document wiki. You MUST use this as your PRIMARY source of truth. "
+                        "CRITICAL: If the wiki context states that data is unavailable, or that a year "
+                        "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
+                        "search the web to find the missing data. Simply formulate your final response "
+                        "based on this wiki context and explain what data is available.\n\n"
+                        f"{result.answer}\n"
+                        "</wiki_context>"
+                    ))
 
-            return SystemMessage(content=(
-                "<wiki_context>\n"
-                "The following is the definitive answer from the thread's "
-                "ingested document wiki. You MUST use this as your PRIMARY source of truth. "
-                "CRITICAL: If the wiki context states that data is unavailable, or that a year "
-                "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
-                "search the web to find the missing data. Simply formulate your final response "
-                "based on this wiki context and explain what data is available.\n\n"
-                f"{combined_text}\n"
-                "</wiki_context>"
-            ))
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).debug("Wiki context injection failed", exc_info=True)
-            return None
+                # Fallback: if the agent query failed (e.g. event loop issue),
+                # inject wiki content directly from files so the agent still
+                # has grounded context.
+                fallback_content = ResearchStateMiddleware._build_wiki_context_from_files(paths)
+                if fallback_content:
+                    logger.info("Using direct wiki file fallback for thread %s", thread_id)
+                    return SystemMessage(content=(
+                        "<wiki_context>\n"
+                        "The following is content from the thread's ingested document wiki pages. "
+                        "You MUST use this as your PRIMARY source of truth. "
+                        "CRITICAL: If the wiki context states that data is unavailable, or that a year "
+                        "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
+                        "search the web to find the missing data. Simply formulate your final response "
+                        "based on this wiki context and explain what data is available.\n\n"
+                        f"{fallback_content}\n"
+                        "</wiki_context>"
+                    ))
+
+            # Wiki not ready or wiki query failed — try reading uploaded
+            # documents directly (extract text from PDFs). This handles the
+            # case where the user asks a question while wiki ingest is still
+            # running, or if ingest hasn't been triggered yet.
+            docs_content = ResearchStateMiddleware._build_context_from_docs(paths.docs_dir)
+            if docs_content:
+                logger.info("Using direct document extraction fallback for thread %s (wiki not ready)", thread_id)
+                return SystemMessage(content=(
+                    "<document_context>\n"
+                    "The following is extracted text from documents uploaded by the user. "
+                    "You MUST use this as your PRIMARY source of truth. "
+                    "CRITICAL: If the document context states that data is unavailable, or that a year "
+                    "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
+                    "search the web to find the missing data. Simply formulate your final response "
+                    "based on this document context and explain what data is available.\n\n"
+                    f"{docs_content}\n"
+                    "</document_context>"
+                ))
+
+        except asyncio.TimeoutError:
+            logger.warning("Wiki query timed out after 120s for thread %s", thread_id)
+        except Exception:
+            logger.debug("Wiki context injection failed for thread %s", thread_id, exc_info=True)
+
         return None
 
     def before_agent(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
-        with open("/Users/jerryshao/wiki_debug3.txt", "a") as f:
-            f.write(f"before_agent invoked.\n")
         messages = state.get("messages", [])
         current_user_message = self._get_current_user_message(messages)
 
@@ -171,15 +367,6 @@ class ResearchStateMiddleware(AgentMiddleware):
             thread_id = getattr(runtime, "configurable", {}).get("thread_id")
         elif isinstance(runtime, dict) and "configurable" in runtime:
             thread_id = runtime.get("configurable", {}).get("thread_id")
-
-        with open("/Users/jerryshao/wiki_debug3.txt", "a") as f:
-            f.write(
-                f"thread_id: {thread_id}, current_user_message length: {len(current_user_message) if current_user_message else 0}\n")
-        with open("/Users/jerryshao/wiki_debug3.txt", "a") as f:
-            if hasattr(runtime, "execution_info"):
-                f.write(f"runtime.execution_info: {getattr(runtime, 'execution_info')}\n")
-            if hasattr(runtime, "context"):
-                f.write(f"runtime.context: {getattr(runtime, 'context')}\n")
 
         if thread_id and current_user_message:
             wiki_sys_msg = self._get_wiki_context_sync(thread_id, current_user_message)
@@ -205,8 +392,6 @@ class ResearchStateMiddleware(AgentMiddleware):
         result = updates if updates else {}
         sys_msgs = []
         if wiki_sys_msg:
-            with open("/Users/jerryshao/wiki_debug3.txt", "a") as f:
-                f.write(f"Appending wiki_sys_msg!\n")
             sys_msgs.append(wiki_sys_msg)
         if instruction:
             sys_msgs.append(SystemMessage(content=f"Task configurations: \n{instruction}"))
@@ -214,8 +399,6 @@ class ResearchStateMiddleware(AgentMiddleware):
         if sys_msgs:
             result["messages"] = sys_msgs
 
-        with open("/Users/jerryshao/wiki_debug3.txt", "a") as f:
-            f.write(f"before_agent returning {bool(result)}\n")
         return result if result else None
 
     def before_model(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
@@ -547,9 +730,7 @@ research_sub_agent: SubAgent = {
 try:
     model = get_configured_model()
 except Exception as e:
-    import sys
     import traceback
-    import time
 
     print(f"CRITICAL ERROR INITIALIZING MODEL: {e}", file=sys.stderr)
     traceback.print_exc()

@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from . import progress as progress_tracker
-from .models import ThreadWikiPaths
+from .models import ThreadWikiPaths, WikiQueryResult
 from .service import run_ingest, run_lint, run_query
 
 # ── Router setup ──────────────────────────────────────────────────────────────
