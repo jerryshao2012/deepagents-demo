@@ -354,6 +354,59 @@ async def _inject_wiki_context(thread_id: str, messages: list[dict[str, Any]]) -
         return None
 
 
+async def _check_if_needs_deep_research_async(question: str, wiki_answer: str) -> bool:
+    """Evaluate if the wiki answer is sufficient to answer the user's question asynchronously.
+
+    Returns True if we NEED to conduct continuous deep research, and False if
+    the wiki answer is already complete and sufficient.
+    """
+    if not wiki_answer or not wiki_answer.strip():
+        return True
+
+    from langchain_core.messages import HumanMessage
+    from model_factory import get_configured_model
+    try:
+        model = get_configured_model()
+        prompt = (
+            "You are an expert research evaluator. Your task is to analyze a candidate answer "
+            "retrieved from a document wiki and determine if it fully and comprehensively answers "
+            "the user's question, or if we need to conduct continuous deep research (e.g. searching "
+            "the web) to enhance it.\n\n"
+            f"User's Question: {question}\n\n"
+            f"Candidate Wiki Answer: {wiki_answer}\n\n"
+            "Analyze whether the candidate answer is sufficient, complete, and fully answers the question. "
+            "Respond in the following JSON format:\n"
+            "{\n"
+            '  "needs_deep_research": true/false,\n'
+            '  "reason": "Detailed reasoning for the decision"\n'
+            "}\n"
+            "Do not include any other text in your response, only the valid JSON object."
+        )
+        response = await model.ainvoke([HumanMessage(content=prompt)])
+        content = response.content.strip()
+        if content.startswith("```json"):
+            content = content[7:]
+        if content.endswith("```"):
+            content = content[:-3]
+        content = content.strip()
+
+        import json
+        data = json.loads(content)
+        needs_research = bool(data.get("needs_deep_research", True))
+        import logging
+        logging.getLogger(__name__).info(
+            f"Wiki evaluation decision (server): needs_deep_research={needs_research}. Reason: {data.get('reason')}"
+        )
+        return needs_research
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(
+            f"Error during wiki result evaluation (server): {e}. Defaulting to conducting deep research.",
+            exc_info=True
+        )
+        return True
+
+
 async def _execute_run(run_id: str, thread_id: str) -> None:
     """Invoke the agent and persist the result; called as a fire-and-forget task."""
     db.update_run_status(run_id, "running")
@@ -405,10 +458,32 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
             )
             input_state["messages"] = existing_msgs
 
-            if "files" not in input_state:
-                input_state["files"] = {}
-            from deepagents.backends.utils import create_file_data
-            input_state["files"]["/final_report.md"] = create_file_data(wiki_context)
+            # Extract question for evaluation
+            question = ""
+            for msg in reversed(messages):
+                if isinstance(msg, dict) and msg.get("role") == "user":
+                    question = str(msg.get("content", ""))
+                    break
+                if hasattr(msg, "type") and getattr(msg, "type", None) == "human":
+                    question = str(getattr(msg, "content", ""))
+                    break
+
+            needs_deep_research = await _check_if_needs_deep_research_async(question, wiki_context)
+            if not needs_deep_research:
+                import logging
+                logging.getLogger(__name__).info(
+                    "Wiki answer is complete and sufficient (server). Saving to /final_report.md and disabling web search."
+                )
+                if "files" not in input_state:
+                    input_state["files"] = {}
+                from deepagents.backends.utils import create_file_data
+                input_state["files"]["/final_report.md"] = create_file_data(wiki_context)
+                input_state["no_web"] = True
+            else:
+                import logging
+                logging.getLogger(__name__).info(
+                    "Wiki answer is incomplete/insufficient (server). Conducting continuous deep research to enhance it."
+                )
 
         # Invoke the deep_research agent
         result = await agent.ainvoke(input_state)

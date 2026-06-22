@@ -481,6 +481,52 @@ class ResearchStateMiddleware(AgentMiddleware):
 
         return None, None
 
+    @staticmethod
+    def _check_if_needs_deep_research(question: str, wiki_answer: str) -> bool:
+        """Evaluate if the wiki answer is sufficient to answer the user's question.
+
+        Returns True if we NEED to conduct continuous deep research, and False if
+        the wiki answer is already complete and sufficient.
+        """
+        if not wiki_answer or not wiki_answer.strip():
+            return True
+
+        from langchain_core.messages import HumanMessage
+        try:
+            model = get_configured_model()
+            prompt = (
+                "You are an expert research evaluator. Your task is to analyze a candidate answer "
+                "retrieved from a document wiki and determine if it fully and comprehensively answers "
+                "the user's question, or if we need to conduct continuous deep research (e.g. searching "
+                "the web) to enhance it.\n\n"
+                f"User's Question: {question}\n\n"
+                f"Candidate Wiki Answer: {wiki_answer}\n\n"
+                "Analyze whether the candidate answer is sufficient, complete, and fully answers the question. "
+                "Respond in the following JSON format:\n"
+                "{\n"
+                '  "needs_deep_research": true/false,\n'
+                '  "reason": "Detailed reasoning for the decision"\n'
+                "}\n"
+                "Do not include any other text in your response, only the valid JSON object."
+            )
+            response = model.invoke([HumanMessage(content=prompt)])
+            content = response.content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            if content.endswith("```"):
+                content = content[:-3]
+            content = content.strip()
+
+            import json
+            data = json.loads(content)
+            needs_research = bool(data.get("needs_deep_research", True))
+            logger.info(f"Wiki evaluation decision: needs_deep_research={needs_research}. Reason: {data.get('reason')}")
+            return needs_research
+        except Exception as e:
+            logger.warning(f"Error during wiki result evaluation: {e}. Defaulting to conducting deep research.",
+                           exc_info=True)
+            return True
+
     def before_agent(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
         messages = state.get("messages", [])
         current_user_message = self._get_current_user_message(messages)
@@ -503,9 +549,18 @@ class ResearchStateMiddleware(AgentMiddleware):
         if thread_id and current_user_message:
             wiki_sys_msg, wiki_answer = self._get_wiki_context_sync(str(thread_id), current_user_message)
             if wiki_answer:
-                if "files" not in updates:
-                    updates["files"] = {}
-                updates["files"]["/final_report.md"] = create_file_data(wiki_answer)
+                # Evaluate if we need continuous deep research to enhance it
+                needs_deep_research = self._check_if_needs_deep_research(current_user_message, wiki_answer)
+                if not needs_deep_research:
+                    logger.info(
+                        "Wiki answer is complete and sufficient. Saving to /final_report.md and disabling web search.")
+                    if "files" not in updates:
+                        updates["files"] = {}
+                    updates["files"]["/final_report.md"] = create_file_data(wiki_answer)
+                    updates["no_web"] = True
+                else:
+                    logger.info(
+                        "Wiki answer is incomplete/insufficient. Conducting continuous deep research to enhance it.")
 
         # Always re-extract parameters from the latest user message so that
         # follow-up requests (e.g. "use humanizer skill") are picked up even
