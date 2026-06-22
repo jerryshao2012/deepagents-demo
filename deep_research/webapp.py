@@ -122,6 +122,11 @@ app.add_middleware(
     secret_key=os.environ.get("OAUTH_SECRET_KEY", "oauth-session-secret-key-fallback-for-dev"),
 )
 
+# Register thread wiki routes
+from thread_wiki.routes import router as wiki_router
+
+app.include_router(wiki_router)
+
 
 def _safe_relative_folder(folder: str) -> PurePosixPath:
     """Return a safe relative folder path inside docs."""

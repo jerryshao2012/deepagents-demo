@@ -46,9 +46,6 @@ from webapp import app
 from agent import agent
 from research_agent.prompts import RESEARCHER_DESCRIPTION
 
-# Register thread wiki routes (lazy import to avoid circular dependency)
-from thread_wiki.routes import router as wiki_router
-
 # Import DB wrapper
 import db
 
@@ -816,10 +813,6 @@ async def cancel_run(
     updated = db.get_run(run_id) or {**run, "status": "cancelled"}
     return _api_run(updated)
 
-
-# ── Register Thread Wiki Routes ──────────────────────────────────────────────
-
-app.include_router(wiki_router)
 
 if __name__ == "__main__":
     # For direct execution: python server.py

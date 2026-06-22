@@ -395,6 +395,42 @@ async def lint_wiki(
     return WikiLintResponse(result=result, topic=topic)
 
 
+@router.delete(
+    "/threads/{thread_id}/wiki",
+)
+async def delete_thread_wiki(
+        thread_id: str,
+        current_user=Depends(_wiki_get_current_user),
+) -> dict[str, Any]:
+    """Delete a thread's LLM wiki workspace and uploaded documents."""
+    import shutil
+
+    # 1. Cancel any active ingest for this thread.
+    await progress_tracker.cancel_ingest(
+        thread_id, reason="Thread wiki is being deleted."
+    )
+
+    # 2. Resolve paths for the thread.
+    paths = ThreadWikiPaths.resolve(thread_id, _BASE_DIR)
+
+    # 3. Clean up uploaded documents directory if it exists.
+    if paths.docs_dir.exists():
+        if paths.docs_dir.is_dir():
+            await asyncio.to_thread(shutil.rmtree, paths.docs_dir, ignore_errors=True, onerror=None)
+            logger.info("Deleted documents folder for thread %s", thread_id)
+
+    # 4. Clean up wiki directory if it exists.
+    if paths.wiki_dir.exists():
+        if paths.wiki_dir.is_dir():
+            await asyncio.to_thread(shutil.rmtree, paths.wiki_dir, ignore_errors=True, onerror=None)
+            logger.info("Deleted wiki folder for thread %s", thread_id)
+
+    return {
+        "thread_id": thread_id,
+        "message": "Thread wiki and documents deleted successfully.",
+    }
+
+
 import logging
 
 logger = logging.getLogger(__name__)
