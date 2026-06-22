@@ -265,15 +265,84 @@ class ResearchStateMiddleware(AgentMiddleware):
         return combined if combined.strip() else None
 
     @staticmethod
+    def _check_wiki_ready(paths: "ThreadWikiPaths") -> bool:
+        """Check if the wiki has been built and has actual content pages."""
+        index_path = paths.wiki_content / "index.md"
+        if not index_path.exists():
+            return False
+        if "_No pages yet._" in index_path.read_text(encoding="utf-8"):
+            return False
+        return True
+
+    @staticmethod
+    def _wait_for_wiki_ready(
+        thread_id: str, paths: "ThreadWikiPaths", max_wait: int = 90,
+    ) -> bool:
+        """Wait for an in-progress wiki ingest to complete.
+
+        Polls the thread-wiki progress tracker.  Returns ``True`` if the wiki
+        becomes ready within *max_wait* seconds, ``False`` otherwise (ingest
+        failed, was cancelled, timed out, or no ingest was running).
+        """
+        from thread_wiki import progress as progress_tracker
+        from thread_wiki.models import IngestPhase
+
+        deadline = time.time() + max_wait
+        poll_interval = 2  # seconds
+        logged_waiting = False
+
+        while time.time() < deadline:
+            # 1) Check if wiki is now ready (ingest may have just finished)
+            if ResearchStateMiddleware._check_wiki_ready(paths):
+                return True
+
+            # 2) Check if there's an active ingest to wait for
+            entry = progress_tracker._active_ingests.get(thread_id)
+            if entry and entry.progress.is_active():
+                if not logged_waiting:
+                    logger.info(
+                        "Wiki not ready — waiting for ingest to complete "
+                        "(phase: %s, progress: %d%%) for thread %s",
+                        entry.progress.phase.value,
+                        entry.progress.progress,
+                        thread_id,
+                    )
+                    logged_waiting = True
+                time.sleep(poll_interval)
+                continue
+
+            # 3) Ingest finished (or never started) but wiki is not ready
+            if entry and not entry.progress.is_active():
+                if entry.progress.phase == IngestPhase.ERROR:
+                    logger.warning(
+                        "Wiki ingest failed (error) for thread %s: %s",
+                        thread_id,
+                        entry.progress.error,
+                    )
+                elif entry.progress.phase == IngestPhase.CANCELLED:
+                    logger.warning(
+                        "Wiki ingest was cancelled for thread %s",
+                        thread_id,
+                    )
+            return False
+
+        logger.warning(
+            "Timed out waiting for wiki ingest after %ds for thread %s",
+            max_wait,
+            thread_id,
+        )
+        return False
+
+    @staticmethod
     def _get_wiki_context_sync(thread_id: str, question: str) -> SystemMessage | None:
         """Query the thread's wiki and return a SystemMessage with the answer.
 
-        Uses direct Python API calls to the thread_wiki service instead of
-        spawning a subprocess, avoiding process overhead and JSON parsing.
-        Falls back to directly reading wiki files when the LLM query agent
-        cannot run (e.g. inside a running event loop).
-        If wiki hasn't been built yet, falls back to reading uploaded documents
-        directly (extracting text from PDFs).
+        Fallback strategy (in order):
+        1. If wiki is ready → LLM wiki query (preferred path).
+        2. If wiki not ready → wait for ingest to complete, then LLM wiki query.
+        3. If wiki ingestion or query failed → read wiki files directly.
+        4. If no wiki files → extract text from uploaded PDFs (last resort,
+           with warning logged).
         """
         if not question or len(question) < 5:
             return None
@@ -281,16 +350,45 @@ class ResearchStateMiddleware(AgentMiddleware):
             base_dir = Path(__file__).resolve().parent
             paths = ThreadWikiPaths.resolve(thread_id, base_dir)
 
-            # Check if wiki is ready (index.md exists with actual pages)
-            wiki_ready = False
-            index_path = paths.wiki_content / "index.md"
-            if index_path.exists():
-                if "_No pages yet._" not in index_path.read_text(encoding="utf-8"):
-                    wiki_ready = True
+            # ── Step 1 & 2: Ensure wiki is ready ──────────────────────
+            wiki_ready = ResearchStateMiddleware._check_wiki_ready(paths)
 
+            if not wiki_ready:
+                # Wiki not ready — try waiting for an in-progress ingest.
+                def _wait():
+                    return ResearchStateMiddleware._wait_for_wiki_ready(
+                        thread_id, paths, max_wait=90,
+                    )
+
+                try:
+                    current_loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    current_loop = None
+
+                if current_loop is not None and current_loop.is_running():
+                    # Inside a running event loop (e.g. LangGraph Platform).
+                    # Run the blocking wait in a separate thread.
+                    try:
+                        with concurrent.futures.ThreadPoolExecutor(
+                            max_workers=1,
+                        ) as pool:
+                            wiki_ready = pool.submit(_wait).result(timeout=100)
+                    except concurrent.futures.TimeoutError:
+                        logger.warning(
+                            "Timed out waiting for wiki readiness "
+                            "(thread pool) for thread %s",
+                            thread_id,
+                        )
+                        wiki_ready = False
+                else:
+                    wiki_ready = _wait()
+
+            # ── Step 3: LLM wiki query (if wiki is ready) ─────────────
             if wiki_ready:
                 topic = f"Thread {thread_id[:8]}"
-                result = ResearchStateMiddleware._run_wiki_query(paths, topic, question)
+                result = ResearchStateMiddleware._run_wiki_query(
+                    paths, topic, question,
+                )
 
                 if result and result.answer:
                     return SystemMessage(content=(
@@ -305,31 +403,53 @@ class ResearchStateMiddleware(AgentMiddleware):
                         "</wiki_context>"
                     ))
 
-                # Fallback: if the agent query failed (e.g. event loop issue),
-                # inject wiki content directly from files so the agent still
-                # has grounded context.
-                fallback_content = ResearchStateMiddleware._build_wiki_context_from_files(paths)
-                if fallback_content:
-                    logger.info("Using direct wiki file fallback for thread %s", thread_id)
-                    return SystemMessage(content=(
-                        "<wiki_context>\n"
-                        "The following is content from the thread's ingested document wiki pages. "
-                        "You MUST use this as your PRIMARY source of truth. "
-                        "CRITICAL: If the wiki context states that data is unavailable, or that a year "
-                        "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
-                        "search the web to find the missing data. Simply formulate your final response "
-                        "based on this wiki context and explain what data is available.\n\n"
-                        f"{fallback_content}\n"
-                        "</wiki_context>"
-                    ))
+                # LLM wiki query failed — log warning and fall through
+                logger.warning(
+                    "LLM wiki query failed for thread %s — "
+                    "falling back to reading wiki files",
+                    thread_id,
+                )
+            else:
+                logger.warning(
+                    "Wiki not ready for thread %s "
+                    "(ingest failed, timed out, or not started) — "
+                    "attempting fallbacks",
+                    thread_id,
+                )
 
-            # Wiki not ready or wiki query failed — try reading uploaded
-            # documents directly (extract text from PDFs). This handles the
-            # case where the user asks a question while wiki ingest is still
-            # running, or if ingest hasn't been triggered yet.
-            docs_content = ResearchStateMiddleware._build_context_from_docs(paths.docs_dir)
+            # ── Step 4: Read wiki files directly ──────────────────────
+            # Covers both "wiki ready but query failed" and
+            # "wiki partially built before ingest failed".
+            fallback_content = (
+                ResearchStateMiddleware._build_wiki_context_from_files(paths)
+            )
+            if fallback_content:
+                logger.info(
+                    "Using direct wiki file fallback for thread %s",
+                    thread_id,
+                )
+                return SystemMessage(content=(
+                    "<wiki_context>\n"
+                    "The following is content from the thread's ingested document wiki pages. "
+                    "You MUST use this as your PRIMARY source of truth. "
+                    "CRITICAL: If the wiki context states that data is unavailable, or that a year "
+                    "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
+                    "search the web to find the missing data. Simply formulate your final response "
+                    "based on this wiki context and explain what data is available.\n\n"
+                    f"{fallback_content}\n"
+                    "</wiki_context>"
+                ))
+
+            # ── Step 5: Extract text from uploaded PDFs (last resort) ─
+            docs_content = (
+                ResearchStateMiddleware._build_context_from_docs(paths.docs_dir)
+            )
             if docs_content:
-                logger.info("Using direct document extraction fallback for thread %s (wiki not ready)", thread_id)
+                logger.warning(
+                    "FALLBACK: Using direct document extraction for thread %s "
+                    "(wiki not ready and LLM wiki query failed)",
+                    thread_id,
+                )
                 return SystemMessage(content=(
                     "<document_context>\n"
                     "The following is extracted text from documents uploaded by the user. "
@@ -343,9 +463,16 @@ class ResearchStateMiddleware(AgentMiddleware):
                 ))
 
         except asyncio.TimeoutError:
-            logger.warning("Wiki query timed out after 120s for thread %s", thread_id)
+            logger.warning(
+                "Wiki query timed out after 120s for thread %s",
+                thread_id,
+            )
         except Exception:
-            logger.debug("Wiki context injection failed for thread %s", thread_id, exc_info=True)
+            logger.debug(
+                "Wiki context injection failed for thread %s",
+                thread_id,
+                exc_info=True,
+            )
 
         return None
 
