@@ -2,20 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pymupdf4llm
-import pypdf
-from docx import Document
-from openpyxl import load_workbook
-from pptx import Presentation
-
 from logger_utils import setup_logger
 
 logger = setup_logger(__name__)
 
 
 def _extract_pdf_text(file_path: Path) -> str:
-    """Extract PDF content as markdown without ML model downloads.\n\n    Returns:\n        str: Extracted content from the PDF file.\n    """
+    """Extract PDF content as markdown without ML model downloads.\n\n    Returns:
+        str: Extracted content from the PDF file.
+    """
     try:
+        import pymupdf4llm
+
         logger.info("Use PyMuPDF4LLM for PDF markdown extraction.")
 
         markdown_content = pymupdf4llm.to_markdown(str(file_path))
@@ -28,6 +26,8 @@ def _extract_pdf_text(file_path: Path) -> str:
         logger.error(f"PyMuPDF4LLM PDF extraction failed: {e}")
         # Fallback to pypdf if markdown extraction fails
         try:
+            import pypdf
+
             logger.info("Falling back to pypdf for PDF text extraction.")
             reader = pypdf.PdfReader(file_path)
             page_texts: list[str] = []
@@ -46,6 +46,8 @@ def _extract_text_file(file_path: Path) -> str:
 
 
 def _extract_docx_text(file_path: Path) -> str:
+    from docx import Document
+
     document = Document(str(file_path))
     paragraphs = [
         paragraph.text.strip()
@@ -69,6 +71,8 @@ def _extract_docx_text(file_path: Path) -> str:
 
 
 def _extract_pptx_text(file_path: Path) -> str:
+    from pptx import Presentation
+
     presentation = Presentation(str(file_path))
     slide_sections: list[str] = []
     for index, slide in enumerate(presentation.slides, start=1):
@@ -94,6 +98,8 @@ def _extract_pptx_text(file_path: Path) -> str:
 
 
 def _extract_xlsx_text(file_path: Path) -> str:
+    from openpyxl import load_workbook
+
     workbook = load_workbook(filename=str(file_path), read_only=True, data_only=True)
     sections: list[str] = []
     try:

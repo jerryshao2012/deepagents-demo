@@ -405,6 +405,11 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
             )
             input_state["messages"] = existing_msgs
 
+            if "files" not in input_state:
+                input_state["files"] = {}
+            from deepagents.backends.utils import create_file_data
+            input_state["files"]["/final_report.md"] = create_file_data(wiki_context)
+
         # Invoke the deep_research agent
         result = await agent.ainvoke(input_state)
 

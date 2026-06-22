@@ -2,12 +2,12 @@ import asyncio
 import concurrent.futures
 import os
 import re
-import sys
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import sys
+import time
 from deepagents import create_deep_agent, SubAgent
 from deepagents.backends.utils import create_file_data
 from deepagents.middleware.filesystem import FilesystemState
@@ -18,8 +18,6 @@ from langchain_core.runnables import RunnableConfig
 
 from logger_utils import setup_logger
 from model_factory import get_configured_model
-from thread_wiki.models import ThreadWikiPaths, WikiQueryResult
-from thread_wiki.service import run_query
 from research_agent import (
     RESEARCH_WORKFLOW_INSTRUCTIONS,
     RESEARCHER_INSTRUCTIONS,
@@ -44,6 +42,8 @@ from research_agent.utils.cli import (
 )
 from research_agent.utils.eval_tracking import log_server_metrics
 from research_agent.utils.skill_registry import get_skill_registry
+from thread_wiki.models import ThreadWikiPaths, WikiQueryResult
+from thread_wiki.service import run_query
 from utils import get_ssl_verify_config, str2bool
 
 # Load environment variables
@@ -246,8 +246,13 @@ class ResearchStateMiddleware(AgentMiddleware):
                         extract_supported_document,
                     )
                     content = extract_supported_document(file_path)
-                except ImportError:
+                except ImportError as e:
                     # Fallback to minimal PDF extraction
+                    logger.warning(
+                        "content_extractors import failed for %s (%s) — "
+                        "falling back to minimal PDF extraction",
+                        file_path.name, e,
+                    )
                     try:
                         from thread_wiki.service import _fallback_pdf_extract
                         content = _fallback_pdf_extract(file_path)
@@ -276,7 +281,7 @@ class ResearchStateMiddleware(AgentMiddleware):
 
     @staticmethod
     def _wait_for_wiki_ready(
-        thread_id: str, paths: "ThreadWikiPaths", max_wait: int = 90,
+            thread_id: str, paths: "ThreadWikiPaths", max_wait: int = 90,
     ) -> bool:
         """Wait for an in-progress wiki ingest to complete.
 
@@ -334,8 +339,8 @@ class ResearchStateMiddleware(AgentMiddleware):
         return False
 
     @staticmethod
-    def _get_wiki_context_sync(thread_id: str, question: str) -> SystemMessage | None:
-        """Query the thread's wiki and return a SystemMessage with the answer.
+    def _get_wiki_context_sync(thread_id: str, question: str) -> tuple[SystemMessage | None, str | None]:
+        """Query the thread's wiki and return a SystemMessage with the answer and the raw answer string.
 
         Fallback strategy (in order):
         1. If wiki is ready → LLM wiki query (preferred path).
@@ -345,7 +350,7 @@ class ResearchStateMiddleware(AgentMiddleware):
            with warning logged).
         """
         if not question or len(question) < 5:
-            return None
+            return None, None
         try:
             base_dir = Path(__file__).resolve().parent
             paths = ThreadWikiPaths.resolve(thread_id, base_dir)
@@ -370,7 +375,7 @@ class ResearchStateMiddleware(AgentMiddleware):
                     # Run the blocking wait in a separate thread.
                     try:
                         with concurrent.futures.ThreadPoolExecutor(
-                            max_workers=1,
+                                max_workers=1,
                         ) as pool:
                             wiki_ready = pool.submit(_wait).result(timeout=100)
                     except concurrent.futures.TimeoutError:
@@ -401,7 +406,7 @@ class ResearchStateMiddleware(AgentMiddleware):
                         "based on this wiki context and explain what data is available.\n\n"
                         f"{result.answer}\n"
                         "</wiki_context>"
-                    ))
+                    )), result.answer
 
                 # LLM wiki query failed — log warning and fall through
                 logger.warning(
@@ -438,7 +443,7 @@ class ResearchStateMiddleware(AgentMiddleware):
                     "based on this wiki context and explain what data is available.\n\n"
                     f"{fallback_content}\n"
                     "</wiki_context>"
-                ))
+                )), None
 
             # ── Step 5: Extract text from uploaded PDFs (last resort) ─
             docs_content = (
@@ -460,7 +465,7 @@ class ResearchStateMiddleware(AgentMiddleware):
                     "based on this document context and explain what data is available.\n\n"
                     f"{docs_content}\n"
                     "</document_context>"
-                ))
+                )), None
 
         except asyncio.TimeoutError:
             logger.warning(
@@ -474,7 +479,7 @@ class ResearchStateMiddleware(AgentMiddleware):
                 exc_info=True,
             )
 
-        return None
+        return None, None
 
     def before_agent(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
         messages = state.get("messages", [])
@@ -496,7 +501,11 @@ class ResearchStateMiddleware(AgentMiddleware):
             thread_id = runtime.get("configurable", {}).get("thread_id")
 
         if thread_id and current_user_message:
-            wiki_sys_msg = self._get_wiki_context_sync(thread_id, current_user_message)
+            wiki_sys_msg, wiki_answer = self._get_wiki_context_sync(str(thread_id), current_user_message)
+            if wiki_answer:
+                if "files" not in updates:
+                    updates["files"] = {}
+                updates["files"]["/final_report.md"] = create_file_data(wiki_answer)
 
         # Always re-extract parameters from the latest user message so that
         # follow-up requests (e.g. "use humanizer skill") are picked up even
