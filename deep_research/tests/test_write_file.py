@@ -8,6 +8,7 @@ from research_agent.utils.knowledge_filesystem import write_file_impl
 
 def test_write_file_basic():
     """Test basic write_file functionality."""
+    import os
     # Test writing to a temporary file
     test_path = "/tmp/test_write_file_basic.txt"
     test_content = "Hello, World!"
@@ -17,13 +18,21 @@ def test_write_file_basic():
     assert "Successfully wrote" in result
     assert str(len(test_content)) in result
 
-    # Verify file was actually written
-    file_path = Path(test_path)
-    assert file_path.exists()
-    assert file_path.read_text() == test_content
+    # Verify file was actually written (considering path normalization)
+    output_dir = Path(os.environ.get("OUTPUT_FOLDER", "./output"))
+    resolved_path = Path(test_path)
+    if not resolved_path.exists():
+        resolved_path = output_dir / "tmp/test_write_file_basic.txt"
+
+    assert resolved_path.exists()
+    assert resolved_path.read_text() == test_content
 
     # Cleanup
-    file_path.unlink()
+    resolved_path.unlink()
+    try:
+        resolved_path.parent.rmdir()
+    except OSError:
+        pass
 
 
 def test_write_file_with_state():
@@ -41,6 +50,7 @@ def test_write_file_with_state():
 
 def test_write_file_creates_directories():
     """Test that write_file creates parent directories if needed."""
+    import os
     test_path = "/tmp/test_nested/dir1/dir2/test_file.txt"
     test_content = "Nested directory test"
 
@@ -48,16 +58,25 @@ def test_write_file_creates_directories():
 
     assert "Successfully wrote" in result
 
-    # Verify file and directories were created
-    file_path = Path(test_path)
-    assert file_path.exists()
-    assert file_path.parent.exists()
-    assert file_path.read_text() == test_content
+    # Verify file and directories were created (considering path normalization)
+    output_dir = Path(os.environ.get("OUTPUT_FOLDER", "./output"))
+    resolved_path = Path(test_path)
+    if not resolved_path.exists():
+        resolved_path = output_dir / "tmp/test_nested/dir1/dir2/test_file.txt"
+
+    assert resolved_path.exists()
+    assert resolved_path.parent.exists()
+    assert resolved_path.read_text() == test_content
 
     # Cleanup
-    file_path.unlink()
-    file_path.parent.rmdir()
-    file_path.parent.parent.rmdir()
+    resolved_path.unlink()
+    try:
+        resolved_path.parent.rmdir()
+        resolved_path.parent.parent.rmdir()
+        resolved_path.parent.parent.parent.rmdir()
+        resolved_path.parent.parent.parent.parent.rmdir()
+    except OSError:
+        pass
 
 
 def test_write_file_error_handling():

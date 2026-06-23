@@ -85,6 +85,7 @@ class ResearchState(FilesystemState):
     chat_start_time: float | None
     chat_elapsed_seconds: float | None
     _eval_logged: bool
+    existing_reports: list[str] | None
 
 
 class ResearchStateMiddleware(AgentMiddleware):
@@ -616,6 +617,10 @@ class ResearchStateMiddleware(AgentMiddleware):
         elif isinstance(runtime, dict) and "configurable" in runtime:
             thread_id = runtime.get("configurable", {}).get("thread_id")
 
+        updates["existing_reports"] = [k for k in state.get("files", {}) if k.startswith("/final_report")]
+        if thread_id:
+            from research_agent.utils.knowledge_filesystem import _thread_existing_reports
+            _thread_existing_reports[str(thread_id)] = updates["existing_reports"]
         updates["wiki_query_complete"] = False
         md_regex = r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b'
         original_doc_regex = r'/\1.\2'
@@ -629,7 +634,7 @@ class ResearchStateMiddleware(AgentMiddleware):
                 needs_deep_research = self._check_if_needs_deep_research(current_user_message, wiki_answer)
                 if not needs_deep_research:
                     logger.info(
-                        "Wiki answer is complete and sufficient. Saving to /final_report.md and disabling web search.")
+                        "Wiki answer is complete and sufficient. Saving report and disabling web search.")
                     if "files" not in updates:
                         updates["files"] = {}
                     sanitized_wiki_answer = re.sub(
@@ -638,7 +643,11 @@ class ResearchStateMiddleware(AgentMiddleware):
                     sanitized_wiki_answer = re.sub(
                         doc_regex, remove_raw_regex, sanitized_wiki_answer,
                     )
-                    updates["files"]["/final_report.md"] = create_file_data(sanitized_wiki_answer)
+                    from research_agent.utils.knowledge_filesystem import get_target_report_path
+                    state_files = state.get("files") or {}
+                    existing_reports = updates["existing_reports"]
+                    resolved_path = get_target_report_path(sanitized_wiki_answer, state_files, existing_reports)
+                    updates["files"][resolved_path] = create_file_data(sanitized_wiki_answer)
                     updates["no_web"] = True
                     updates["wiki_query_complete"] = True
                 else:
@@ -735,7 +744,7 @@ class ResearchStateMiddleware(AgentMiddleware):
         else:
             # ── Final-report injection (safety net) or Save Chat Response ──
             if state.get("wiki_query_complete"):
-                # Save the chat response to Files (State) as final_report_1.md
+                # Save the chat response to Files (State) as final_report_1.md (or resolved path)
                 if last_msg is not None:
                     try:
                         last_content = (
@@ -752,10 +761,14 @@ class ResearchStateMiddleware(AgentMiddleware):
                             )
                             if "files" not in updates:
                                 updates["files"] = {}
-                            updates["files"]["/final_report_1.md"] = create_file_data(sanitized)
+                            from research_agent.utils.knowledge_filesystem import get_target_report_path
+                            state_files = state.get("files") or {}
+                            existing_reports = state.get("existing_reports") or []
+                            resolved_path = get_target_report_path(sanitized, state_files, existing_reports)
+                            updates["files"][resolved_path] = create_file_data(sanitized)
 
                             # Persist files using LangGraph send_files_to_state
-                            send_files_to_state({"/final_report_1.md": create_file_data(sanitized)})
+                            send_files_to_state({resolved_path: create_file_data(sanitized)})
 
                             # Update the last message in-place so we don't append a duplicate message
                             if isinstance(last_msg, dict):
@@ -770,7 +783,10 @@ class ResearchStateMiddleware(AgentMiddleware):
                 # the instruction and replaces the closing chatter with the actual
                 # report content.
                 files = state.get("files") or {}
-                report_data = files.get("/final_report.md")
+                existing_reports = state.get("existing_reports") or []
+                from research_agent.utils.knowledge_filesystem import get_active_report_path
+                active_report_path = get_active_report_path(files, existing_reports)
+                report_data = files.get(active_report_path)
                 if report_data and last_msg is not None:
                     try:
                         report_text = file_data_to_string(report_data)
@@ -789,8 +805,8 @@ class ResearchStateMiddleware(AgentMiddleware):
                         if report_text_sanitized != report_text:
                             if "files" not in updates:
                                 updates["files"] = {}
-                            updates["files"]["/final_report.md"] = create_file_data(report_text_sanitized)
-                            send_files_to_state({"/final_report.md": create_file_data(report_text_sanitized)})
+                            updates["files"][active_report_path] = create_file_data(report_text_sanitized)
+                            send_files_to_state({active_report_path: create_file_data(report_text_sanitized)})
                             report_text = report_text_sanitized
 
                         # Only inject if the last message isn't already the report

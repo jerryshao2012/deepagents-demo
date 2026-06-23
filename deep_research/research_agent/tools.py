@@ -216,6 +216,7 @@ def read_doc_folder(
 def write_file(
         file_path: str,
         content: str,
+        state: Annotated[dict, InjectedState],
 ) -> str:
     """Write content to a file.
 
@@ -234,6 +235,22 @@ def write_file(
     content = re.sub(r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b', r'/\1.\2', content)
     # Also handle references to /raw/ without the trailing .md if any
     content = re.sub(r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b', r'/\1', content)
+
+    # Turn-aware path resolution for reports
+    normalized_path = file_path
+    if not normalized_path.startswith('/'):
+        if normalized_path.startswith('./'):
+            normalized_path = normalized_path[1:]
+        else:
+            normalized_path = '/' + normalized_path
+
+    if normalized_path.startswith("/final_report"):
+        from research_agent.utils.knowledge_filesystem import get_target_report_path
+        state_files = state.get("files") or {}
+        existing_reports = state.get("existing_reports") or []
+        resolved_path = get_target_report_path(content, state_files, existing_reports)
+        file_path = resolved_path
+        logger.info(f"Resolved report path: {file_path}")
 
     result = write_file_impl(file_path, content)
     logger.info(f"Successfully wrote file: {file_path}")

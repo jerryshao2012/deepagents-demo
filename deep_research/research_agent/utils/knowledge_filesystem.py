@@ -30,6 +30,9 @@ SUPPORTED_DOC_SUFFIXES = {".pdf", ".txt", ".md", ".docx", ".pptx", ".xlsx"}
 
 logger = setup_logger(__name__)
 
+# Global mapping of thread_id to existing_reports list to bypass injected state limitations in tools
+_thread_existing_reports: dict[str, list[str]] = {}
+
 
 def send_files_to_state(updates: dict) -> None:
     """Persist file updates to LangGraph state via the Pregel channel API.
@@ -517,6 +520,7 @@ def read_file_impl(
 def write_file_impl(
         file_path: str,
         content: str,
+        state: dict | None = None,
 ) -> str:
     """Write content to a file with virtual filesystem support.
 
@@ -527,24 +531,40 @@ def write_file_impl(
     Args:
         file_path: The path where the file should be written.
         content: The content to write to the file.
+        state: Optional state dictionary to modify directly (mostly for testing).
 
     Returns:
         Confirmation message with the normalized file path, or an error message.
     """
     try:
+        # If state is provided, update it (mostly for backward compatibility / tests)
+        if state is not None:
+            if "files" not in state:
+                state["files"] = {}
+            state["files"][file_path] = create_file_data(content)
+
         # Normalize the file path
         normalized_path = normalize_path_for_filesystem_tools(file_path)
 
-        # Persist to LangGraph state via the channel API (same mechanism as
-        # deepagents' built-in write_file tool).  Direct mutation of
-        # state["files"] does NOT survive the node boundary.
-        sandbox_file_path = file_path.lstrip('.') if file_path.startswith('./') else file_path
+        # Check if we are in a runnable context
+        runnable_context = False
         try:
-            send_files_to_state({sandbox_file_path: create_file_data(content)})
-            logger.info(f"Persisted to state: {sandbox_file_path}")
-            return f"Successfully wrote {len(content)} bytes to `{sandbox_file_path}`"
-        except Exception as e:
-            logger.warning(f"Could not persist {sandbox_file_path} to state: {e}")
+            get_config()
+            runnable_context = True
+        except Exception:
+            pass
+
+        if runnable_context:
+            # Persist to LangGraph state via the channel API (same mechanism as
+            # deepagents' built-in write_file tool).  Direct mutation of
+            # state["files"] does NOT survive the node boundary.
+            sandbox_file_path = file_path.lstrip('.') if file_path.startswith('./') else file_path
+            try:
+                send_files_to_state({sandbox_file_path: create_file_data(content)})
+                logger.info(f"Persisted to state: {sandbox_file_path}")
+                return f"Successfully wrote {len(content)} bytes to `{sandbox_file_path}`"
+            except Exception as e:
+                logger.warning(f"Could not persist {sandbox_file_path} to state: {e}")
 
         # Fallback to local filesystem
         reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
@@ -721,3 +741,121 @@ def read_doc_folder_impl(
     else:
         logger.info("\n".join(summary_lines))
         return "\n".join(summary_lines + ["", "--- EXTRACTED DOCUMENTS ---", ""] + extracted_text)
+
+
+def normalize_citations_for_comparison(text: str) -> str:
+    """Normalize text content for comparison by removing citation formatting differences."""
+    if not text:
+        return ""
+    # Normalize paths like /raw/bmo_ar2025.pdf.md to bmo_ar2025.pdf, /bmo_ar2025.pdf to bmo_ar2025.pdf
+    text = re.sub(r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b', r'\1.\2', text)
+    text = re.sub(r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b', r'\1', text)
+    text = re.sub(r'/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b', r'\1', text)
+    # Remove all whitespace to ignore formatting differences
+    return "".join(text.split())
+
+
+def get_target_report_path(content: str, state_files: dict | None, existing_reports: list[str] | None) -> str:
+    """Resolve the file path to write the report to, avoiding overwriting reports from previous turns.
+    
+    If the content (ignoring sanitization/citation diffs) matches any report in state_files,
+    that matching path is returned (in-place sanitization/update).
+    
+    Otherwise, if a new report file (not in existing_reports) was already created during this turn,
+    that path is returned (so multiple writes in the same turn reuse the same new path).
+    
+    Otherwise, a new report path is allocated (e.g. /final_report.md if it doesn't exist in existing_reports,
+    or /final_report_N.md where N is determined by incrementing the highest existing suffix).
+    """
+    state_files = state_files or {}
+
+    # Fallback to global thread mapping if existing_reports is None/empty
+    if not existing_reports:
+        try:
+            from langgraph.config import get_config
+            config = get_config()
+            thread_id = config.get("configurable", {}).get("thread_id")
+            if thread_id:
+                if str(thread_id) in _thread_existing_reports:
+                    existing_reports = _thread_existing_reports[str(thread_id)]
+        except Exception:
+            pass
+
+    existing_reports = existing_reports or []
+
+    norm_content = normalize_citations_for_comparison(content)
+
+    # 1. Check if the content is just a sanitized/variant version of a report currently in the state
+    for r_path in state_files:
+        if r_path.startswith("/final_report"):
+            try:
+                existing_content = file_data_to_string(state_files[r_path])
+                if normalize_citations_for_comparison(existing_content) == norm_content:
+                    return r_path
+            except Exception:
+                pass
+
+    # 2. Check if we already created a new report file during this turn (not in existing_reports)
+    new_reports_in_turn = [
+        p for p in state_files
+        if p.startswith("/final_report") and p not in existing_reports
+    ]
+    if new_reports_in_turn:
+        # Return the first/active one created in this turn
+        return sorted(new_reports_in_turn)[0]
+
+    # 3. Allocate a new path
+    if "/final_report.md" not in existing_reports:
+        return "/final_report.md"
+
+    max_n = 0
+    for r_path in existing_reports:
+        match = re.search(r'_(\d+)\.md$', r_path)
+        if match:
+            max_n = max(max_n, int(match.group(1)))
+
+    next_n = max_n + 1
+    return f"/final_report_{next_n}.md"
+
+
+def get_active_report_path(state_files: dict | None, existing_reports: list[str] | None) -> str:
+    """Find the active report path for the current turn.
+    
+    This is either:
+    1. A report file in state_files that is NOT in existing_reports (meaning it was created this turn).
+    2. Or if none, the highest index /final_report*.md in state_files.
+    3. Or default to "/final_report.md".
+    """
+    state_files = state_files or {}
+
+    # Fallback to global thread mapping if existing_reports is None/empty
+    if not existing_reports:
+        try:
+            from langgraph.config import get_config
+            config = get_config()
+            thread_id = config.get("configurable", {}).get("thread_id")
+            if thread_id:
+                if str(thread_id) in _thread_existing_reports:
+                    existing_reports = _thread_existing_reports[str(thread_id)]
+        except Exception:
+            pass
+
+    existing_reports = existing_reports or []
+
+    # 1. Look for a brand new report file created in this turn
+    new_reports = [p for p in state_files if p.startswith("/final_report") and p not in existing_reports]
+    if new_reports:
+        return sorted(new_reports)[-1]
+
+    # 2. Fall back to the highest numbered report that exists in state_files
+    existing_in_state = [p for p in state_files if p.startswith("/final_report")]
+    if existing_in_state:
+        def get_suffix_num(path: str) -> int:
+            match = re.search(r'_(\d+)\.md$', path)
+            if match:
+                return int(match.group(1))
+            return 0
+
+        return sorted(existing_in_state, key=get_suffix_num)[-1]
+
+    return "/final_report.md"

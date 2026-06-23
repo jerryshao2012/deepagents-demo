@@ -349,3 +349,102 @@ class TestWikiQueryResult:
         result = WikiQueryResult(answer="test", sources_cited=[cit])
         assert len(result.sources_cited) == 1
         assert result.sources_cited[0].page == 10
+
+
+# ── Turn-Aware Report Naming Tests ─────────────────────────────────────────
+
+class TestTurnAwareReportNaming:
+    """Tests for turn-aware report naming and dynamic path resolution."""
+
+    def test_normalize_citations_for_comparison(self) -> None:
+        from research_agent.utils.knowledge_filesystem import normalize_citations_for_comparison
+
+        t1 = "This is a report with citation (/raw/bmo_ar2025.pdf.md, p. 3)."
+        t2 = "This is a report with citation (/bmo_ar2025.pdf, p. 3)."
+        assert normalize_citations_for_comparison(t1) == normalize_citations_for_comparison(t2)
+
+        t3 = "Another one: /raw/some_deck.pptx.md."
+        t4 = "Another one: /some_deck.pptx."
+        assert normalize_citations_for_comparison(t3) == normalize_citations_for_comparison(t4)
+
+    def test_get_target_report_path_empty_state(self) -> None:
+        from research_agent.utils.knowledge_filesystem import get_target_report_path
+        from deepagents.backends.utils import create_file_data
+
+        content = "Some report content"
+        # If no reports exist at the start of the turn, return /final_report.md
+        assert get_target_report_path(content, {}, []) == "/final_report.md"
+
+    def test_get_target_report_path_inplace_update(self) -> None:
+        from research_agent.utils.knowledge_filesystem import get_target_report_path
+        from deepagents.backends.utils import create_file_data
+
+        content = "Some report content with citation (/raw/bmo_ar2025.pdf.md, p. 3)"
+        sanitized_content = "Some report content with citation (/bmo_ar2025.pdf, p. 3)"
+
+        state_files = {
+            "/final_report.md": create_file_data(content)
+        }
+        existing_reports = ["/final_report.md"]
+
+        # Since they are equivalent (only citation differences), return /final_report.md (in-place sanitization)
+        assert get_target_report_path(sanitized_content, state_files, existing_reports) == "/final_report.md"
+
+    def test_get_target_report_path_new_report(self) -> None:
+        from research_agent.utils.knowledge_filesystem import get_target_report_path
+        from deepagents.backends.utils import create_file_data
+
+        old_content = "Report 1 content"
+        new_content = "Report 2 content"
+
+        state_files = {
+            "/final_report.md": create_file_data(old_content),
+            "/final_report_1.md": create_file_data("some other report")
+        }
+        existing_reports = ["/final_report.md", "/final_report_1.md"]
+
+        # Since it's new content and both exist at start, allocate /final_report_2.md
+        assert get_target_report_path(new_content, state_files, existing_reports) == "/final_report_2.md"
+
+        # Test max suffix increment with a gap (e.g. /final_report.md and /final_report_2.md exist, next should be /final_report_3.md)
+        state_files_gap = {
+            "/final_report.md": create_file_data("a"),
+            "/final_report_2.md": create_file_data("b")
+        }
+        existing_reports_gap = ["/final_report.md", "/final_report_2.md"]
+        assert get_target_report_path("new content", state_files_gap, existing_reports_gap) == "/final_report_3.md"
+
+    def test_get_target_report_path_reuse_turn_path(self) -> None:
+        from research_agent.utils.knowledge_filesystem import get_target_report_path
+        from deepagents.backends.utils import create_file_data
+
+        old_content = "Report 1 content"
+        new_content_1 = "New Report first draft"
+        new_content_2 = "New Report final draft"
+
+        state_files = {
+            "/final_report.md": create_file_data(old_content),
+            "/final_report_1.md": create_file_data(new_content_1) # created this turn
+        }
+        existing_reports = ["/final_report.md"]
+
+        # Since /final_report_1.md was created in this turn (not in existing_reports),
+        # multiple writes in the same turn should reuse it even if content differs
+        assert get_target_report_path(new_content_2, state_files, existing_reports) == "/final_report_1.md"
+
+    def test_get_active_report_path(self) -> None:
+        from research_agent.utils.knowledge_filesystem import get_active_report_path
+        from deepagents.backends.utils import create_file_data
+
+        state_files = {
+            "/final_report.md": create_file_data("1"),
+            "/final_report_1.md": create_file_data("2"),
+            "/final_report_2.md": create_file_data("3"), # created this turn
+        }
+        existing_reports = ["/final_report.md", "/final_report_1.md"]
+
+        # Returns the newly created file in this turn
+        assert get_active_report_path(state_files, existing_reports) == "/final_report_2.md"
+
+        # If no new file created this turn, returns the highest index
+        assert get_active_report_path(state_files, ["/final_report.md", "/final_report_1.md", "/final_report_2.md"]) == "/final_report_2.md"

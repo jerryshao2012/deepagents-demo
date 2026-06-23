@@ -428,6 +428,10 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
         messages = thread.get("messages") or []
 
         # Build initial input state for deep_research agent
+        existing_reports = [k for k in existing_files if k.startswith("/final_report")]
+        from research_agent.utils.knowledge_filesystem import _thread_existing_reports
+        _thread_existing_reports[str(thread_id)] = existing_reports
+
         input_state = {
             "messages": messages,
             "files": existing_files,
@@ -435,6 +439,7 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
             "skill": existing_values.get("skill"),
             "no_web": existing_values.get("no_web"),
             "wiki_query_complete": existing_values.get("wiki_query_complete", False),
+            "existing_reports": existing_reports,
         }
 
         # Clean None values
@@ -480,7 +485,7 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
             if not needs_deep_research:
                 import logging
                 logging.getLogger(__name__).info(
-                    "Wiki answer is complete and sufficient (server). Saving to /final_report.md and disabling web search."
+                    "Wiki answer is complete and sufficient (server). Saving report and disabling web search."
                 )
                 if "files" not in input_state:
                     input_state["files"] = {}
@@ -494,7 +499,10 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
                     r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
                     r'/\1', sanitized_wiki_context,
                 )
-                input_state["files"]["/final_report.md"] = create_file_data(sanitized_wiki_context)
+                from research_agent.utils.knowledge_filesystem import get_target_report_path
+                existing_reports = input_state.get("existing_reports") or []
+                resolved_path = get_target_report_path(sanitized_wiki_context, input_state["files"], existing_reports)
+                input_state["files"][resolved_path] = create_file_data(sanitized_wiki_context)
                 input_state["no_web"] = True
                 input_state["wiki_query_complete"] = True
             else:
@@ -516,50 +524,51 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
 
         # Perform citation validation if enabled
         files = result.get("files", {})
-        for report_path in ["/final_report_1.md", "/final_report.md"]:
-            if report_path in files:
-                from deepagents.backends.utils import file_data_to_string, create_file_data
-                report_data = files[report_path]
-                report_text = file_data_to_string(report_data)
-                if os.getenv("DEEP_RESEARCH_VALIDATE_CITATIONS") == "1":
-                    from thread_wiki.service import _extract_citations
-                    from research_agent.utils.citation_validator import validate_web_citations
+        existing_reports = result.get("existing_reports") or []
+        from research_agent.utils.knowledge_filesystem import get_active_report_path
+        active_report_path = get_active_report_path(files, existing_reports)
 
-                    citations = _extract_citations(report_text)
-                    web_citations = [c for c in citations if c.kind == "web"]
-                    if web_citations:
-                        try:
-                            validation_results = await validate_web_citations(web_citations, report_text)
-                            if validation_results and "### Citation Verification" not in report_text:
-                                appendix_lines = ["", "### Citation Verification"]
-                                for res in validation_results:
-                                    appendix_lines.append(
-                                        f"- **[{res.url}]({res.url})**: Reachable: {'Yes' if res.reachable else 'No'}, "
-                                        f"Grounded: {'Yes' if res.grounded else 'No'} ({res.reason})"
-                                    )
-                                appendix = "\n".join(appendix_lines)
-                                new_report_text = report_text + "\n" + appendix
-                                files[report_path] = create_file_data(new_report_text)
-                                report_text = new_report_text
-                        except Exception as e:
-                            import logging
-                            logging.getLogger(__name__).warning(f"Citation validation failed: {e}", exc_info=True)
+        if active_report_path in files:
+            from deepagents.backends.utils import file_data_to_string, create_file_data
+            report_data = files[active_report_path]
+            report_text = file_data_to_string(report_data)
+            if os.getenv("DEEP_RESEARCH_VALIDATE_CITATIONS") == "1":
+                from thread_wiki.service import _extract_citations
+                from research_agent.utils.citation_validator import validate_web_citations
 
-                # Update the final chat message if it matches the unvalidated report
-                messages = result.get("messages", [])
-                if messages:
-                    last_msg = messages[-1]
-                    last_content = (
-                        last_msg.get("content", "") if isinstance(last_msg, dict)
-                        else getattr(last_msg, "content", "") or ""
-                    )
-                    if last_content.strip() == report_text.strip():
-                        if isinstance(last_msg, dict):
-                            last_msg["content"] = report_text
-                        else:
-                            setattr(last_msg, "content", report_text)
-                # Break after validating the first available report file
-                break
+                citations = _extract_citations(report_text)
+                web_citations = [c for c in citations if c.kind == "web"]
+                if web_citations:
+                    try:
+                        validation_results = await validate_web_citations(web_citations, report_text)
+                        if validation_results and "### Citation Verification" not in report_text:
+                            appendix_lines = ["", "### Citation Verification"]
+                            for res in validation_results:
+                                appendix_lines.append(
+                                    f"- **[{res.url}]({res.url})**: Reachable: {'Yes' if res.reachable else 'No'}, "
+                                    f"Grounded: {'Yes' if res.grounded else 'No'} ({res.reason})"
+                                )
+                            appendix = "\n".join(appendix_lines)
+                            new_report_text = report_text + "\n" + appendix
+                            files[active_report_path] = create_file_data(new_report_text)
+                            report_text = new_report_text
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).warning(f"Citation validation failed: {e}", exc_info=True)
+
+            # Update the final chat message if it matches the unvalidated report
+            messages = result.get("messages", [])
+            if messages:
+                last_msg = messages[-1]
+                last_content = (
+                    last_msg.get("content", "") if isinstance(last_msg, dict)
+                    else getattr(last_msg, "content", "") or ""
+                )
+                if last_content.strip() == report_text.strip():
+                    if isinstance(last_msg, dict):
+                        last_msg["content"] = report_text
+                    else:
+                        setattr(last_msg, "content", report_text)
 
         # Serialize messages
         serialized_messages = [serialize_message(m) for m in result.get("messages", [])]
@@ -571,30 +580,28 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
                 content = last_msg["content"]
 
                 # If the report was updated by citation validator, ensure the message is updated too
-                for report_path in ["/final_report_1.md", "/final_report.md"]:
-                    if report_path in files:
-                        from deepagents.backends.utils import file_data_to_string
-                        report_text = file_data_to_string(files[report_path])
-                        import re as _re
-                        report_text_sanitized = _re.sub(
-                            r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
-                            r'/\1.\2', report_text,
-                        )
-                        report_text_sanitized = _re.sub(
-                            r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
-                            r'/\1', report_text_sanitized,
-                        )
-                        content_sanitized = _re.sub(
-                            r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
-                            r'/\1.\2', content,
-                        )
-                        content_sanitized = _re.sub(
-                            r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
-                            r'/\1', content_sanitized,
-                        )
-                        if content_sanitized.strip() == report_text_sanitized.strip() or "### Citation Verification" in report_text:
-                            content = report_text
-                        break
+                if active_report_path in files:
+                    from deepagents.backends.utils import file_data_to_string
+                    report_text = file_data_to_string(files[active_report_path])
+                    import re as _re
+                    report_text_sanitized = _re.sub(
+                        r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
+                        r'/\1.\2', report_text,
+                    )
+                    report_text_sanitized = _re.sub(
+                        r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
+                        r'/\1', report_text_sanitized,
+                    )
+                    content_sanitized = _re.sub(
+                        r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
+                        r'/\1.\2', content,
+                    )
+                    content_sanitized = _re.sub(
+                        r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
+                        r'/\1', content_sanitized,
+                    )
+                    if content_sanitized.strip() == report_text_sanitized.strip() or "### Citation Verification" in report_text:
+                        content = report_text
 
                 # Sanitize /raw/ references
                 import re as _re
@@ -616,6 +623,7 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
             "skill": result.get("skill"),
             "no_web": result.get("no_web"),
             "wiki_query_complete": result.get("wiki_query_complete"),
+            "existing_reports": result.get("existing_reports"),
         }
 
         db.update_thread(thread_id, serialized_messages, serializable_result)
