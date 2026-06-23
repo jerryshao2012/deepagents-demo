@@ -495,6 +495,35 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
             if run_data and run_data.get("status") == "cancelled":
                 return
 
+        # Perform citation validation if enabled
+        files = result.get("files", {})
+        if "/final_report.md" in files:
+            from deepagents.backends.utils import file_data_to_string, create_file_data
+            report_data = files["/final_report.md"]
+            report_text = file_data_to_string(report_data)
+            if os.getenv("DEEP_RESEARCH_VALIDATE_CITATIONS") == "1":
+                from thread_wiki.service import _extract_citations
+                from research_agent.utils.citation_validator import validate_web_citations
+
+                citations = _extract_citations(report_text)
+                web_citations = [c for c in citations if c.kind == "web"]
+                if web_citations:
+                    try:
+                        validation_results = await validate_web_citations(web_citations, report_text)
+                        if validation_results and "### Citation Verification" not in report_text:
+                            appendix_lines = ["", "### Citation Verification"]
+                            for res in validation_results:
+                                appendix_lines.append(
+                                    f"- **[{res.url}]({res.url})**: Reachable: {'Yes' if res.reachable else 'No'}, "
+                                    f"Grounded: {'Yes' if res.grounded else 'No'} ({res.reason})"
+                                )
+                            appendix = "\n".join(appendix_lines)
+                            new_report_text = report_text + "\n" + appendix
+                            files["/final_report.md"] = create_file_data(new_report_text)
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).warning(f"Citation validation failed: {e}", exc_info=True)
+
         # Serialize messages
         serialized_messages = [serialize_message(m) for m in result.get("messages", [])]
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from json import dumps as json_dumps
 from typing import Annotated, Literal
 
@@ -17,6 +18,15 @@ verify_ssl = get_ssl_verify_config()
 tavily_session = requests.Session()
 tavily_session.verify = verify_ssl
 tavily_client = TavilyClient(session=tavily_session)
+
+_web_page_cache: dict[str, str] = {}
+_cache_lock = threading.Lock()
+
+
+def get_cached_webpage(url: str) -> str | None:
+    """Retrieve cached webpage content by URL."""
+    with _cache_lock:
+        return _web_page_cache.get(url)
 
 
 def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float = 60.0) -> dict:
@@ -84,7 +94,16 @@ def fetch_webpage_content_impl(
             verify=verify_ssl,
         )
         response.raise_for_status()
-        return markdownify(response.text)
+        content = markdownify(response.text)
+        with _cache_lock:
+            if len(_web_page_cache) >= 200:
+                try:
+                    first_key = next(iter(_web_page_cache))
+                    _web_page_cache.pop(first_key)
+                except StopIteration:
+                    pass
+            _web_page_cache[url] = content
+        return content
     except Exception as exc:
         return f"Error fetching content from {url}: {exc}"
 

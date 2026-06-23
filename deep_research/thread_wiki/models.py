@@ -130,12 +130,31 @@ class WikiQueryRequest:
 
 
 @dataclass(frozen=True)
+class SourceCitation:
+    """A single source reference parsed from an answer.
+
+    Citation kinds:
+    - ``raw``: an uploaded document raw path, e.g. ``/raw/report.pdf.md``.
+      ``page`` carries the PDF page number when derivable.
+    - ``web``: a web URL, with ``url`` set and ``locator`` holding the title.
+    - ``section``: a ``file#Heading`` reference, with ``locator`` holding the
+      heading text.
+    """
+
+    kind: str = "raw"
+    raw_path: str | None = None
+    page: int | None = None
+    locator: str | None = None
+    url: str | None = None
+
+
+@dataclass(frozen=True)
 class WikiQueryResult:
     """Result from a wiki query operation."""
 
     answer: str
     filed_path: str | None = None
-    sources_cited: list[str] = field(default_factory=list)
+    sources_cited: list[SourceCitation] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

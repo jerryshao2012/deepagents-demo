@@ -4,8 +4,8 @@ import re
 
 import jsonschema
 
-from research_agent.utils.skill_registry import get_skill_registry
 from research_agent.utils.json_utils import robust_json_loads
+from research_agent.utils.skill_registry import get_skill_registry
 
 
 def _coerce_integers(value: object, schema: dict) -> object:

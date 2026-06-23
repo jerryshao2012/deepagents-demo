@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 
 from deepagents.backends.utils import create_file_data
 from dotenv import load_dotenv
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
@@ -207,6 +208,70 @@ def read_doc_folder(
     result = read_doc_folder_impl(folder_path, specific_files, state)
     logger.info(f"Successfully processed document folder: {folder_path}")
     return result
+
+
+@tool(parse_docstring=True)
+def retrieve_thread_documents(
+        query: str,
+        config: RunnableConfig,
+        k: int = 5,
+) -> str:
+    """Retrieve top-k relevant document chunks from the thread's local search index.
+
+    Use this tool when search/read of document folder fails or indicates that the document corpus is too large to read inline,
+    or when you need specific factual context from the local documents using vector retrieval.
+
+    Args:
+        query: Search query for retrieval.
+        k: Number of relevant chunks to retrieve (default: 5).
+    """
+    logger.info(f"Retrieving thread documents for query: {query}, k: {k}")
+    try:
+        from thread_wiki.models import ThreadWikiPaths
+        from research_agent.utils.retrieval import load_or_build_index
+        from model_factory import create_embedding_model
+
+        thread_id = config.get("configurable", {}).get("thread_id")
+        if not thread_id:
+            return "Error: thread_id not found in configuration; cannot retrieve documents."
+
+        base_dir = Path(".").resolve()
+        paths = ThreadWikiPaths.resolve(str(thread_id), base_dir)
+        index_dir = paths.wiki_dir / "index"
+
+        embedding_model = create_embedding_model()
+
+        vectorstore = load_or_build_index(paths.raw_dir, index_dir, embedding_model)
+        if not vectorstore:
+            return "Error: No document index is available or could be built for this thread. Ensure documents are ingested first."
+
+        results = vectorstore.similarity_search_with_score(query, k=k)
+        if not results:
+            return "No matching document snippets found."
+
+        output_lines = []
+        for idx, (doc, score) in enumerate(results, start=1):
+            meta = doc.metadata
+            src = meta.get("source_path") or "unknown"
+            page = meta.get("page")
+            locator = meta.get("locator")
+            heading = meta.get("heading")
+
+            location_parts = []
+            if page:
+                location_parts.append(f"p. {page}")
+            if locator and locator != f"Page {page}":
+                location_parts.append(locator)
+            if heading:
+                location_parts.append(heading)
+
+            loc_str = f" ({', '.join(location_parts)})" if location_parts else ""
+            output_lines.append(f"[{idx}] Source: {src}{loc_str} (Score: {score:.4f})\n{doc.page_content}\n")
+
+        return "\n---\n\n".join(output_lines)
+    except Exception as e:
+        logger.error(f"Error in retrieve_thread_documents tool: {e}", exc_info=True)
+        return f"Error retrieving thread documents: {e}"
 
 
 @tool(parse_docstring=True)

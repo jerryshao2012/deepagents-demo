@@ -7,21 +7,67 @@ from logger_utils import setup_logger
 logger = setup_logger(__name__)
 
 
+def _render_page_chunk(page_number: int, markdown: str) -> str:
+    """Render a single page chunk with machine + human-readable page markers.
+
+    Emits an HTML-comment sentinel (``<!-- page: N -->``) that is invisible in
+    rendered markdown but trivially parseable, followed by a ``## Page N``
+    heading so agents and the existing ``read_file`` section selector can both
+    target an individual page.
+    """
+    body = markdown.strip()
+    return f"<!-- page: {page_number} -->\n## Page {page_number}\n\n{body}"
+
+
 def _extract_pdf_text(file_path: Path) -> str:
-    """Extract PDF content as markdown without ML model downloads.\n\n    Returns:
-        str: Extracted content from the PDF file.
+    """Extract PDF content as markdown with per-page boundary markers.
+
+    Primary path uses ``pymupdf4llm.to_markdown(page_chunks=True)`` which
+    returns a list of per-page dicts (each carrying ``metadata.page``). Each
+    page is rendered with a ``<!-- page: N -->`` sentinel + ``## Page N``
+    heading so page numbers survive into citations.
+
+    Falls back to the older single-string ``to_markdown`` call (page
+    granularity unavailable) and finally to ``pypdf`` per-page extraction.
+
+    Returns:
+        str: Extracted markdown content with page markers.
     """
     try:
         import pymupdf4llm
 
-        logger.info("Use PyMuPDF4LLM for PDF markdown extraction.")
+        logger.info("Use PyMuPDF4LLM for PDF markdown extraction (page_chunks=True).")
 
-        markdown_content = pymupdf4llm.to_markdown(str(file_path))
-        if isinstance(markdown_content, list):
-            # Convert each dictionary to a string representation
-            return "\n\n".join(str(item) for item in markdown_content)
-        if markdown_content.strip():
+        markdown_content = pymupdf4llm.to_markdown(
+            str(file_path), page_chunks=True, show_progress=False
+        )
+
+        if isinstance(markdown_content, list) and markdown_content:
+            page_blocks: list[str] = []
+            for index, chunk in enumerate(markdown_content, start=1):
+                # page_chunks=True returns dicts like {"metadata": {...}, "content": ...}
+                if isinstance(chunk, dict):
+                    metadata = chunk.get("metadata") or {}
+                    page_number = metadata.get("page_number") or metadata.get("page") or index
+                    body = chunk.get("text") or chunk.get("content") or chunk.get("markdown") or ""
+                    page_blocks.append(_render_page_chunk(int(page_number), str(body)))
+                else:
+                    # Unexpected item shape; render with enumerated page number.
+                    page_blocks.append(_render_page_chunk(index, str(chunk)))
+            return "\n\n".join(page_blocks)
+
+        # Older pymupdf4llm versions or non-chunked mode return a flat string.
+        if isinstance(markdown_content, str) and markdown_content.strip():
+            logger.warning(
+                "pymupdf4llm returned a flat string for %s; "
+                "page-level markers unavailable.",
+                file_path.name,
+            )
             return markdown_content
+
+        # Empty/None result → fall through to pypdf fallback below.
+        if markdown_content:
+            return str(markdown_content)
     except Exception as e:
         logger.error(f"PyMuPDF4LLM PDF extraction failed: {e}")
         # Fallback to pypdf if markdown extraction fails
@@ -34,7 +80,7 @@ def _extract_pdf_text(file_path: Path) -> str:
             for index, page in enumerate(reader.pages, start=1):
                 text = (page.extract_text() or "").strip()
                 if text:
-                    page_texts.append(f"## Page {index}:\n\n{text}")
+                    page_texts.append(_render_page_chunk(index, text))
             return "\n\n".join(page_texts)
         except Exception as e:
             return f"Error extracting PDF text: {e}"
@@ -46,37 +92,60 @@ def _extract_text_file(file_path: Path) -> str:
 
 
 def _extract_docx_text(file_path: Path) -> str:
+    """Extract DOCX content preserving heading levels as machine sentinels.
+
+    Headings emit an ``<!-- heading: N -->`` sentinel so downstream citation
+    capture and navigation can locate claims by heading path.
+    """
     from docx import Document
 
     document = Document(str(file_path))
-    paragraphs = [
-        paragraph.text.strip()
-        for paragraph in document.paragraphs
-        if paragraph.text and paragraph.text.strip()
-    ]
+    lines: list[str] = []
+
+    for paragraph in document.paragraphs:
+        text = (paragraph.text or "").strip()
+        if not text:
+            continue
+        style_name = ""
+        try:
+            style_name = paragraph.style.name if paragraph.style else ""
+        except Exception:
+            style_name = ""
+        if style_name and style_name.lower().startswith("heading"):
+            level = "".join(ch for ch in style_name if ch.isdigit())
+            level_int = int(level) if level else 1
+            lines.append(f"<!-- heading: {level_int} -->")
+            lines.append(text)
+        else:
+            lines.append(text)
 
     # Many documents are table-based; include table cells so content is not silently missed.
+    table_index = 0
     for table in document.tables:
+        table_index += 1
+        lines.append(f"<!-- table: {table_index} -->")
         for row in table.rows:
             for cell in row.cells:
-                call_paragraph = [
-                    paragraph.text.strip()
-                    for paragraph in cell.paragraphs
-                    if paragraph.text and paragraph.text.strip()
-                ]
-                if call_paragraph:
-                    paragraphs.extend(call_paragraph)
+                for paragraph in cell.paragraphs:
+                    cell_text = (paragraph.text or "").strip()
+                    if cell_text:
+                        lines.append(cell_text)
 
-    return "\n".join(paragraphs)
+    return "\n".join(lines)
 
 
 def _extract_pptx_text(file_path: Path) -> str:
+    """Extract PPTX content with machine-readable slide sentinels.
+
+    Each slide emits an ``<!-- slide: N -->`` sentinel mirroring the PDF
+    ``<!-- page: N -->`` convention, enabling uniform citation capture.
+    """
     from pptx import Presentation
 
     presentation = Presentation(str(file_path))
     slide_sections: list[str] = []
     for index, slide in enumerate(presentation.slides, start=1):
-        parts: list[str] = [f"Slide {index}"]
+        parts: list[str] = [f"<!-- slide: {index} -->", f"Slide {index}"]
         for shape in slide.shapes:
             text = getattr(shape, "text", "")
             if text and text.strip():
@@ -98,19 +167,26 @@ def _extract_pptx_text(file_path: Path) -> str:
 
 
 def _extract_xlsx_text(file_path: Path) -> str:
+    """Extract XLSX content preserving sheet + row locators.
+
+    Each data row carries an ``<!-- sheet: <name>; row: N -->`` sentinel so
+    claims can be cited down to a spreadsheet row.
+    """
     from openpyxl import load_workbook
 
     workbook = load_workbook(filename=str(file_path), read_only=True, data_only=True)
     sections: list[str] = []
     try:
         for worksheet in workbook.worksheets:
-            rows: list[str] = []
-            for row in worksheet.iter_rows(values_only=True):
+            sheet_lines: list[str] = [f"<!-- sheet: {worksheet.title} -->", f"Sheet: {worksheet.title}"]
+            for row_index, row in enumerate(worksheet.iter_rows(values_only=True), start=1):
                 values = [str(value).strip() for value in row if value not in (None, "")]
-                if values:
-                    rows.append(" | ".join(values))
-            body = "\n".join(rows) if rows else "(empty sheet)"
-            sections.append(f"Sheet: {worksheet.title}\n{body}")
+                if not values:
+                    continue
+                sheet_lines.append(f"<!-- sheet: {worksheet.title}; row: {row_index} -->")
+                sheet_lines.append(" | ".join(values))
+            sections.append(
+                "\n".join(sheet_lines) if len(sheet_lines) > 2 else f"Sheet: {worksheet.title}\n(empty sheet)")
     finally:
         workbook.close()
 

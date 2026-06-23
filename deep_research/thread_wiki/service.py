@@ -24,6 +24,7 @@ import sys
 from .models import (
     IngestPhase,
     IngestProgress,
+    SourceCitation,
     ThreadWikiPaths,
     WikiQueryResult,
 )
@@ -649,6 +650,97 @@ async def run_ingest(
         raise
 
 
+def _extract_citations(answer: str) -> list[SourceCitation]:
+    """Extract cited source paths, pages, locators, and web URLs from the answer text."""
+    if not answer:
+        return []
+
+    citations: list[SourceCitation] = []
+    seen_web_urls: set[str] = set()
+    seen_raw_citations: set[tuple[str, int | None, str | None]] = set()
+
+    # 1. Parse Sources block and numbered web citations
+    # Example: [1] AI Research: https://example.com/ai
+    # We match [index] title/locator: url
+    # Note the title/locator is optional, but if present it resides between [index] and :
+    numbered_ref_re = re.compile(r"\[(\d+)]\s*(.*?):\s*(https?://[^\s)\],;]+)", re.IGNORECASE)
+    for match in numbered_ref_re.finditer(answer):
+        locator = match.group(2).strip()
+        url = match.group(3).rstrip(".,;)]")
+        if url not in seen_web_urls:
+            seen_web_urls.add(url)
+            citations.append(SourceCitation(kind="web", url=url, locator=locator or None))
+
+    # 2. Parse bare URLs (excluding those already matched as numbered)
+    # Match any http/https URL in the text
+    url_re = re.compile(r"(https?://[^\s)\],;]+)", re.IGNORECASE)
+    for match in url_re.finditer(answer):
+        url = match.group(1).rstrip(".,;)]")
+        if url not in seen_web_urls:
+            seen_web_urls.add(url)
+            citations.append(SourceCitation(kind="web", url=url, locator=None))
+
+    # 3. Parse Section References (e.g. policies.md#Risk-Factors)
+    # Format: filename.md#Heading-Anchor, making sure it doesn't start with /raw/
+    # If Group 1 (/raw/) is present, it's skipped here (will be parsed as raw citation).
+    section_re = re.compile(r"(/raw/)?\b([A-Za-z0-9._\-]+\.md)#([A-Za-z0-9._\-]+)", re.IGNORECASE)
+    for match in section_re.finditer(answer):
+        if match.group(1):
+            continue
+        raw_path = match.group(2)
+        locator = match.group(3)
+        citations.append(SourceCitation(kind="section", raw_path=raw_path, locator=locator))
+
+    # 4. Parse Raw citations
+    # Match /raw/<path> and look for trailing page or locator metadata
+    raw_path_re = re.compile(r"/raw/([A-Za-z0-9._/\-]+)", re.IGNORECASE)
+    page_re = re.compile(r"^\s*[,(\[\s]?\s*p(?:age)?\.?\s*(\d+)\b", re.IGNORECASE)
+    slide_re = re.compile(r"^\s*[,(\[\s]?\s*(Slide\s*\d+)\b", re.IGNORECASE)
+    xlsx_re = re.compile(r"^\s*[,(\[\s]?\s*(Sheet:\s*[^,\n)]+?,\s*(?:row|col)\s*\d+)\b", re.IGNORECASE)
+
+    for match in raw_path_re.finditer(answer):
+        raw_path = "/raw/" + match.group(1)
+
+        # Look at context immediately following the raw path
+        start_idx = match.end()
+        next_raw = answer.find("/raw/", start_idx)
+        next_nl = answer.find("\n", start_idx)
+        end_idx = len(answer)
+        if next_raw != -1:
+            end_idx = min(end_idx, next_raw)
+        if next_nl != -1:
+            end_idx = min(end_idx, next_nl)
+        end_idx = min(end_idx, start_idx + 100)
+        tail = answer[start_idx:end_idx]
+
+        page: int | None = None
+        locator: str | None = None
+
+        page_match = page_re.search(tail)
+        if page_match:
+            page = int(page_match.group(1))
+        else:
+            slide_match = slide_re.search(tail)
+            if slide_match:
+                locator = slide_match.group(1)
+            else:
+                xlsx_match = xlsx_re.search(tail)
+                if xlsx_match:
+                    locator = xlsx_match.group(1)
+
+        key = (raw_path, page, locator)
+        if key not in seen_raw_citations:
+            seen_raw_citations.add(key)
+            citations.append(SourceCitation(
+                kind="raw",
+                raw_path=raw_path,
+                page=page,
+                locator=locator,
+            ))
+
+    return citations
+
+
 async def run_query(
         paths: ThreadWikiPaths,
         topic: str,
@@ -694,10 +786,9 @@ async def run_query(
         )
         filed_path = target
 
-    # Extract cited source paths from the answer text.
-    cited = re.findall(r"/raw/([A-Za-z0-9._/\-]+)", answer)
+    citations = _extract_citations(answer)
 
-    return WikiQueryResult(answer=answer, filed_path=filed_path, sources_cited=cited)
+    return WikiQueryResult(answer=answer, filed_path=filed_path, sources_cited=citations)
 
 
 async def run_lint(

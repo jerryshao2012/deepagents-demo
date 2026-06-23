@@ -699,8 +699,25 @@ def read_doc_folder_impl(
     total_text = "\n".join(extracted_text)
     if len(total_text) > 40000:
         logger.info("\n".join(summary_lines))
-        return "\n".join(summary_lines + ["",
-                                          f"Text omitted because total size is {len(total_text)} chars (too large to display inline). Please use the `read_file` tool on the specific file paths listed above to read them."])
+        try:
+            from model_factory import create_embedding_model
+            from research_agent.utils.retrieval import load_or_build_index
+
+            embedding_model = create_embedding_model()
+            extracted_dir = output_subfolder / "extracted"
+            index_dir = output_subfolder / "index"
+            load_or_build_index(extracted_dir, index_dir, embedding_model)
+
+            return "\n".join(summary_lines + [
+                "",
+                f"Text omitted because total size is {len(total_text)} chars (too large to display inline).",
+                "A local search index has been created for these documents.",
+                "You MUST use the `retrieve_documents` tool to query the documents and search for specific factual data/evidence."
+            ])
+        except Exception as e:
+            logger.error(f"Failed to build vector index: {e}", exc_info=True)
+            return "\n".join(summary_lines + ["",
+                                              f"Text omitted because total size is {len(total_text)} chars (too large to display inline). Please use the `read_file` tool on the specific file paths listed above to read them."])
     else:
         logger.info("\n".join(summary_lines))
         return "\n".join(summary_lines + ["", "--- EXTRACTED DOCUMENTS ---", ""] + extracted_text)

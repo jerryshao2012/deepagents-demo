@@ -184,11 +184,26 @@ Query the thread's wiki knowledge base. Returns a grounded answer with citations
 **Response:**
 ```json
 {
-  "answer": "Based on the ingested documents, the key findings are...\n\nSources: /raw/document.pdf.md",
+  "answer": "Based on the ingested documents, the key findings are...\n\nSources: (Source: /raw/document.pdf.md, p. 42)",
   "filed_path": "/wiki/query/key-findings-about-topic-x.md",
-  "sources_cited": ["document.pdf.md"]
+  "sources_cited": [
+    {
+      "kind": "raw",
+      "raw_path": "/raw/document.pdf.md",
+      "page": 42,
+      "locator": null,
+      "url": null
+    }
+  ]
 }
 ```
+
+Each `SourceCitation` object contains:
+- `kind`: one of `"raw"` (uploaded document), `"web"` (URL), or `"section"` (file#heading)
+- `raw_path`: the document path (for `raw`/`section` kinds)
+- `page`: page number when derivable (for PDFs)
+- `locator`: free-form locator (slide number, sheet+row, heading text, or web source title)
+- `url`: URL (for `web` kind)
 
 **Example:**
 ```bash

@@ -80,11 +80,21 @@ class WikiStatusResponse(BaseModel):
     wiki_ready: bool
 
 
+class SourceCitationOut(BaseModel):
+    """A single structured source citation parsed from an answer."""
+
+    kind: str = "raw"
+    raw_path: str | None = None
+    page: int | None = None
+    locator: str | None = None
+    url: str | None = None
+
+
 class WikiQueryResponse(BaseModel):
     """Response from a wiki query."""
     answer: str
     filed_path: str | None = None
-    sources_cited: list[str] = Field(default_factory=list)
+    sources_cited: list[SourceCitationOut] = Field(default_factory=list)
 
 
 class WikiLintResponse(BaseModel):
@@ -363,7 +373,16 @@ async def query_wiki(
     return WikiQueryResponse(
         answer=result.answer,
         filed_path=result.filed_path,
-        sources_cited=result.sources_cited,
+        sources_cited=[
+            SourceCitationOut(
+                kind=c.kind,
+                raw_path=c.raw_path,
+                page=c.page,
+                locator=c.locator,
+                url=c.url,
+            )
+            for c in result.sources_cited
+        ],
     )
 
 

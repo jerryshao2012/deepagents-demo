@@ -36,6 +36,7 @@ from research_agent.tools import (
     write_file,
     tavily_search,
     fetch_webpage_content,
+    retrieve_thread_documents,
 )
 from research_agent.utils.cli import (
     build_instruction,
@@ -137,17 +138,57 @@ class ResearchStateMiddleware(AgentMiddleware):
                 relative = md_file.relative_to(wiki_dir)
                 parts.append(f"--- wiki/{relative} ---\n{content}")
 
-            # 2) Raw source excerpts (first ~80 000 chars of each file so
-            #    key financial tables and executive summaries are captured).
+            # 2) Raw source excerpts or vector index prompt
             raw_dir = paths.raw_dir
             if raw_dir.exists():
+                raw_files = sorted(raw_dir.rglob("*.md"))
+                total_chars = 0
+                for raw_file in raw_files:
+                    try:
+                        total_chars += len(raw_file.read_text(encoding="utf-8"))
+                    except Exception:
+                        pass
                 _MAX_RAW_CHARS = 80_000
-                for raw_file in sorted(raw_dir.rglob("*.md")):
-                    raw_content = raw_file.read_text(encoding="utf-8")
-                    relative = raw_file.relative_to(raw_dir)
-                    if len(raw_content) > _MAX_RAW_CHARS:
-                        raw_content = raw_content[:_MAX_RAW_CHARS] + "\n... [truncated]"
-                    parts.append(f"--- raw/{relative} (excerpt) ---\n{raw_content}")
+
+                # Check if we should trigger vector indexing
+                if total_chars > _MAX_RAW_CHARS or any(
+                        raw_file.lstat().st_size > _MAX_RAW_CHARS for raw_file in raw_files):
+                    try:
+                        from model_factory import create_embedding_model
+                        from research_agent.utils.retrieval import load_or_build_index
+
+                        embedding_model = create_embedding_model()
+                        index_dir = paths.wiki_dir / "index"
+                        load_or_build_index(raw_dir, index_dir, embedding_model)
+
+                        parts.append(
+                            "--- Raw Source Documents ---\n"
+                            "Note: The local raw source documents are too large to display in full inline. "
+                            "A local vector search index has been created for this thread. "
+                            "You MUST use the `retrieve_documents` tool to query the documents and search "
+                            "for specific factual evidence/data."
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to build vector index: {e}", exc_info=True)
+                        # Fallback to truncation if indexing fails
+                        for raw_file in raw_files:
+                            try:
+                                raw_content = raw_file.read_text(encoding="utf-8")
+                                relative = raw_file.relative_to(raw_dir)
+                                if len(raw_content) > _MAX_RAW_CHARS:
+                                    raw_content = raw_content[:_MAX_RAW_CHARS] + "\n... [truncated]"
+                                parts.append(f"--- raw/{relative} (excerpt) ---\n{raw_content}")
+                            except Exception:
+                                pass
+                else:
+                    # Small enough, include in full inline
+                    for raw_file in raw_files:
+                        try:
+                            raw_content = raw_file.read_text(encoding="utf-8")
+                            relative = raw_file.relative_to(raw_dir)
+                            parts.append(f"--- raw/{relative} ---\n{raw_content}")
+                        except Exception:
+                            pass
 
             combined = "\n\n".join(parts)
             return combined if combined.strip() else None
@@ -509,7 +550,20 @@ class ResearchStateMiddleware(AgentMiddleware):
                 "}\n"
                 "Do not include any other text in your response, only the valid JSON object."
             )
-            response = model.invoke([HumanMessage(content=prompt)])
+            def _invoke():
+                return model.invoke([HumanMessage(content=prompt)])
+
+            try:
+                current_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                current_loop = None
+
+            if current_loop is not None and current_loop.is_running():
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    response = pool.submit(_invoke).result(timeout=60)
+            else:
+                response = _invoke()
+
             content = response.content.strip()
             if content.startswith("```json"):
                 content = content[7:]
@@ -945,6 +999,7 @@ agent = create_deep_agent(
         ls,
         glob,
         read_doc_folder,
+        retrieve_thread_documents,
         render_skill_output,
         finalize_golden_dataset_output,
     ],

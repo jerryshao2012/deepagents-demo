@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     cifs-utils \
+    ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
 # Install a specific, stable version of uv
