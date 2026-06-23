@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
+import sys
 from langchain_core.messages import AIMessage, ToolMessage
 
 import research_agent_cli

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import sys
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 

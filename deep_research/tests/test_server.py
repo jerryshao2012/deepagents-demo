@@ -7,11 +7,11 @@ The agent's ainvoke is patched to return a canned response.
 from __future__ import annotations
 
 import asyncio
-import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import sys
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
@@ -215,7 +215,7 @@ def test_thread_ownership(client, monkeypatch):
     monkeypatch.setenv("LANGCHAIN_API_KEY", "secret-key")
 
     # Set up mock OAuth session validation
-    from oauth_handler import user_manager
+    from webapp.oauth_handler import user_manager
     session_store = {"token-user-1": {"identity": "user-1", "name": "User One"},
                      "token-user-2": {"identity": "user-2", "name": "User Two"}}
 

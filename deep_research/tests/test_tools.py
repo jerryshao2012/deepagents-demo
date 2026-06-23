@@ -4,7 +4,6 @@ from langchain_core.messages import HumanMessage
 
 from agent import ResearchStateMiddleware
 from research_agent import tools
-from research_agent.utils.skill_registry import get_skill_registry
 from research_agent.tools import (
     fetch_webpage_content,
 )
@@ -12,6 +11,7 @@ from research_agent.tools import (
     finalize_golden_dataset_output,
     read_doc_folder,
 )
+from research_agent.utils.skill_registry import get_skill_registry
 
 
 def test_get_skill_definition_renders_slides_from_definition() -> None:

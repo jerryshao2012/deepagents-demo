@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Test reachability of google.com."""
 
-import sys
-
 import httpx
+import sys
 
 
 def test_google_reachable():

@@ -1,5 +1,5 @@
-from pathlib import Path
 import tomllib
+from pathlib import Path
 
 
 def test_pyproject_packages_include_skill_modules() -> None:

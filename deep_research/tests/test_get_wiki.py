@@ -1,6 +1,7 @@
 import asyncio
 import concurrent.futures
 from pathlib import Path
+
 from thread_wiki.models import ThreadWikiPaths
 from thread_wiki.service import run_query
 
@@ -20,6 +21,7 @@ else:
 
 topic = f"Thread {thread_id[:8]}"
 
+
 def _run_coro():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -27,6 +29,7 @@ def _run_coro():
         return loop.run_until_complete(run_query(paths, topic, question, file_results=False))
     finally:
         loop.close()
+
 
 print("3. Running thread pool executor")
 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:

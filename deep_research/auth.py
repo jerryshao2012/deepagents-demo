@@ -1,11 +1,11 @@
 import os
-from typing import Set, Any
+from typing import Set
 
 from fastapi import HTTPException
 from langgraph_sdk import Auth
 
 from logger_utils import setup_logger
-from oauth_handler import user_manager
+from webapp.oauth_handler import user_manager
 
 logger = setup_logger(__name__)
 

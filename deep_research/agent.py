@@ -848,7 +848,9 @@ class ResearchStateMiddleware(AgentMiddleware):
                     except Exception:
                         pass
                 else:
-                    # If /final_report.md doesn't exist, still sanitize the last chat message if it has raw references
+                    # The agent finished without writing a report file (e.g. it answered
+                    # directly in chat).  Save the chat response as a new report file so
+                    # the user still gets a persisted artifact for every turn.
                     try:
                         last_content = (
                             last_msg.get("content", "") if isinstance(last_msg, dict)
@@ -861,6 +863,17 @@ class ResearchStateMiddleware(AgentMiddleware):
                             last_content_sanitized = re.sub(
                                 doc_regex, remove_raw_regex, last_content_sanitized,
                             )
+                            # Persist as a report file (mirrors the wiki_query_complete branch)
+                            if "files" not in updates:
+                                updates["files"] = {}
+                            from research_agent.utils.knowledge_filesystem import get_target_report_path
+                            state_files = state.get("files") or {}
+                            existing_reports = state.get("existing_reports") or []
+                            resolved_path = get_target_report_path(last_content_sanitized, state_files, existing_reports)
+                            updates["files"][resolved_path] = create_file_data(last_content_sanitized)
+                            send_files_to_state({resolved_path: create_file_data(last_content_sanitized)})
+                
+                            # Update the last message content in-place
                             if last_content_sanitized != last_content:
                                 if isinstance(last_msg, dict):
                                     last_msg["content"] = last_content_sanitized

@@ -62,15 +62,43 @@ class OAuthUserManager:
         return session_token
 
     def validate_session(self, session_token: str) -> Optional[dict]:
-        """Validate session token and return user data if valid."""
+        """Validate session token and return user data if valid.
+
+        Implements a sliding window: if the session has less than 1 hour
+        remaining, automatically extend the expiry by 24 hours from now.
+        """
         session = self.sessions.get(session_token)
         if not session:
             return None
 
-        if datetime.now(timezone.utc) > session["expires_at"]:
+        now = datetime.now(timezone.utc)
+        if now > session["expires_at"]:
             del self.sessions[session_token]
             return None
 
+        # Sliding window: extend session if less than 1 hour remaining
+        remaining = session["expires_at"] - now
+        if remaining < timedelta(hours=1):
+            session["expires_at"] = now + timedelta(hours=24)
+
+        return session["user_data"]
+
+    def refresh_session(self, session_token: str) -> Optional[dict]:
+        """Explicitly extend a session's expiry by 24 hours.
+
+        Returns the user data if the session was found and refreshed,
+        None if the session doesn't exist or is already expired.
+        """
+        session = self.sessions.get(session_token)
+        if not session:
+            return None
+
+        now = datetime.now(timezone.utc)
+        if now > session["expires_at"]:
+            del self.sessions[session_token]
+            return None
+
+        session["expires_at"] = now + timedelta(hours=24)
         return session["user_data"]
 
     def cleanup_expired_sessions(self):
@@ -83,7 +111,7 @@ class OAuthUserManager:
         ]
         for token in expired:
             del self.sessions[token]
-    
+
     def remove_session(self, session_token: str) -> Optional[str]:
         """Remove a specific session and return the user identity if it existed."""
         session = self.sessions.pop(session_token, None)

@@ -2,8 +2,9 @@
 """Test script for OAuth authentication setup."""
 
 import os
-import sys
 from pathlib import Path
+
+import sys
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -35,7 +36,7 @@ def test_oauth_handler():
     print("\nTesting OAuth handler module...")
 
     try:
-        from oauth_handler import (
+        from webapp.oauth_handler import (
             google,
             github,
             user_manager,
@@ -121,7 +122,7 @@ def test_session_management():
     print("\nTesting session management...")
 
     try:
-        from oauth_handler import user_manager
+        from webapp.oauth_handler import user_manager
 
         # Create a test session
         test_user = {
@@ -167,7 +168,7 @@ def test_logout_and_cleanup():
     print("\nTesting logout and cleanup...")
 
     try:
-        from oauth_handler import user_manager, handle_logout
+        from webapp.oauth_handler import user_manager, handle_logout
         from auth import _logged_oauth_users
 
         # Create a test session

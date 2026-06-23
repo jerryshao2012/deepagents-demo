@@ -369,7 +369,6 @@ class TestTurnAwareReportNaming:
 
     def test_get_target_report_path_empty_state(self) -> None:
         from research_agent.utils.knowledge_filesystem import get_target_report_path
-        from deepagents.backends.utils import create_file_data
 
         content = "Some report content"
         # If no reports exist at the start of the turn, return /final_report.md
@@ -424,7 +423,7 @@ class TestTurnAwareReportNaming:
 
         state_files = {
             "/final_report.md": create_file_data(old_content),
-            "/final_report_1.md": create_file_data(new_content_1) # created this turn
+            "/final_report_1.md": create_file_data(new_content_1)  # created this turn
         }
         existing_reports = ["/final_report.md"]
 
@@ -439,7 +438,7 @@ class TestTurnAwareReportNaming:
         state_files = {
             "/final_report.md": create_file_data("1"),
             "/final_report_1.md": create_file_data("2"),
-            "/final_report_2.md": create_file_data("3"), # created this turn
+            "/final_report_2.md": create_file_data("3"),  # created this turn
         }
         existing_reports = ["/final_report.md", "/final_report_1.md"]
 
@@ -447,7 +446,8 @@ class TestTurnAwareReportNaming:
         assert get_active_report_path(state_files, existing_reports) == "/final_report_2.md"
 
         # If no new file created this turn, returns the highest index
-        assert get_active_report_path(state_files, ["/final_report.md", "/final_report_1.md", "/final_report_2.md"]) == "/final_report_2.md"
+        assert get_active_report_path(state_files, ["/final_report.md", "/final_report_1.md",
+                                                    "/final_report_2.md"]) == "/final_report_2.md"
 
     def test_after_model_wiki_query_complete_fallback(self) -> None:
         from agent import ResearchStateMiddleware
@@ -495,4 +495,3 @@ class TestTurnAwareReportNaming:
 
         # By default, wiki_query_complete is set to False in updates if no wiki context matches
         assert _thread_wiki_query_complete.get("thread-def") is False
-

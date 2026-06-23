@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Test that skills without keywords get default keyword from name."""
 
-import sys
 from pathlib import Path
+
+import sys
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
