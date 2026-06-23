@@ -516,46 +516,50 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
 
         # Perform citation validation if enabled
         files = result.get("files", {})
-        if "/final_report.md" in files:
-            from deepagents.backends.utils import file_data_to_string, create_file_data
-            report_data = files["/final_report.md"]
-            report_text = file_data_to_string(report_data)
-            if os.getenv("DEEP_RESEARCH_VALIDATE_CITATIONS") == "1":
-                from thread_wiki.service import _extract_citations
-                from research_agent.utils.citation_validator import validate_web_citations
+        for report_path in ["/final_report_1.md", "/final_report.md"]:
+            if report_path in files:
+                from deepagents.backends.utils import file_data_to_string, create_file_data
+                report_data = files[report_path]
+                report_text = file_data_to_string(report_data)
+                if os.getenv("DEEP_RESEARCH_VALIDATE_CITATIONS") == "1":
+                    from thread_wiki.service import _extract_citations
+                    from research_agent.utils.citation_validator import validate_web_citations
 
-                citations = _extract_citations(report_text)
-                web_citations = [c for c in citations if c.kind == "web"]
-                if web_citations:
-                    try:
-                        validation_results = await validate_web_citations(web_citations, report_text)
-                        if validation_results and "### Citation Verification" not in report_text:
-                            appendix_lines = ["", "### Citation Verification"]
-                            for res in validation_results:
-                                appendix_lines.append(
-                                    f"- **[{res.url}]({res.url})**: Reachable: {'Yes' if res.reachable else 'No'}, "
-                                    f"Grounded: {'Yes' if res.grounded else 'No'} ({res.reason})"
-                                )
-                            appendix = "\n".join(appendix_lines)
-                            new_report_text = report_text + "\n" + appendix
-                            files["/final_report.md"] = create_file_data(new_report_text)
+                    citations = _extract_citations(report_text)
+                    web_citations = [c for c in citations if c.kind == "web"]
+                    if web_citations:
+                        try:
+                            validation_results = await validate_web_citations(web_citations, report_text)
+                            if validation_results and "### Citation Verification" not in report_text:
+                                appendix_lines = ["", "### Citation Verification"]
+                                for res in validation_results:
+                                    appendix_lines.append(
+                                        f"- **[{res.url}]({res.url})**: Reachable: {'Yes' if res.reachable else 'No'}, "
+                                        f"Grounded: {'Yes' if res.grounded else 'No'} ({res.reason})"
+                                    )
+                                appendix = "\n".join(appendix_lines)
+                                new_report_text = report_text + "\n" + appendix
+                                files[report_path] = create_file_data(new_report_text)
+                                report_text = new_report_text
+                        except Exception as e:
+                            import logging
+                            logging.getLogger(__name__).warning(f"Citation validation failed: {e}", exc_info=True)
 
-                            # Update the final chat message if it matches the unvalidated report
-                            messages = result.get("messages", [])
-                            if messages:
-                                last_msg = messages[-1]
-                                last_content = (
-                                    last_msg.get("content", "") if isinstance(last_msg, dict)
-                                    else getattr(last_msg, "content", "") or ""
-                                )
-                                if last_content.strip() == report_text.strip():
-                                    if isinstance(last_msg, dict):
-                                        last_msg["content"] = new_report_text
-                                    else:
-                                        setattr(last_msg, "content", new_report_text)
-                    except Exception as e:
-                        import logging
-                        logging.getLogger(__name__).warning(f"Citation validation failed: {e}", exc_info=True)
+                # Update the final chat message if it matches the unvalidated report
+                messages = result.get("messages", [])
+                if messages:
+                    last_msg = messages[-1]
+                    last_content = (
+                        last_msg.get("content", "") if isinstance(last_msg, dict)
+                        else getattr(last_msg, "content", "") or ""
+                    )
+                    if last_content.strip() == report_text.strip():
+                        if isinstance(last_msg, dict):
+                            last_msg["content"] = report_text
+                        else:
+                            setattr(last_msg, "content", report_text)
+                # Break after validating the first available report file
+                break
 
         # Serialize messages
         serialized_messages = [serialize_message(m) for m in result.get("messages", [])]
@@ -566,29 +570,31 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
             if last_msg.get("role") == "assistant" and last_msg.get("content"):
                 content = last_msg["content"]
 
-                # If /final_report.md was updated by citation validator, ensure the message is updated too
-                if "/final_report.md" in files:
-                    from deepagents.backends.utils import file_data_to_string
-                    report_text = file_data_to_string(files["/final_report.md"])
-                    import re as _re
-                    report_text_sanitized = _re.sub(
-                        r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
-                        r'/\1.\2', report_text,
-                    )
-                    report_text_sanitized = _re.sub(
-                        r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
-                        r'/\1', report_text_sanitized,
-                    )
-                    content_sanitized = _re.sub(
-                        r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
-                        r'/\1.\2', content,
-                    )
-                    content_sanitized = _re.sub(
-                        r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
-                        r'/\1', content_sanitized,
-                    )
-                    if content_sanitized.strip() == report_text_sanitized.strip() or "### Citation Verification" in report_text:
-                        content = report_text
+                # If the report was updated by citation validator, ensure the message is updated too
+                for report_path in ["/final_report_1.md", "/final_report.md"]:
+                    if report_path in files:
+                        from deepagents.backends.utils import file_data_to_string
+                        report_text = file_data_to_string(files[report_path])
+                        import re as _re
+                        report_text_sanitized = _re.sub(
+                            r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
+                            r'/\1.\2', report_text,
+                        )
+                        report_text_sanitized = _re.sub(
+                            r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
+                            r'/\1', report_text_sanitized,
+                        )
+                        content_sanitized = _re.sub(
+                            r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
+                            r'/\1.\2', content,
+                        )
+                        content_sanitized = _re.sub(
+                            r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
+                            r'/\1', content_sanitized,
+                        )
+                        if content_sanitized.strip() == report_text_sanitized.strip() or "### Citation Verification" in report_text:
+                            content = report_text
+                        break
 
                 # Sanitize /raw/ references
                 import re as _re

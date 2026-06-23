@@ -617,6 +617,10 @@ class ResearchStateMiddleware(AgentMiddleware):
             thread_id = runtime.get("configurable", {}).get("thread_id")
 
         updates["wiki_query_complete"] = False
+        md_regex = r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b'
+        original_doc_regex = r'/\1.\2'
+        doc_regex = r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b'
+        remove_raw_regex = r'/\1'
 
         if thread_id and current_user_message:
             wiki_sys_msg, wiki_answer = self._get_wiki_context_sync(str(thread_id), current_user_message)
@@ -629,12 +633,10 @@ class ResearchStateMiddleware(AgentMiddleware):
                     if "files" not in updates:
                         updates["files"] = {}
                     sanitized_wiki_answer = re.sub(
-                        r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
-                        r'/\1.\2', wiki_answer,
+                        md_regex, original_doc_regex, wiki_answer,
                     )
                     sanitized_wiki_answer = re.sub(
-                        r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
-                        r'/\1', sanitized_wiki_answer,
+                        doc_regex, remove_raw_regex, sanitized_wiki_answer,
                     )
                     updates["files"]["/final_report.md"] = create_file_data(sanitized_wiki_answer)
                     updates["no_web"] = True
@@ -706,6 +708,10 @@ class ResearchStateMiddleware(AgentMiddleware):
         messages = state.get("messages", [])
         last_msg = messages[-1] if messages else None
         last_tool_calls = getattr(last_msg, "tool_calls", None) or []
+        md_regex = r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b'
+        original_doc_regex = r'/\1.\2'
+        doc_regex = r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b'
+        remove_raw_regex = r'/\1'
 
         if last_tool_calls:
             # Agent is still working — emit a brief status based on the
@@ -729,7 +735,7 @@ class ResearchStateMiddleware(AgentMiddleware):
         else:
             # ── Final-report injection (safety net) or Save Chat Response ──
             if state.get("wiki_query_complete"):
-                # Save the chat response to Files (State) as final_report.md
+                # Save the chat response to Files (State) as final_report_1.md
                 if last_msg is not None:
                     try:
                         last_content = (
@@ -739,19 +745,17 @@ class ResearchStateMiddleware(AgentMiddleware):
                         if last_content.strip():
                             # Sanitize to restore source formats
                             sanitized = re.sub(
-                                r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
-                                r'/\1.\2', last_content,
+                                md_regex, original_doc_regex, last_content,
                             )
                             sanitized = re.sub(
-                                r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
-                                r'/\1', sanitized,
+                                doc_regex, remove_raw_regex, sanitized,
                             )
                             if "files" not in updates:
                                 updates["files"] = {}
-                            updates["files"]["/final_report.md"] = create_file_data(sanitized)
+                            updates["files"]["/final_report_1.md"] = create_file_data(sanitized)
 
                             # Persist files using LangGraph send_files_to_state
-                            send_files_to_state({"/final_report.md": create_file_data(sanitized)})
+                            send_files_to_state({"/final_report_1.md": create_file_data(sanitized)})
 
                             # Update the last message in-place so we don't append a duplicate message
                             if isinstance(last_msg, dict):
@@ -777,12 +781,10 @@ class ResearchStateMiddleware(AgentMiddleware):
 
                         # Ensure report_text itself is sanitized (safety check)
                         report_text_sanitized = re.sub(
-                            r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
-                            r'/\1.\2', report_text,
+                            md_regex, original_doc_regex, report_text,
                         )
                         report_text_sanitized = re.sub(
-                            r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
-                            r'/\1', report_text_sanitized,
+                            doc_regex, remove_raw_regex, report_text_sanitized,
                         )
                         if report_text_sanitized != report_text:
                             if "files" not in updates:
@@ -797,12 +799,10 @@ class ResearchStateMiddleware(AgentMiddleware):
                         else:
                             # If the last message contains the report but is not sanitized, sanitize in-place!
                             last_content_sanitized = re.sub(
-                                r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
-                                r'/\1.\2', last_content,
+                                md_regex, original_doc_regex, last_content,
                             )
                             last_content_sanitized = re.sub(
-                                r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
-                                r'/\1', last_content_sanitized,
+                                doc_regex, remove_raw_regex, last_content_sanitized,
                             )
                             if last_content_sanitized != last_content:
                                 if isinstance(last_msg, dict):
@@ -820,12 +820,10 @@ class ResearchStateMiddleware(AgentMiddleware):
                         )
                         if last_content.strip():
                             last_content_sanitized = re.sub(
-                                r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
-                                r'/\1.\2', last_content,
+                                md_regex, original_doc_regex, last_content,
                             )
                             last_content_sanitized = re.sub(
-                                r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
-                                r'/\1', last_content_sanitized,
+                                doc_regex, remove_raw_regex, last_content_sanitized,
                             )
                             if last_content_sanitized != last_content:
                                 if isinstance(last_msg, dict):
