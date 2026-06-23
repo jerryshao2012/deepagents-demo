@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,9 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
 from logger_utils import setup_logger
+from model_factory import create_embedding_model
+from research_agent.skills.frontend_slides.pipeline import _SKILL_DIR
+from research_agent.skills.frontend_slides.pipeline import _parse_sections, _build_html, _slugify_filename
 from research_agent.skills.golden_dataset.pipeline import (
     export_golden_dataset_csv,
     evaluate_and_report_golden_dataset,
@@ -31,11 +35,13 @@ from research_agent.utils.knowledge_filesystem import (
     send_files_to_state,
 )
 from research_agent.utils.result_rendering import render_skill_output_impl
+from research_agent.utils.retrieval import load_or_build_index
 from research_agent.utils.skill_registry import get_skill_registry
 from research_agent.utils.web_search import (
     fetch_webpage_content_impl,
     tavily_search_impl
 )
+from thread_wiki.models import ThreadWikiPaths
 
 # Load environment variables
 load_dotenv()
@@ -227,10 +233,6 @@ def retrieve_thread_documents(
     """
     logger.info(f"Retrieving thread documents for query: {query}, k: {k}")
     try:
-        from thread_wiki.models import ThreadWikiPaths
-        from research_agent.utils.retrieval import load_or_build_index
-        from model_factory import create_embedding_model
-
         thread_id = config.get("configurable", {}).get("thread_id")
         if not thread_id:
             return "Error: thread_id not found in configuration; cannot retrieve documents."
@@ -292,6 +294,12 @@ def write_file(
         Confirmation message with the file path and size, or an error message.
     """
     logger.info(f"Writing file: {file_path} ({len(content)} bytes)")
+
+    # Sanitize citations referencing raw processed markdown files back to original files (e.g., /raw/bmo_ar2025.pdf.md -> bmo_ar2025.pdf)
+    # Match /raw/<name>.<ext>.md or /raw/<name>.<ext>.txt
+    content = re.sub(r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b', r'\1.\2', content)
+    # Also handle references to /raw/ without the trailing .md if any
+    content = re.sub(r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b', r'\1', content)
 
     result = write_file_impl(file_path, content)
     logger.info(f"Successfully wrote file: {file_path}")
@@ -464,8 +472,7 @@ def finalize_golden_dataset_output(
     # Handle both string and dict inputs for flexibility
     if isinstance(payload_json, dict):
         logger.debug("Converting dict payload to JSON string")
-        import json as _json
-        payload_json_str = _json.dumps(payload_json)
+        payload_json_str = json.dumps(payload_json)
     elif isinstance(payload_json, str):
         payload_json_str = payload_json
     else:
@@ -578,7 +585,6 @@ def frontend_slides(
         str: Confirmation containing the generated file path and slide count, or an error message.
     """
     logger.info(f"Generating frontend slides - Style: {style_preset}, Animation: {animation_feeling}")
-    from research_agent.skills.frontend_slides.pipeline import _parse_sections, _build_html, _slugify_filename
 
     # Parse the markdown content into structured slide data
     logger.debug("Parsing presentation markdown into slides")
@@ -660,7 +666,6 @@ def frontend_slides_export_pdf(
         str: The path to the generated PDF file or an error message.
     """
     logger.info(f"Exporting HTML to PDF - Source: {html_file_path}, Compact: {compact}")
-    from research_agent.skills.frontend_slides.pipeline import _SKILL_DIR
 
     script_path = _SKILL_DIR / "scripts" / "export-pdf.sh"
     logger.debug(f"Using export script: {script_path}")
@@ -701,7 +706,6 @@ def frontend_slides_deploy(
         str: The deployment output including the live URL, or an error message.
     """
     logger.info(f"Deploying HTML presentation to Vercel: {html_file_path}")
-    from research_agent.skills.frontend_slides.pipeline import _SKILL_DIR
 
     script_path = _SKILL_DIR / "scripts" / "deploy.sh"
     logger.debug(f"Using deploy script: {script_path}")
@@ -738,7 +742,6 @@ def frontend_slides_extract_pptx(
         str: The output of the extraction process, including the path to the extracted JSON.
     """
     logger.info(f"Extracting PowerPoint content from: {pptx_file_path}")
-    from research_agent.skills.frontend_slides.pipeline import _SKILL_DIR
 
     script_path = _SKILL_DIR / "scripts" / "extract-pptx.py"
     logger.debug(f"Using extraction script: {script_path}")
