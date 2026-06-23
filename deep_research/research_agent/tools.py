@@ -10,13 +10,11 @@ from typing import Annotated, Literal
 
 from deepagents.backends.utils import create_file_data
 from dotenv import load_dotenv
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolArg
 from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
 from logger_utils import setup_logger
-from model_factory import create_embedding_model
 from research_agent.skills.frontend_slides.pipeline import _SKILL_DIR
 from research_agent.skills.frontend_slides.pipeline import _parse_sections, _build_html, _slugify_filename
 from research_agent.skills.golden_dataset.pipeline import (
@@ -35,13 +33,11 @@ from research_agent.utils.knowledge_filesystem import (
     send_files_to_state,
 )
 from research_agent.utils.result_rendering import render_skill_output_impl
-from research_agent.utils.retrieval import load_or_build_index
 from research_agent.utils.skill_registry import get_skill_registry
 from research_agent.utils.web_search import (
     fetch_webpage_content_impl,
     tavily_search_impl
 )
-from thread_wiki.models import ThreadWikiPaths
 
 # Load environment variables
 load_dotenv()
@@ -217,66 +213,6 @@ def read_doc_folder(
 
 
 @tool(parse_docstring=True)
-def retrieve_thread_documents(
-        query: str,
-        config: RunnableConfig,
-        k: int = 5,
-) -> str:
-    """Retrieve top-k relevant document chunks from the thread's local search index.
-
-    Use this tool when search/read of document folder fails or indicates that the document corpus is too large to read inline,
-    or when you need specific factual context from the local documents using vector retrieval.
-
-    Args:
-        query: Search query for retrieval.
-        k: Number of relevant chunks to retrieve (default: 5).
-    """
-    logger.info(f"Retrieving thread documents for query: {query}, k: {k}")
-    try:
-        thread_id = config.get("configurable", {}).get("thread_id")
-        if not thread_id:
-            return "Error: thread_id not found in configuration; cannot retrieve documents."
-
-        base_dir = Path(".").resolve()
-        paths = ThreadWikiPaths.resolve(str(thread_id), base_dir)
-        index_dir = paths.wiki_dir / "index"
-
-        embedding_model = create_embedding_model()
-
-        vectorstore = load_or_build_index(paths.raw_dir, index_dir, embedding_model)
-        if not vectorstore:
-            return "Error: No document index is available or could be built for this thread. Ensure documents are ingested first."
-
-        results = vectorstore.similarity_search_with_score(query, k=k)
-        if not results:
-            return "No matching document snippets found."
-
-        output_lines = []
-        for idx, (doc, score) in enumerate(results, start=1):
-            meta = doc.metadata
-            src = meta.get("source_path") or "unknown"
-            page = meta.get("page")
-            locator = meta.get("locator")
-            heading = meta.get("heading")
-
-            location_parts = []
-            if page:
-                location_parts.append(f"p. {page}")
-            if locator and locator != f"Page {page}":
-                location_parts.append(locator)
-            if heading:
-                location_parts.append(heading)
-
-            loc_str = f" ({', '.join(location_parts)})" if location_parts else ""
-            output_lines.append(f"[{idx}] Source: {src}{loc_str} (Score: {score:.4f})\n{doc.page_content}\n")
-
-        return "\n---\n\n".join(output_lines)
-    except Exception as e:
-        logger.error(f"Error in retrieve_thread_documents tool: {e}", exc_info=True)
-        return f"Error retrieving thread documents: {e}"
-
-
-@tool(parse_docstring=True)
 def write_file(
         file_path: str,
         content: str,
@@ -295,11 +231,9 @@ def write_file(
     """
     logger.info(f"Writing file: {file_path} ({len(content)} bytes)")
 
-    # Sanitize citations referencing raw processed markdown files back to original files (e.g., /raw/bmo_ar2025.pdf.md -> bmo_ar2025.pdf)
-    # Match /raw/<name>.<ext>.md or /raw/<name>.<ext>.txt
-    content = re.sub(r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b', r'\1.\2', content)
+    content = re.sub(r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b', r'/\1.\2', content)
     # Also handle references to /raw/ without the trailing .md if any
-    content = re.sub(r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b', r'\1', content)
+    content = re.sub(r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b', r'/\1', content)
 
     result = write_file_impl(file_path, content)
     logger.info(f"Successfully wrote file: {file_path}")

@@ -375,6 +375,10 @@ async def _check_if_needs_deep_research_async(question: str, wiki_answer: str) -
             f"User's Question: {question}\n\n"
             f"Candidate Wiki Answer: {wiki_answer}\n\n"
             "Analyze whether the candidate answer is sufficient, complete, and fully answers the question. "
+            "IMPORTANT: If the user's question is about the uploaded documents/files, and the candidate wiki answer "
+            "contains the requested information from those documents, you MUST set 'needs_deep_research' to false. "
+            "Do not suggest conducting deep research or searching the web just to find external/extra information "
+            "if the candidate answer already directly and fully answers the question using the provided document data.\n\n"
             "Respond in the following JSON format:\n"
             "{\n"
             '  "needs_deep_research": true/false,\n'
@@ -384,14 +388,17 @@ async def _check_if_needs_deep_research_async(question: str, wiki_answer: str) -
         )
         response = await model.ainvoke([HumanMessage(content=prompt)])
         content = response.content.strip()
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.endswith("```"):
-            content = content[:-3]
-        content = content.strip()
 
-        import json
-        data = json.loads(content)
+        # Extract JSON block between the first '{' and the last '}'
+        start_idx = content.find('{')
+        end_idx = content.rfind('}')
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            json_content = content[start_idx:end_idx+1]
+        else:
+            json_content = content
+
+        from research_agent.utils.json_utils import robust_json_loads
+        data = robust_json_loads(json_content)
         needs_research = bool(data.get("needs_deep_research", True))
         import logging
         logging.getLogger(__name__).info(
@@ -477,7 +484,16 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
                 if "files" not in input_state:
                     input_state["files"] = {}
                 from deepagents.backends.utils import create_file_data
-                input_state["files"]["/final_report.md"] = create_file_data(wiki_context)
+                import re as _re
+                sanitized_wiki_context = _re.sub(
+                    r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
+                    r'/\1.\2', wiki_context,
+                )
+                sanitized_wiki_context = _re.sub(
+                    r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
+                    r'/\1', sanitized_wiki_context,
+                )
+                input_state["files"]["/final_report.md"] = create_file_data(sanitized_wiki_context)
                 input_state["no_web"] = True
             else:
                 import logging

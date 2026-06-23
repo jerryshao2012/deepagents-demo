@@ -711,13 +711,13 @@ def read_doc_folder_impl(
             return "\n".join(summary_lines + [
                 "",
                 f"Text omitted because total size is {len(total_text)} chars (too large to display inline).",
-                "A local search index has been created for these documents.",
-                "You MUST use the `retrieve_documents` tool to query the documents and search for specific factual data/evidence."
+                "The documents have been ingested into the wiki workspace.",
+                "Please read the synthesized wiki pages under `/wiki/` (e.g. `/wiki/index.md`) using the `read_file` tool to find the information."
             ])
         except Exception as e:
-            logger.error(f"Failed to build vector index: {e}", exc_info=True)
+            logger.error(f"Failed to process: {e}", exc_info=True)
             return "\n".join(summary_lines + ["",
-                                              f"Text omitted because total size is {len(total_text)} chars (too large to display inline). Please use the `read_file` tool on the specific file paths listed above to read them."])
+                                              f"Text omitted because total size is {len(total_text)} chars (too large to display inline). Please use the `read_file` tool on the specific file paths listed above to read them or check `/wiki/` if ingested."])
     else:
         logger.info("\n".join(summary_lines))
         return "\n".join(summary_lines + ["", "--- EXTRACTED DOCUMENTS ---", ""] + extracted_text)

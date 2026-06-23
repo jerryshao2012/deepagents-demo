@@ -68,6 +68,7 @@ Evidence rules:
 - Every non-trivial claim should be traceable to the ingested source set.
 - Avoid introducing unsupported external facts.
 - If evidence is weak or missing, say so directly.
+- If raw documents are too large to read in full, you may use the `retrieve_raw_documents` tool to query them and retrieve relevant snippets.
 
 Filesystem policy:
 - Never write to `/raw/`.
@@ -393,12 +394,63 @@ def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
             FilesystemPermission(operations=["write"], paths=["/**"], mode="allow"),
         ]
 
+    from langchain_core.tools import tool
+    
+    @tool
+    def retrieve_raw_documents(query: str, k: int = 5) -> str:
+        """Retrieve top-k relevant document snippets from the raw documents vector search index.
+        Use this tool when you need to search large raw source documents in `/raw/` for specific facts.
+        """
+        try:
+            from model_factory import create_embedding_model
+            from research_agent.utils.retrieval import load_or_build_index
+            
+            embedding_model = create_embedding_model()
+            index_dir = wiki_dir / "index"
+            raw_dir = wiki_dir / "raw"
+            
+            vectorstore = load_or_build_index(raw_dir, index_dir, embedding_model)
+            if not vectorstore:
+                return "Error: No search index is available or could be built. You must read `/raw/` files directly."
+                
+            results = vectorstore.similarity_search_with_score(query, k=k)
+            if not results:
+                return "No matching document snippets found."
+                
+            output_lines = []
+            for idx, (doc, score) in enumerate(results, start=1):
+                meta = doc.metadata
+                src = meta.get("source_path") or "unknown"
+                page = meta.get("page")
+                locator = meta.get("locator")
+                heading = meta.get("heading")
+                
+                # Strip leading /raw/ from source path in snippet output
+                if src.startswith("/raw/"):
+                    src = src[len("/raw/"):]
+                
+                location_parts = []
+                if page:
+                    location_parts.append(f"p. {page}")
+                if locator and locator != f"Page {page}":
+                    location_parts.append(locator)
+                if heading:
+                    location_parts.append(heading)
+                    
+                loc_str = f" ({', '.join(location_parts)})" if location_parts else ""
+                output_lines.append(f"[{idx}] Source: /raw/{src}{loc_str} (Score: {score:.4f})\n{doc.page_content}\n")
+                
+            return "\n---\n\n".join(output_lines)
+        except Exception as e:
+            return f"Error retrieving raw documents: {e}"
+
     model = _resolve_model()
     agent = create_deep_agent(
         model=model,
         backend=backend,
         permissions=permissions,
         system_prompt=_BASE_SYSTEM_PROMPT,
+        tools=[retrieve_raw_documents],
     )
     result = agent.invoke({"messages": [{"role": "user", "content": prompt}]})
 
@@ -492,7 +544,7 @@ def _build_query_prompt(topic: str, question: str) -> str:
         "2) Read recent `/log.md` entries (latest ~10 `## [` headings) to understand what was ingested recently.\n"
         "3) Prefer checking relevant prior `/wiki/query/*.md` pages first.\n"
         "4) Read the canonical wiki pages before final synthesis.\n"
-        "5) CRITICAL: If the wiki pages do not contain the full answer, you MUST search and read the raw source documents in `/raw/`.\n"
+        "5) CRITICAL: If the wiki pages do not contain the full answer, you MUST search and read the raw source documents in `/raw/` (using the `retrieve_raw_documents` tool if the files are too large to read directly).\n"
         "6) Provide a grounded answer with wiki or raw file path citations.\n"
         "7) Decide whether this answer should be filed as a durable wiki page.\n\n"
         "Output format (exact keys):\n"

@@ -23,7 +23,6 @@ from research_agent.tools import (
     read_doc_folder,
     tavily_search,
     fetch_webpage_content,
-    retrieve_thread_documents,
 )
 
 __all__ = [
@@ -40,7 +39,6 @@ __all__ = [
     "read_doc_folder",
     "tavily_search",
     "fetch_webpage_content",
-    "retrieve_thread_documents",
     "RESEARCHER_INSTRUCTIONS",
     "RESEARCH_WORKFLOW_INSTRUCTIONS",
     "SUBAGENT_DELEGATION_INSTRUCTIONS",

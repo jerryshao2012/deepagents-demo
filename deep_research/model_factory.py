@@ -64,15 +64,103 @@ def get_openai_auth_kwargs() -> dict:
         return {"api_key": SecretStr(os.getenv("AZURE_OPENAI_API_KEY", ""))}
 
 
+from langchain_core.embeddings import Embeddings
+import hashlib
+import numpy as np
+
+class SimpleLocalEmbeddings(Embeddings):
+    """A deterministic, completely local bag-of-words projection embedding model.
+    Used as an offline fallback that works with FAISS.
+    """
+    def __init__(self, size=1536):
+        self.size = size
+
+    def _embed(self, text: str) -> list[float]:
+        words = [w.strip(".,!?\"'()[]{}<>").lower() for w in text.split()]
+        vec = np.zeros(self.size, dtype=np.float32)
+        if not words:
+            return vec.tolist()
+        
+        for word in words:
+            if not word:
+                continue
+            # MD5 hash to deterministic feature index
+            h = int(hashlib.md5(word.encode('utf-8')).hexdigest(), 16)
+            idx = h % self.size
+            sign = 1 if ((h >> 4) % 2 == 0) else -1
+            vec[idx] += sign
+            
+        norm = np.linalg.norm(vec)
+        if norm > 0:
+            vec = vec / norm
+        return vec.tolist()
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [self._embed(t) for t in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._embed(text)
+
+
 def create_embedding_model():
-    """Create an Azure OpenAI embedding model instance."""
-    return init_embeddings(
-        model=f"azure_openai:{os.environ['AZURE_EMBEDDING_NAME']}",
-        azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
-        azure_deployment=os.environ["AZURE_EMBEDDING_DEPLOYMENT_NAME"],
-        api_version=os.environ["AZURE_OPENAI_API_VERSION"],
-        **get_openai_auth_kwargs(),
-    )
+    """Create an embedding model instance with graceful fallbacks."""
+    # 1. Try Azure OpenAI if configured
+    if (
+        os.getenv("AZURE_EMBEDDING_NAME")
+        and os.getenv("AZURE_OPENAI_ENDPOINT")
+        and os.getenv("AZURE_EMBEDDING_DEPLOYMENT_NAME")
+        and os.getenv("AZURE_OPENAI_API_VERSION")
+    ):
+        try:
+            logger.info("Using Azure OpenAI embedding model.")
+            return init_embeddings(
+                model=f"azure_openai:{os.environ['AZURE_EMBEDDING_NAME']}",
+                azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+                azure_deployment=os.environ["AZURE_EMBEDDING_DEPLOYMENT_NAME"],
+                api_version=os.environ["AZURE_OPENAI_API_VERSION"],
+                **get_openai_auth_kwargs(),
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize Azure OpenAI embeddings: {e}. Trying other providers...")
+
+    # 2. Try OpenAI if configured
+    if os.getenv("OPENAI_API_KEY"):
+        try:
+            logger.info("Using OpenAI embedding model.")
+            from langchain_openai import OpenAIEmbeddings
+            return OpenAIEmbeddings(
+                model="text-embedding-3-small",
+                api_key=SecretStr(os.environ["OPENAI_API_KEY"])
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize OpenAI embeddings: {e}. Trying other providers...")
+
+    # 3. Try Google if configured
+    if os.getenv("GOOGLE_API_KEY"):
+        try:
+            logger.info("Using Google embedding model (models/gemini-embedding-001).")
+            from langchain_google_genai import GoogleGenerativeAIEmbeddings
+            return GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-001")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Google embeddings: {e}. Trying other providers...")
+
+    # 4. Try Ollama if configured
+    if os.getenv("OLLAMA_API_BASE"):
+        try:
+            logger.info("Using Ollama embedding model.")
+            from langchain_ollama import OllamaEmbeddings
+            emb_model = os.getenv("EMBEDDING_MODEL_NAME") or os.getenv("MODEL_NAME") or "nomic-embed-text"
+            return OllamaEmbeddings(
+                model=emb_model,
+                base_url=os.environ["OLLAMA_API_BASE"]
+            )
+        except Exception as e:
+            logger.warning(f"Failed to initialize Ollama embeddings: {e}. Trying fallback...")
+
+    # 5. Ultimate Fallback: SimpleLocalEmbeddings
+    logger.warning("No embedding provider configured or initialization failed. Falling back to SimpleLocalEmbeddings.")
+    return SimpleLocalEmbeddings(size=1536)
+
 
 
 def create_memory_saver():

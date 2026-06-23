@@ -38,7 +38,6 @@ from research_agent.tools import (
     write_file,
     tavily_search,
     fetch_webpage_content,
-    retrieve_thread_documents,
 )
 from research_agent.utils.cli import (
     build_instruction,
@@ -1070,7 +1069,6 @@ agent = create_deep_agent(
         ls,
         glob,
         read_doc_folder,
-        retrieve_thread_documents,
         render_skill_output,
         finalize_golden_dataset_output,
     ],
