@@ -206,6 +206,19 @@ USER_IDENTITY_PRINCIPAL_ID=$(az identity show --name "$USER_IDENTITY_NAME" --res
 echo "🔐 Ensuring Managed Identity has Key Vault access..."
 az keyvault set-policy --name "$KV_NAME" --secret-permissions get list --object-id "$USER_IDENTITY_PRINCIPAL_ID" > /dev/null
 
+echo "🔐 Ensuring Managed Identity has ACR Pull access..."
+ACR_RESOURCE_ID=$(az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query id -o tsv 2>/dev/null || echo "")
+if [ -n "$ACR_RESOURCE_ID" ]; then
+  az role assignment create \
+    --assignee-object-id "$USER_IDENTITY_PRINCIPAL_ID" \
+    --assignee-principal-type "ServicePrincipal" \
+    --role "AcrPull" \
+    --scope "$ACR_RESOURCE_ID" >/dev/null 2>&1 || true
+  echo "✅ ACR pull role assignment set successfully"
+else
+  echo "⚠️  Could not find ACR registry resource ID"
+fi
+
 if az containerapp show --name $AGENT_NAME --resource-group $RESOURCE_GROUP &> /dev/null; then
   echo "📝 Container app already exists. Updating..."
   az containerapp identity assign --name $AGENT_NAME --resource-group $RESOURCE_GROUP --user-assigned "$USER_IDENTITY_ID" > /dev/null || true
@@ -223,7 +236,7 @@ else
     --ingress internal \
     --transport auto \
     --min-replicas 1 \
-    --max-replicas 5 \
+    --max-replicas 1 \
     --cpu 2.0 \
     --memory 4Gi \
     --user-assigned "$USER_IDENTITY_ID"
@@ -343,7 +356,7 @@ properties:
           - name: INPUT_FOLDER
             value: ${MOUNT_PATH}/input
           - name: SQLITE_DB_PATH
-            value: /deps/deep_research/deep_research.db
+            value: ${MOUNT_PATH}/deep_research.db
           - name: TAVILY_API_KEY
             secretRef: tavily-api-key
           - name: LANGCHAIN_API_KEY
@@ -361,6 +374,9 @@ properties:
         volumeMounts:
           - volumeName: persistent-storage
             mountPath: $MOUNT_PATH
+    scale:
+      minReplicas: 1
+      maxReplicas: 1
 EOF
 az containerapp update --name $AGENT_NAME --resource-group $RESOURCE_GROUP --yaml "$UPDATE_YAML"
 rm -f "$UPDATE_YAML"

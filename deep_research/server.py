@@ -512,6 +512,9 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
                 )
                 input_state["wiki_query_complete"] = False
 
+        from research_agent.utils.knowledge_filesystem import _thread_wiki_query_complete
+        _thread_wiki_query_complete[str(thread_id)] = input_state.get("wiki_query_complete", False)
+
         # Invoke the deep_research agent
         result = await agent.ainvoke(input_state)
 
@@ -524,7 +527,10 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
 
         # Perform citation validation if enabled
         files = result.get("files", {})
-        existing_reports = result.get("existing_reports") or []
+        existing_reports = result.get("existing_reports")
+        if not existing_reports:
+            from research_agent.utils.knowledge_filesystem import _thread_existing_reports
+            existing_reports = _thread_existing_reports.get(str(thread_id), [])
         from research_agent.utils.knowledge_filesystem import get_active_report_path
         active_report_path = get_active_report_path(files, existing_reports)
 
@@ -615,6 +621,15 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
                 )
                 last_msg["content"] = sanitized
 
+        from research_agent.utils.knowledge_filesystem import _thread_wiki_query_complete, _thread_existing_reports
+        wiki_query_complete = result.get("wiki_query_complete")
+        if not wiki_query_complete and str(thread_id) in _thread_wiki_query_complete:
+            wiki_query_complete = _thread_wiki_query_complete[str(thread_id)]
+
+        existing_reports_db = result.get("existing_reports")
+        if not existing_reports_db:
+            existing_reports_db = _thread_existing_reports.get(str(thread_id), [])
+
         # Serialize the other state fields to preserve files, doc_folder, etc.
         serializable_result = {
             "messages": serialized_messages,
@@ -622,8 +637,8 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
             "doc_folder": result.get("doc_folder"),
             "skill": result.get("skill"),
             "no_web": result.get("no_web"),
-            "wiki_query_complete": result.get("wiki_query_complete"),
-            "existing_reports": result.get("existing_reports"),
+            "wiki_query_complete": wiki_query_complete,
+            "existing_reports": existing_reports_db,
         }
 
         db.update_thread(thread_id, serialized_messages, serializable_result)

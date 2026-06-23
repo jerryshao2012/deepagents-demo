@@ -448,3 +448,51 @@ class TestTurnAwareReportNaming:
 
         # If no new file created this turn, returns the highest index
         assert get_active_report_path(state_files, ["/final_report.md", "/final_report_1.md", "/final_report_2.md"]) == "/final_report_2.md"
+
+    def test_after_model_wiki_query_complete_fallback(self) -> None:
+        from agent import ResearchStateMiddleware
+        from research_agent.utils.knowledge_filesystem import _thread_wiki_query_complete
+        from langchain_core.messages import AIMessage
+
+        middleware = ResearchStateMiddleware()
+
+        # Test case 1: wiki_query_complete is False in state, and not set in thread map
+        state = {
+            "messages": [AIMessage(content="This is the final response.")],
+            "files": {},
+            "existing_reports": []
+        }
+        runtime = {"configurable": {"thread_id": "thread-abc"}}
+        _thread_wiki_query_complete["thread-abc"] = False
+
+        updates = middleware.after_model(state, runtime)
+        # Should not save final report since wiki_query_complete is False and files is empty
+        assert updates is None or "files" not in updates
+
+        # Test case 2: wiki_query_complete is False in state, but True in thread map
+        _thread_wiki_query_complete["thread-abc"] = True
+        updates = middleware.after_model(state, runtime)
+        # Should save final report since wiki_query_complete is True via global map fallback
+        assert updates is not None
+        assert "/final_report.md" in updates["files"]
+
+    def test_before_agent_wiki_query_complete_registration(self) -> None:
+        from agent import ResearchStateMiddleware
+        from research_agent.utils.knowledge_filesystem import _thread_wiki_query_complete
+        from langchain_core.messages import HumanMessage
+
+        middleware = ResearchStateMiddleware()
+        state = {
+            "messages": [HumanMessage(content="test query")],
+            "files": {},
+            "existing_reports": []
+        }
+        runtime = {"configurable": {"thread_id": "thread-def"}}
+
+        import unittest.mock as mock
+        with mock.patch.object(middleware, "_get_wiki_context_sync", return_value=(None, None)):
+            middleware.before_agent(state, runtime)
+
+        # By default, wiki_query_complete is set to False in updates if no wiki context matches
+        assert _thread_wiki_query_complete.get("thread-def") is False
+

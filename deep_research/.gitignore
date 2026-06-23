@@ -1,0 +1,22 @@
+# Local python & dev artifacts
+__pycache__/
+.venv/
+.deepeval/
+.pytest_cache/
+.ruff_cache/
+deep_research_example.egg-info/
+.DS_Store
+
+# User configurations
+.env
+.build_version
+secrets.sh
+secrets-aws.sh
+
+# Runtime data directories (ignored to prevent watchfiles/langgraph dev from restarting)
+docs/
+input/
+output/
+.langgraph_api/
+deep_research.db
+index/

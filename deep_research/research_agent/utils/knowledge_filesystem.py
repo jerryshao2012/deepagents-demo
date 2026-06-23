@@ -33,6 +33,9 @@ logger = setup_logger(__name__)
 # Global mapping of thread_id to existing_reports list to bypass injected state limitations in tools
 _thread_existing_reports: dict[str, list[str]] = {}
 
+# Global mapping of thread_id to wiki_query_complete status to bypass injected state limitations
+_thread_wiki_query_complete: dict[str, bool] = {}
+
 
 def send_files_to_state(updates: dict) -> None:
     """Persist file updates to LangGraph state via the Pregel channel API.

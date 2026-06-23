@@ -655,6 +655,10 @@ class ResearchStateMiddleware(AgentMiddleware):
                         "Wiki answer is incomplete/insufficient. Conducting continuous deep research to enhance it.")
                     updates["wiki_query_complete"] = False
 
+        if thread_id:
+            from research_agent.utils.knowledge_filesystem import _thread_wiki_query_complete
+            _thread_wiki_query_complete[str(thread_id)] = updates.get("wiki_query_complete", False)
+
         # Always re-extract parameters from the latest user message so that
         # follow-up requests (e.g. "use humanizer skill") are picked up even
         # when a Task-configurations SystemMessage already exists from a
@@ -743,7 +747,23 @@ class ResearchStateMiddleware(AgentMiddleware):
                 updates["messages"] = [_AIMessage(content=status)]
         else:
             # ── Final-report injection (safety net) or Save Chat Response ──
-            if state.get("wiki_query_complete"):
+            wiki_query_complete = state.get("wiki_query_complete")
+            if not wiki_query_complete:
+                thread_id = None
+                if isinstance(runtime, dict):
+                    thread_id = runtime.get("configurable", {}).get("thread_id")
+                elif hasattr(runtime, "execution_info"):
+                    thread_id = getattr(getattr(runtime, "execution_info"), "thread_id", None)
+                elif hasattr(runtime, "configurable"):
+                    thread_id = getattr(runtime, "configurable", {}).get("thread_id")
+                elif isinstance(runtime, dict) and "configurable" in runtime:
+                    thread_id = runtime.get("configurable", {}).get("thread_id")
+
+                if thread_id:
+                    from research_agent.utils.knowledge_filesystem import _thread_wiki_query_complete
+                    wiki_query_complete = _thread_wiki_query_complete.get(str(thread_id), False)
+
+            if wiki_query_complete:
                 # Save the chat response to Files (State) as final_report_1.md (or resolved path)
                 if last_msg is not None:
                     try:
