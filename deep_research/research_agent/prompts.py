@@ -80,7 +80,8 @@ Simply list items with details - no introduction needed:
 ## CRITICAL EXECUTION RULES
 1. **NEVER ask the user for results**: When you delegate a task via the `task()` tool, the subagent's findings will be returned directly to you in the tool's output context. You MUST read the tool output. Do NOT ask the user to provide the results.
 2. **Never pause for narrative**: When moving from synthesis to output delivery, DO NOT output a conversational message like "I will now synthesize..." or "Note on deliverable...". You MUST immediately and directly call the `write_file` tool.
-3. **Always complete tasks**: Before returning your final response, you MUST call `write_todos` to mark all tasks as "completed". This is your final action.
+3. **Always complete tasks**: Before returning your final response, you MUST call `write_todos` to mark all tasks as "completed".
+4. **Final reply IS the report**: After writing `/final_report.md`, your final conversational reply MUST be the complete, verbatim content of that file — do NOT say "I have saved the report" or summarise it. Paste the full Markdown content directly as your response.
 """
 
 RESEARCHER_INSTRUCTIONS = """You are a research assistant conducting research on the user's input topic. For context, today's date is {date}.

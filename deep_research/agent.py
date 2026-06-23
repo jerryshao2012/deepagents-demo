@@ -13,11 +13,13 @@ from deepagents.backends.utils import create_file_data
 from deepagents.middleware.filesystem import FilesystemState
 from dotenv import load_dotenv
 from langchain.agents.middleware import AgentMiddleware
+from langchain_core.messages import AIMessage as _AIMessage
+from langchain_core.messages import HumanMessage
 from langchain_core.messages import SystemMessage
 from langchain_core.runnables import RunnableConfig
 
 from logger_utils import setup_logger
-from model_factory import get_configured_model
+from model_factory import create_embedding_model, get_configured_model
 from research_agent import (
     RESEARCH_WORKFLOW_INSTRUCTIONS,
     RESEARCHER_INSTRUCTIONS,
@@ -42,7 +44,11 @@ from research_agent.utils.cli import (
     build_instruction,
 )
 from research_agent.utils.eval_tracking import log_server_metrics
+from research_agent.utils.json_utils import robust_json_loads
+from research_agent.utils.retrieval import load_or_build_index
 from research_agent.utils.skill_registry import get_skill_registry
+from thread_wiki import progress as progress_tracker
+from thread_wiki.models import IngestPhase
 from thread_wiki.models import ThreadWikiPaths, WikiQueryResult
 from thread_wiki.service import run_query
 from utils import get_ssl_verify_config, str2bool
@@ -154,9 +160,6 @@ class ResearchStateMiddleware(AgentMiddleware):
                 if total_chars > _MAX_RAW_CHARS or any(
                         raw_file.lstat().st_size > _MAX_RAW_CHARS for raw_file in raw_files):
                     try:
-                        from model_factory import create_embedding_model
-                        from research_agent.utils.retrieval import load_or_build_index
-
                         embedding_model = create_embedding_model()
                         index_dir = paths.wiki_dir / "index"
                         load_or_build_index(raw_dir, index_dir, embedding_model)
@@ -330,9 +333,6 @@ class ResearchStateMiddleware(AgentMiddleware):
         becomes ready within *max_wait* seconds, ``False`` otherwise (ingest
         failed, was cancelled, timed out, or no ingest was running).
         """
-        from thread_wiki import progress as progress_tracker
-        from thread_wiki.models import IngestPhase
-
         deadline = time.time() + max_wait
         poll_interval = 2  # seconds
         logged_waiting = False
@@ -532,7 +532,6 @@ class ResearchStateMiddleware(AgentMiddleware):
         if not wiki_answer or not wiki_answer.strip():
             return True
 
-        from langchain_core.messages import HumanMessage
         try:
             model = get_configured_model()
             prompt = (
@@ -550,6 +549,7 @@ class ResearchStateMiddleware(AgentMiddleware):
                 "}\n"
                 "Do not include any other text in your response, only the valid JSON object."
             )
+
             def _invoke():
                 return model.invoke([HumanMessage(content=prompt)])
 
@@ -565,14 +565,8 @@ class ResearchStateMiddleware(AgentMiddleware):
                 response = _invoke()
 
             content = response.content.strip()
-            if content.startswith("```json"):
-                content = content[7:]
-            if content.endswith("```"):
-                content = content[:-3]
-            content = content.strip()
 
-            import json
-            data = json.loads(content)
+            data = robust_json_loads(content)
             needs_research = bool(data.get("needs_deep_research", True))
             logger.info(f"Wiki evaluation decision: needs_deep_research={needs_research}. Reason: {data.get('reason')}")
             return needs_research
@@ -587,6 +581,27 @@ class ResearchStateMiddleware(AgentMiddleware):
 
         # Seed the research request file with the latest user message
         updates: dict[str, Any] = self._seed_research_request_file(current_user_message, state)
+
+        # ── Instant progress feedback ──────────────────────────────────────
+        # Emit a status AIMessage immediately so the user sees activity in
+        # the UI while the (potentially slow) wiki query runs in the background.
+        has_docs = bool(
+            state.get("doc_folder")
+            or (state.get("files") and any(
+                k.startswith("/raw/") or k.startswith("/docs/")
+                for k in (state.get("files") or {})
+            ))
+        )
+        status_text = (
+            "📚 Searching your uploaded documents for relevant information…"
+            if has_docs else
+            "🔍 Starting research…"
+        )
+        updates.setdefault("messages", [])
+        if isinstance(updates["messages"], list):
+            updates["messages"] = [_AIMessage(content=status_text)] + updates["messages"]
+        else:
+            updates["messages"] = [_AIMessage(content=status_text)]
 
         # Inject Wiki Context if we are running in LangGraph dev / native LangGraph
         wiki_sys_msg = None
@@ -642,7 +657,9 @@ class ResearchStateMiddleware(AgentMiddleware):
             sys_msgs.append(SystemMessage(content=f"Task configurations: \n{instruction}"))
 
         if sys_msgs:
-            result["messages"] = sys_msgs
+            # Prepend system messages while keeping the status AIMessage
+            existing_msgs = result.get("messages", [])
+            result["messages"] = sys_msgs + existing_msgs
 
         return result if result else None
 
@@ -660,9 +677,63 @@ class ResearchStateMiddleware(AgentMiddleware):
         }
 
     def after_model(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
-        """Calculate chat_elapsed_seconds after each model response and optionally track eval metrics."""
+        """Calculate chat_elapsed_seconds after each model response and optionally track eval metrics.
+
+        Also handles two UX improvements:
+        - Progress messages: when the model issues tool calls, emit a brief
+          status message so the user can see what phase the agent is in.
+        - Final report injection: when the agent finishes (no tool calls) and
+          /final_report.md exists, make its content the final AI message so
+          the report is rendered inline in the UI instead of a "file saved" notice.
+        """
         chat_start_time = state.get("chat_start_time")
         updates = {}
+
+        # ── Progress messages ──────────────────────────────────────────────
+        messages = state.get("messages", [])
+        last_msg = messages[-1] if messages else None
+        last_tool_calls = getattr(last_msg, "tool_calls", None) or []
+
+        if last_tool_calls:
+            # Agent is still working — emit a brief status based on the
+            # tool(s) it just called so the user sees forward motion.
+            _TOOL_STATUS = {
+                "tavily_search": "🔍 Searching the web…",
+                "fetch_webpage_content": "🌐 Fetching web page…",
+                "read_doc_folder": "📂 Reading uploaded documents…",
+                "retrieve_thread_documents": "🧠 Querying document index…",
+                "read_file": "📄 Reading file…",
+                "write_file": "💾 Saving report…",
+            }
+            tool_names = [tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "") for tc in
+                          last_tool_calls]
+            status = next(
+                (_TOOL_STATUS[n] for n in tool_names if n in _TOOL_STATUS),
+                f"⚙️ Running {', '.join(tool_names)}…" if tool_names else None,
+            )
+            if status:
+                updates["messages"] = [_AIMessage(content=status)]
+        else:
+            # ── Final-report injection (safety net) ────────────────────────
+            # The prompt instructs the agent to paste the report as its final
+            # reply; this hook catches cases where the model doesn't follow
+            # the instruction and replaces the closing chatter with the actual
+            # report content.
+            files = state.get("files") or {}
+            report_data = files.get("/final_report.md")
+            if report_data and last_msg is not None:
+                try:
+                    from deepagents.backends.utils import file_data_to_string
+                    report_text = file_data_to_string(report_data)
+                    last_content = (
+                        last_msg.get("content", "") if isinstance(last_msg, dict)
+                        else getattr(last_msg, "content", "") or ""
+                    )
+                    # Only inject if the last message isn't already the report
+                    if report_text.strip() and report_text.strip() not in last_content.strip():
+                        updates["messages"] = [_AIMessage(content=report_text)]
+                except Exception:
+                    pass
 
         if isinstance(chat_start_time, (int, float)):
             chat_elapsed_seconds = time.time() - chat_start_time
