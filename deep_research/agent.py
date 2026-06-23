@@ -9,7 +9,7 @@ from typing import Any
 import sys
 import time
 from deepagents import create_deep_agent, SubAgent
-from deepagents.backends.utils import create_file_data
+from deepagents.backends.utils import file_data_to_string, create_file_data
 from deepagents.middleware.filesystem import FilesystemState
 from dotenv import load_dotenv
 from langchain.agents.middleware import AgentMiddleware
@@ -44,6 +44,7 @@ from research_agent.utils.cli import (
 )
 from research_agent.utils.eval_tracking import log_server_metrics
 from research_agent.utils.json_utils import robust_json_loads
+from research_agent.utils.knowledge_filesystem import send_files_to_state
 from research_agent.utils.retrieval import load_or_build_index
 from research_agent.utils.skill_registry import get_skill_registry
 from thread_wiki import progress as progress_tracker
@@ -80,6 +81,7 @@ class ResearchState(FilesystemState):
     doc_folder: str | None
     skill: str | None
     no_web: bool | None
+    wiki_query_complete: bool | None
     chat_start_time: float | None
     chat_elapsed_seconds: float | None
     _eval_logged: bool
@@ -592,9 +594,9 @@ class ResearchStateMiddleware(AgentMiddleware):
             ))
         )
         status_text = (
-            "📚 Searching your uploaded documents for relevant information…"
+            "Searching your uploaded documents for relevant information…"
             if has_docs else
-            "🔍 Starting research…"
+            "Starting research…"
         )
         updates.setdefault("messages", [])
         if isinstance(updates["messages"], list):
@@ -614,6 +616,8 @@ class ResearchStateMiddleware(AgentMiddleware):
         elif isinstance(runtime, dict) and "configurable" in runtime:
             thread_id = runtime.get("configurable", {}).get("thread_id")
 
+        updates["wiki_query_complete"] = False
+
         if thread_id and current_user_message:
             wiki_sys_msg, wiki_answer = self._get_wiki_context_sync(str(thread_id), current_user_message)
             if wiki_answer:
@@ -624,11 +628,21 @@ class ResearchStateMiddleware(AgentMiddleware):
                         "Wiki answer is complete and sufficient. Saving to /final_report.md and disabling web search.")
                     if "files" not in updates:
                         updates["files"] = {}
-                    updates["files"]["/final_report.md"] = create_file_data(wiki_answer)
+                    sanitized_wiki_answer = re.sub(
+                        r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
+                        r'/\1.\2', wiki_answer,
+                    )
+                    sanitized_wiki_answer = re.sub(
+                        r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
+                        r'/\1', sanitized_wiki_answer,
+                    )
+                    updates["files"]["/final_report.md"] = create_file_data(sanitized_wiki_answer)
                     updates["no_web"] = True
+                    updates["wiki_query_complete"] = True
                 else:
                     logger.info(
                         "Wiki answer is incomplete/insufficient. Conducting continuous deep research to enhance it.")
+                    updates["wiki_query_complete"] = False
 
         # Always re-extract parameters from the latest user message so that
         # follow-up requests (e.g. "use humanizer skill") are picked up even
@@ -713,26 +727,113 @@ class ResearchStateMiddleware(AgentMiddleware):
             if status:
                 updates["messages"] = [_AIMessage(content=status)]
         else:
-            # ── Final-report injection (safety net) ────────────────────────
-            # The prompt instructs the agent to paste the report as its final
-            # reply; this hook catches cases where the model doesn't follow
-            # the instruction and replaces the closing chatter with the actual
-            # report content.
-            files = state.get("files") or {}
-            report_data = files.get("/final_report.md")
-            if report_data and last_msg is not None:
-                try:
-                    from deepagents.backends.utils import file_data_to_string
-                    report_text = file_data_to_string(report_data)
-                    last_content = (
-                        last_msg.get("content", "") if isinstance(last_msg, dict)
-                        else getattr(last_msg, "content", "") or ""
-                    )
-                    # Only inject if the last message isn't already the report
-                    if report_text.strip() and report_text.strip() not in last_content.strip():
-                        updates["messages"] = [_AIMessage(content=report_text)]
-                except Exception:
-                    pass
+            # ── Final-report injection (safety net) or Save Chat Response ──
+            if state.get("wiki_query_complete"):
+                # Save the chat response to Files (State) as final_report.md
+                if last_msg is not None:
+                    try:
+                        last_content = (
+                            last_msg.get("content", "") if isinstance(last_msg, dict)
+                            else getattr(last_msg, "content", "") or ""
+                        )
+                        if last_content.strip():
+                            # Sanitize to restore source formats
+                            sanitized = re.sub(
+                                r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
+                                r'/\1.\2', last_content,
+                            )
+                            sanitized = re.sub(
+                                r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
+                                r'/\1', sanitized,
+                            )
+                            if "files" not in updates:
+                                updates["files"] = {}
+                            updates["files"]["/final_report.md"] = create_file_data(sanitized)
+
+                            # Persist files using LangGraph send_files_to_state
+                            send_files_to_state({"/final_report.md": create_file_data(sanitized)})
+
+                            # Update the last message in-place so we don't append a duplicate message
+                            if isinstance(last_msg, dict):
+                                last_msg["content"] = sanitized
+                            else:
+                                setattr(last_msg, "content", sanitized)
+                    except Exception:
+                        pass
+            else:
+                # The prompt instructs the agent to paste the report as its final
+                # reply; this hook catches cases where the model doesn't follow
+                # the instruction and replaces the closing chatter with the actual
+                # report content.
+                files = state.get("files") or {}
+                report_data = files.get("/final_report.md")
+                if report_data and last_msg is not None:
+                    try:
+                        report_text = file_data_to_string(report_data)
+                        last_content = (
+                            last_msg.get("content", "") if isinstance(last_msg, dict)
+                            else getattr(last_msg, "content", "") or ""
+                        )
+
+                        # Ensure report_text itself is sanitized (safety check)
+                        report_text_sanitized = re.sub(
+                            r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
+                            r'/\1.\2', report_text,
+                        )
+                        report_text_sanitized = re.sub(
+                            r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
+                            r'/\1', report_text_sanitized,
+                        )
+                        if report_text_sanitized != report_text:
+                            if "files" not in updates:
+                                updates["files"] = {}
+                            updates["files"]["/final_report.md"] = create_file_data(report_text_sanitized)
+                            send_files_to_state({"/final_report.md": create_file_data(report_text_sanitized)})
+                            report_text = report_text_sanitized
+
+                        # Only inject if the last message isn't already the report
+                        if report_text.strip() and report_text.strip() not in last_content.strip():
+                            updates["messages"] = [_AIMessage(content=report_text)]
+                        else:
+                            # If the last message contains the report but is not sanitized, sanitize in-place!
+                            last_content_sanitized = re.sub(
+                                r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
+                                r'/\1.\2', last_content,
+                            )
+                            last_content_sanitized = re.sub(
+                                r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
+                                r'/\1', last_content_sanitized,
+                            )
+                            if last_content_sanitized != last_content:
+                                if isinstance(last_msg, dict):
+                                    last_msg["content"] = last_content_sanitized
+                                else:
+                                    setattr(last_msg, "content", last_content_sanitized)
+                    except Exception:
+                        pass
+                else:
+                    # If /final_report.md doesn't exist, still sanitize the last chat message if it has raw references
+                    try:
+                        last_content = (
+                            last_msg.get("content", "") if isinstance(last_msg, dict)
+                            else getattr(last_msg, "content", "") or ""
+                        )
+                        if last_content.strip():
+                            last_content_sanitized = re.sub(
+                                r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
+                                r'/\1.\2', last_content,
+                            )
+                            last_content_sanitized = re.sub(
+                                r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
+                                r'/\1', last_content_sanitized,
+                            )
+                            if last_content_sanitized != last_content:
+                                if isinstance(last_msg, dict):
+                                    last_msg["content"] = last_content_sanitized
+                                else:
+                                    setattr(last_msg, "content", last_content_sanitized)
+                    except Exception:
+                        pass
 
         if isinstance(chat_start_time, (int, float)):
             chat_elapsed_seconds = time.time() - chat_start_time

@@ -393,7 +393,7 @@ async def _check_if_needs_deep_research_async(question: str, wiki_answer: str) -
         start_idx = content.find('{')
         end_idx = content.rfind('}')
         if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-            json_content = content[start_idx:end_idx+1]
+            json_content = content[start_idx:end_idx + 1]
         else:
             json_content = content
 
@@ -434,6 +434,7 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
             "doc_folder": existing_values.get("doc_folder"),
             "skill": existing_values.get("skill"),
             "no_web": existing_values.get("no_web"),
+            "wiki_query_complete": existing_values.get("wiki_query_complete", False),
         }
 
         # Clean None values
@@ -495,11 +496,13 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
                 )
                 input_state["files"]["/final_report.md"] = create_file_data(sanitized_wiki_context)
                 input_state["no_web"] = True
+                input_state["wiki_query_complete"] = True
             else:
                 import logging
                 logging.getLogger(__name__).info(
                     "Wiki answer is incomplete/insufficient (server). Conducting continuous deep research to enhance it."
                 )
+                input_state["wiki_query_complete"] = False
 
         # Invoke the deep_research agent
         result = await agent.ainvoke(input_state)
@@ -536,12 +539,68 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
                             appendix = "\n".join(appendix_lines)
                             new_report_text = report_text + "\n" + appendix
                             files["/final_report.md"] = create_file_data(new_report_text)
+
+                            # Update the final chat message if it matches the unvalidated report
+                            messages = result.get("messages", [])
+                            if messages:
+                                last_msg = messages[-1]
+                                last_content = (
+                                    last_msg.get("content", "") if isinstance(last_msg, dict)
+                                    else getattr(last_msg, "content", "") or ""
+                                )
+                                if last_content.strip() == report_text.strip():
+                                    if isinstance(last_msg, dict):
+                                        last_msg["content"] = new_report_text
+                                    else:
+                                        setattr(last_msg, "content", new_report_text)
                     except Exception as e:
                         import logging
                         logging.getLogger(__name__).warning(f"Citation validation failed: {e}", exc_info=True)
 
         # Serialize messages
         serialized_messages = [serialize_message(m) for m in result.get("messages", [])]
+
+        # Sanitize final response message to restore source formats and apply citation validations
+        if serialized_messages:
+            last_msg = serialized_messages[-1]
+            if last_msg.get("role") == "assistant" and last_msg.get("content"):
+                content = last_msg["content"]
+
+                # If /final_report.md was updated by citation validator, ensure the message is updated too
+                if "/final_report.md" in files:
+                    from deepagents.backends.utils import file_data_to_string
+                    report_text = file_data_to_string(files["/final_report.md"])
+                    import re as _re
+                    report_text_sanitized = _re.sub(
+                        r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
+                        r'/\1.\2', report_text,
+                    )
+                    report_text_sanitized = _re.sub(
+                        r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
+                        r'/\1', report_text_sanitized,
+                    )
+                    content_sanitized = _re.sub(
+                        r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
+                        r'/\1.\2', content,
+                    )
+                    content_sanitized = _re.sub(
+                        r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
+                        r'/\1', content_sanitized,
+                    )
+                    if content_sanitized.strip() == report_text_sanitized.strip() or "### Citation Verification" in report_text:
+                        content = report_text
+
+                # Sanitize /raw/ references
+                import re as _re
+                sanitized = _re.sub(
+                    r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
+                    r'/\1.\2', content,
+                )
+                sanitized = _re.sub(
+                    r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
+                    r'/\1', sanitized,
+                )
+                last_msg["content"] = sanitized
 
         # Serialize the other state fields to preserve files, doc_folder, etc.
         serializable_result = {
@@ -550,6 +609,7 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
             "doc_folder": result.get("doc_folder"),
             "skill": result.get("skill"),
             "no_web": result.get("no_web"),
+            "wiki_query_complete": result.get("wiki_query_complete"),
         }
 
         db.update_thread(thread_id, serialized_messages, serializable_result)
