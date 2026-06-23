@@ -18,10 +18,10 @@ import sys
 from fastapi import File, Form, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
 
-from . import config as _cfg
-from .auth_helpers import is_authenticated
-from .model_diagnostics import run_model_diagnostics
-from .utils import (
+import webapp.config as _cfg
+from webapp.auth_helpers import is_authenticated
+from webapp.model_diagnostics import run_model_diagnostics
+from webapp.utils import (
     detect_media_type,
     extract_thread_id_from_folder,
     format_bytes,
@@ -29,7 +29,7 @@ from .utils import (
     safe_filename,
     safe_relative_folder,
 )
-from .wiki_hooks import trigger_wiki_auto_ingest, trigger_wiki_delete_hooks
+from webapp.wiki_hooks import trigger_wiki_auto_ingest, trigger_wiki_delete_hooks
 
 logger = logging.getLogger(__name__)
 

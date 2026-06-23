@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import Request
 
-from . import config as _cfg
+import webapp.config as _cfg
 
 
 def is_authenticated(x_api_key: str | None, request: Request | None = None) -> bool:

@@ -7,7 +7,7 @@
   },
   "env": ".env",
   "http": {
-    "app": "./webapp.py:app"
+    "app": "./webapp/__init__.py:app"
   },
   "auth": {
     "path": "./auth.py:auth"
