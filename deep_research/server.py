@@ -428,9 +428,9 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
         messages = thread.get("messages") or []
 
         # Build initial input state for deep_research agent
-        existing_reports = [k for k in existing_files if k.startswith("/final_report")]
-        from research_agent.utils.knowledge_filesystem import _thread_existing_reports
-        _thread_existing_reports[str(thread_id)] = existing_reports
+        existing_reports = [k for k in existing_files if k.startswith("/cited_response")]
+        from research_agent.utils.knowledge_filesystem import _thread_existing_cited_responses
+        _thread_existing_cited_responses[str(thread_id)] = existing_reports
 
         input_state = {
             "messages": messages,
@@ -499,9 +499,10 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
                     r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
                     r'/\1', sanitized_wiki_context,
                 )
-                from research_agent.utils.knowledge_filesystem import get_target_report_path
+                from research_agent.utils.knowledge_filesystem import get_target_cited_response_path
                 existing_reports = input_state.get("existing_reports") or []
-                resolved_path = get_target_report_path(sanitized_wiki_context, input_state["files"], existing_reports)
+                resolved_path = get_target_cited_response_path(sanitized_wiki_context, input_state["files"],
+                                                               existing_reports)
                 input_state["files"][resolved_path] = create_file_data(sanitized_wiki_context)
                 input_state["no_web"] = True
                 input_state["wiki_query_complete"] = True
@@ -529,10 +530,10 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
         files = result.get("files", {})
         existing_reports = result.get("existing_reports")
         if not existing_reports:
-            from research_agent.utils.knowledge_filesystem import _thread_existing_reports
-            existing_reports = _thread_existing_reports.get(str(thread_id), [])
-        from research_agent.utils.knowledge_filesystem import get_active_report_path
-        active_report_path = get_active_report_path(files, existing_reports)
+            from research_agent.utils.knowledge_filesystem import _thread_existing_cited_responses
+            existing_reports = _thread_existing_cited_responses.get(str(thread_id), [])
+        from research_agent.utils.knowledge_filesystem import get_active_cited_response_path
+        active_report_path = get_active_cited_response_path(files, existing_reports)
 
         if active_report_path in files:
             from deepagents.backends.utils import file_data_to_string, create_file_data
@@ -621,14 +622,15 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
                 )
                 last_msg["content"] = sanitized
 
-        from research_agent.utils.knowledge_filesystem import _thread_wiki_query_complete, _thread_existing_reports
+        from research_agent.utils.knowledge_filesystem import _thread_wiki_query_complete, \
+            _thread_existing_cited_responses
         wiki_query_complete = result.get("wiki_query_complete")
         if not wiki_query_complete and str(thread_id) in _thread_wiki_query_complete:
             wiki_query_complete = _thread_wiki_query_complete[str(thread_id)]
 
         existing_reports_db = result.get("existing_reports")
         if not existing_reports_db:
-            existing_reports_db = _thread_existing_reports.get(str(thread_id), [])
+            existing_reports_db = _thread_existing_cited_responses.get(str(thread_id), [])
 
         # Serialize the other state fields to preserve files, doc_folder, etc.
         serializable_result = {
@@ -756,6 +758,8 @@ async def delete_thread(
     ok = db.delete_thread(thread_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Thread not found")
+    from research_agent.utils.knowledge_filesystem import clear_thread_cache
+    clear_thread_cache(thread_id)
     return {}
 
 

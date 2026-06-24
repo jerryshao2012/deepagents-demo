@@ -2,6 +2,7 @@ import asyncio
 import concurrent.futures
 import os
 import re
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 import sys
 import time
 from deepagents import create_deep_agent, SubAgent
-from deepagents.backends.utils import file_data_to_string, create_file_data
+from deepagents.backends.utils import create_file_data
 from deepagents.middleware.filesystem import FilesystemState
 from dotenv import load_dotenv
 from langchain.agents.middleware import AgentMiddleware
@@ -42,9 +43,14 @@ from research_agent.tools import (
 from research_agent.utils.cli import (
     build_instruction,
 )
+from research_agent.utils.content_extractors import (
+    extract_supported_document,
+)
 from research_agent.utils.eval_tracking import log_server_metrics
 from research_agent.utils.json_utils import robust_json_loads
-from research_agent.utils.knowledge_filesystem import send_files_to_state
+from research_agent.utils.knowledge_filesystem import _thread_existing_cited_responses
+from research_agent.utils.knowledge_filesystem import _thread_wiki_query_complete
+from research_agent.utils.knowledge_filesystem import get_target_cited_response_path
 from research_agent.utils.retrieval import load_or_build_index
 from research_agent.utils.skill_registry import get_skill_registry
 from thread_wiki import progress as progress_tracker
@@ -85,7 +91,7 @@ class ResearchState(FilesystemState):
     chat_start_time: float | None
     chat_elapsed_seconds: float | None
     _eval_logged: bool
-    existing_reports: list[str] | None
+    existing_cited_responses: list[str] | None
 
 
 class ResearchStateMiddleware(AgentMiddleware):
@@ -286,27 +292,8 @@ class ResearchStateMiddleware(AgentMiddleware):
                 except Exception:
                     continue
             elif suffix in _BINARY_SUFFIXES:
-                try:
-                    # Try the same extraction used by wiki ingest
-                    from research_agent.utils.content_extractors import (
-                        extract_supported_document,
-                    )
-                    content = extract_supported_document(file_path)
-                except ImportError as e:
-                    # Fallback to minimal PDF extraction
-                    logger.warning(
-                        "content_extractors import failed for %s (%s) — "
-                        "falling back to minimal PDF extraction",
-                        file_path.name, e,
-                    )
-                    try:
-                        from thread_wiki.service import _fallback_pdf_extract
-                        content = _fallback_pdf_extract(file_path)
-                    except Exception:
-                        continue
-                except Exception:
-                    continue
-
+                # Try the same extraction used by wiki ingest
+                content = extract_supported_document(file_path)
             if content and content.strip():
                 if len(content) > _MAX_CHARS_PER_FILE:
                     content = content[:_MAX_CHARS_PER_FILE] + "\n... [truncated]"
@@ -439,6 +426,17 @@ class ResearchStateMiddleware(AgentMiddleware):
                 )
 
                 if result and result.answer:
+                    md_regex = r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b'
+                    original_doc_regex = r'/\1.\2'
+                    doc_regex = r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b'
+                    remove_raw_regex = r'/\1'
+
+                    sanitized_wiki_answer = re.sub(
+                        md_regex, original_doc_regex, result.answer,
+                    )
+                    sanitized_wiki_answer = re.sub(
+                        doc_regex, remove_raw_regex, sanitized_wiki_answer,
+                    )
                     return SystemMessage(content=(
                         "<wiki_context>\n"
                         "The following is the definitive answer from the thread's "
@@ -447,9 +445,9 @@ class ResearchStateMiddleware(AgentMiddleware):
                         "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
                         "search the web to find the missing data. Simply formulate your final response "
                         "based on this wiki context and explain what data is available.\n\n"
-                        f"{result.answer}\n"
+                        f"{sanitized_wiki_answer}\n"
                         "</wiki_context>"
-                    )), result.answer
+                    )), sanitized_wiki_answer
 
                 # LLM wiki query failed — log warning and fall through
                 logger.warning(
@@ -488,7 +486,7 @@ class ResearchStateMiddleware(AgentMiddleware):
                     "</wiki_context>"
                 )), None
 
-            # ── Step 5: Extract text from uploaded PDFs (last resort) ─
+            # ── Step 5: Extract text from uploaded documents (last resort) ─
             docs_content = (
                 ResearchStateMiddleware._build_context_from_docs(paths.docs_dir)
             )
@@ -617,15 +615,10 @@ class ResearchStateMiddleware(AgentMiddleware):
         elif isinstance(runtime, dict) and "configurable" in runtime:
             thread_id = runtime.get("configurable", {}).get("thread_id")
 
-        updates["existing_reports"] = [k for k in state.get("files", {}) if k.startswith("/final_report")]
+        updates["existing_cited_responses"] = [k for k in state.get("files", {}) if k.startswith("/cited_response")]
         if thread_id:
-            from research_agent.utils.knowledge_filesystem import _thread_existing_reports
-            _thread_existing_reports[str(thread_id)] = updates["existing_reports"]
+            _thread_existing_cited_responses[str(thread_id)] = updates["existing_cited_responses"]
         updates["wiki_query_complete"] = False
-        md_regex = r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b'
-        original_doc_regex = r'/\1.\2'
-        doc_regex = r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b'
-        remove_raw_regex = r'/\1'
 
         if thread_id and current_user_message:
             wiki_sys_msg, wiki_answer = self._get_wiki_context_sync(str(thread_id), current_user_message)
@@ -635,28 +628,20 @@ class ResearchStateMiddleware(AgentMiddleware):
                 if not needs_deep_research:
                     logger.info(
                         "Wiki answer is complete and sufficient. Saving report and disabling web search.")
-                    if "files" not in updates:
-                        updates["files"] = {}
-                    sanitized_wiki_answer = re.sub(
-                        md_regex, original_doc_regex, wiki_answer,
-                    )
-                    sanitized_wiki_answer = re.sub(
-                        doc_regex, remove_raw_regex, sanitized_wiki_answer,
-                    )
-                    from research_agent.utils.knowledge_filesystem import get_target_report_path
-                    state_files = state.get("files") or {}
-                    existing_reports = updates["existing_reports"]
-                    resolved_path = get_target_report_path(sanitized_wiki_answer, state_files, existing_reports)
-                    updates["files"][resolved_path] = create_file_data(sanitized_wiki_answer)
                     updates["no_web"] = True
                     updates["wiki_query_complete"] = True
                 else:
                     logger.info(
                         "Wiki answer is incomplete/insufficient. Conducting continuous deep research to enhance it.")
                     updates["wiki_query_complete"] = False
+                if "files" not in updates:
+                    updates["files"] = {}
+                state_files = state.get("files") or {}
+                existing_cited_responses = updates["existing_cited_responses"]
+                resolved_path = get_target_cited_response_path(wiki_answer, state_files, existing_cited_responses)
+                updates["files"][resolved_path] = create_file_data(wiki_answer)
 
         if thread_id:
-            from research_agent.utils.knowledge_filesystem import _thread_wiki_query_complete
             _thread_wiki_query_complete[str(thread_id)] = updates.get("wiki_query_complete", False)
 
         # Always re-extract parameters from the latest user message so that
@@ -710,9 +695,6 @@ class ResearchStateMiddleware(AgentMiddleware):
         Also handles two UX improvements:
         - Progress messages: when the model issues tool calls, emit a brief
           status message so the user can see what phase the agent is in.
-        - Final report injection: when the agent finishes (no tool calls) and
-          /final_report.md exists, make its content the final AI message so
-          the report is rendered inline in the UI instead of a "file saved" notice.
         """
         chat_start_time = state.get("chat_start_time")
         updates = {}
@@ -721,10 +703,6 @@ class ResearchStateMiddleware(AgentMiddleware):
         messages = state.get("messages", [])
         last_msg = messages[-1] if messages else None
         last_tool_calls = getattr(last_msg, "tool_calls", None) or []
-        md_regex = r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b'
-        original_doc_regex = r'/\1.\2'
-        doc_regex = r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b'
-        remove_raw_regex = r'/\1'
 
         if last_tool_calls:
             # Agent is still working — emit a brief status based on the
@@ -745,142 +723,6 @@ class ResearchStateMiddleware(AgentMiddleware):
             )
             if status:
                 updates["messages"] = [_AIMessage(content=status)]
-        else:
-            # ── Final-report injection (safety net) or Save Chat Response ──
-            wiki_query_complete = state.get("wiki_query_complete")
-            if not wiki_query_complete:
-                thread_id = None
-                if isinstance(runtime, dict):
-                    thread_id = runtime.get("configurable", {}).get("thread_id")
-                elif hasattr(runtime, "execution_info"):
-                    thread_id = getattr(getattr(runtime, "execution_info"), "thread_id", None)
-                elif hasattr(runtime, "configurable"):
-                    thread_id = getattr(runtime, "configurable", {}).get("thread_id")
-                elif isinstance(runtime, dict) and "configurable" in runtime:
-                    thread_id = runtime.get("configurable", {}).get("thread_id")
-
-                if thread_id:
-                    from research_agent.utils.knowledge_filesystem import _thread_wiki_query_complete
-                    wiki_query_complete = _thread_wiki_query_complete.get(str(thread_id), False)
-
-            if wiki_query_complete:
-                # Save the chat response to Files (State) as final_report_1.md (or resolved path)
-                if last_msg is not None:
-                    try:
-                        last_content = (
-                            last_msg.get("content", "") if isinstance(last_msg, dict)
-                            else getattr(last_msg, "content", "") or ""
-                        )
-                        if last_content.strip():
-                            # Sanitize to restore source formats
-                            sanitized = re.sub(
-                                md_regex, original_doc_regex, last_content,
-                            )
-                            sanitized = re.sub(
-                                doc_regex, remove_raw_regex, sanitized,
-                            )
-                            if "files" not in updates:
-                                updates["files"] = {}
-                            from research_agent.utils.knowledge_filesystem import get_target_report_path
-                            state_files = state.get("files") or {}
-                            existing_reports = state.get("existing_reports") or []
-                            resolved_path = get_target_report_path(sanitized, state_files, existing_reports)
-                            updates["files"][resolved_path] = create_file_data(sanitized)
-
-                            # Persist files using LangGraph send_files_to_state
-                            send_files_to_state({resolved_path: create_file_data(sanitized)})
-
-                            # Update the last message in-place so we don't append a duplicate message
-                            if isinstance(last_msg, dict):
-                                last_msg["content"] = sanitized
-                            else:
-                                setattr(last_msg, "content", sanitized)
-                    except Exception:
-                        pass
-            else:
-                # The prompt instructs the agent to paste the report as its final
-                # reply; this hook catches cases where the model doesn't follow
-                # the instruction and replaces the closing chatter with the actual
-                # report content.
-                files = state.get("files") or {}
-                existing_reports = state.get("existing_reports") or []
-                from research_agent.utils.knowledge_filesystem import get_active_report_path
-                active_report_path = get_active_report_path(files, existing_reports)
-                report_data = files.get(active_report_path)
-                if report_data and last_msg is not None:
-                    try:
-                        report_text = file_data_to_string(report_data)
-                        last_content = (
-                            last_msg.get("content", "") if isinstance(last_msg, dict)
-                            else getattr(last_msg, "content", "") or ""
-                        )
-
-                        # Ensure report_text itself is sanitized (safety check)
-                        report_text_sanitized = re.sub(
-                            md_regex, original_doc_regex, report_text,
-                        )
-                        report_text_sanitized = re.sub(
-                            doc_regex, remove_raw_regex, report_text_sanitized,
-                        )
-                        if report_text_sanitized != report_text:
-                            if "files" not in updates:
-                                updates["files"] = {}
-                            updates["files"][active_report_path] = create_file_data(report_text_sanitized)
-                            send_files_to_state({active_report_path: create_file_data(report_text_sanitized)})
-                            report_text = report_text_sanitized
-
-                        # Only inject if the last message isn't already the report
-                        if report_text.strip() and report_text.strip() not in last_content.strip():
-                            updates["messages"] = [_AIMessage(content=report_text)]
-                        else:
-                            # If the last message contains the report but is not sanitized, sanitize in-place!
-                            last_content_sanitized = re.sub(
-                                md_regex, original_doc_regex, last_content,
-                            )
-                            last_content_sanitized = re.sub(
-                                doc_regex, remove_raw_regex, last_content_sanitized,
-                            )
-                            if last_content_sanitized != last_content:
-                                if isinstance(last_msg, dict):
-                                    last_msg["content"] = last_content_sanitized
-                                else:
-                                    setattr(last_msg, "content", last_content_sanitized)
-                    except Exception:
-                        pass
-                else:
-                    # The agent finished without writing a report file (e.g. it answered
-                    # directly in chat).  Save the chat response as a new report file so
-                    # the user still gets a persisted artifact for every turn.
-                    try:
-                        last_content = (
-                            last_msg.get("content", "") if isinstance(last_msg, dict)
-                            else getattr(last_msg, "content", "") or ""
-                        )
-                        if last_content.strip():
-                            last_content_sanitized = re.sub(
-                                md_regex, original_doc_regex, last_content,
-                            )
-                            last_content_sanitized = re.sub(
-                                doc_regex, remove_raw_regex, last_content_sanitized,
-                            )
-                            # Persist as a report file (mirrors the wiki_query_complete branch)
-                            if "files" not in updates:
-                                updates["files"] = {}
-                            from research_agent.utils.knowledge_filesystem import get_target_report_path
-                            state_files = state.get("files") or {}
-                            existing_reports = state.get("existing_reports") or []
-                            resolved_path = get_target_report_path(last_content_sanitized, state_files, existing_reports)
-                            updates["files"][resolved_path] = create_file_data(last_content_sanitized)
-                            send_files_to_state({resolved_path: create_file_data(last_content_sanitized)})
-                
-                            # Update the last message content in-place
-                            if last_content_sanitized != last_content:
-                                if isinstance(last_msg, dict):
-                                    last_msg["content"] = last_content_sanitized
-                                else:
-                                    setattr(last_msg, "content", last_content_sanitized)
-                    except Exception:
-                        pass
 
         if isinstance(chat_start_time, (int, float)):
             chat_elapsed_seconds = time.time() - chat_start_time
@@ -1193,8 +1035,6 @@ research_sub_agent: SubAgent = {
 try:
     model = get_configured_model()
 except Exception as e:
-    import traceback
-
     print(f"CRITICAL ERROR INITIALIZING MODEL: {e}", file=sys.stderr)
     traceback.print_exc()
     with open("/deps/deep_research/FATAL_ERROR.log", "w") as f:

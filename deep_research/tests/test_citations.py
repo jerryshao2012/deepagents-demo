@@ -368,53 +368,53 @@ class TestTurnAwareReportNaming:
         assert normalize_citations_for_comparison(t3) == normalize_citations_for_comparison(t4)
 
     def test_get_target_report_path_empty_state(self) -> None:
-        from research_agent.utils.knowledge_filesystem import get_target_report_path
+        from research_agent.utils.knowledge_filesystem import get_target_cited_response_path
 
         content = "Some report content"
-        # If no reports exist at the start of the turn, return /final_report.md
-        assert get_target_report_path(content, {}, []) == "/final_report.md"
+        # If no reports exist at the start of the turn, return /cited_response.md
+        assert get_target_cited_response_path(content, {}, []) == "/cited_response.md"
 
     def test_get_target_report_path_inplace_update(self) -> None:
-        from research_agent.utils.knowledge_filesystem import get_target_report_path
+        from research_agent.utils.knowledge_filesystem import get_target_cited_response_path
         from deepagents.backends.utils import create_file_data
 
         content = "Some report content with citation (/raw/bmo_ar2025.pdf.md, p. 3)"
         sanitized_content = "Some report content with citation (/bmo_ar2025.pdf, p. 3)"
 
         state_files = {
-            "/final_report.md": create_file_data(content)
+            "/cited_response.md": create_file_data(content)
         }
-        existing_reports = ["/final_report.md"]
+        existing_reports = ["/cited_response.md"]
 
-        # Since they are equivalent (only citation differences), return /final_report.md (in-place sanitization)
-        assert get_target_report_path(sanitized_content, state_files, existing_reports) == "/final_report.md"
+        # Since they are equivalent (only citation differences), return /cited_response.md (in-place sanitization)
+        assert get_target_cited_response_path(sanitized_content, state_files, existing_reports) == "/cited_response.md"
 
     def test_get_target_report_path_new_report(self) -> None:
-        from research_agent.utils.knowledge_filesystem import get_target_report_path
+        from research_agent.utils.knowledge_filesystem import get_target_cited_response_path
         from deepagents.backends.utils import create_file_data
 
         old_content = "Report 1 content"
         new_content = "Report 2 content"
 
         state_files = {
-            "/final_report.md": create_file_data(old_content),
-            "/final_report_1.md": create_file_data("some other report")
+            "/cited_response.md": create_file_data(old_content),
+            "/cited_response_1.md": create_file_data("some other report")
         }
-        existing_reports = ["/final_report.md", "/final_report_1.md"]
+        existing_reports = ["/cited_response.md", "/cited_response_1.md"]
 
-        # Since it's new content and both exist at start, allocate /final_report_2.md
-        assert get_target_report_path(new_content, state_files, existing_reports) == "/final_report_2.md"
+        # Since it's new content and both exist at start, allocate /cited_response_2.md
+        assert get_target_cited_response_path(new_content, state_files, existing_reports) == "/cited_response_2.md"
 
-        # Test max suffix increment with a gap (e.g. /final_report.md and /final_report_2.md exist, next should be /final_report_3.md)
+        # Test max suffix increment with a gap (e.g. /cited_response.md and /cited_response_2.md exist, next should be /cited_response_3.md)
         state_files_gap = {
-            "/final_report.md": create_file_data("a"),
-            "/final_report_2.md": create_file_data("b")
+            "/cited_response.md": create_file_data("a"),
+            "/cited_response_2.md": create_file_data("b")
         }
-        existing_reports_gap = ["/final_report.md", "/final_report_2.md"]
-        assert get_target_report_path("new content", state_files_gap, existing_reports_gap) == "/final_report_3.md"
+        existing_reports_gap = ["/cited_response.md", "/cited_response_2.md"]
+        assert get_target_cited_response_path("new content", state_files_gap, existing_reports_gap) == "/cited_response_3.md"
 
     def test_get_target_report_path_reuse_turn_path(self) -> None:
-        from research_agent.utils.knowledge_filesystem import get_target_report_path
+        from research_agent.utils.knowledge_filesystem import get_target_cited_response_path
         from deepagents.backends.utils import create_file_data
 
         old_content = "Report 1 content"
@@ -422,32 +422,32 @@ class TestTurnAwareReportNaming:
         new_content_2 = "New Report final draft"
 
         state_files = {
-            "/final_report.md": create_file_data(old_content),
-            "/final_report_1.md": create_file_data(new_content_1)  # created this turn
+            "/cited_response.md": create_file_data(old_content),
+            "/cited_response_1.md": create_file_data(new_content_1)  # created this turn
         }
-        existing_reports = ["/final_report.md"]
+        existing_reports = ["/cited_response.md"]
 
-        # Since /final_report_1.md was created in this turn (not in existing_reports),
+        # Since /cited_response_1.md was created in this turn (not in existing_reports),
         # multiple writes in the same turn should reuse it even if content differs
-        assert get_target_report_path(new_content_2, state_files, existing_reports) == "/final_report_1.md"
+        assert get_target_cited_response_path(new_content_2, state_files, existing_reports) == "/cited_response_1.md"
 
     def test_get_active_report_path(self) -> None:
-        from research_agent.utils.knowledge_filesystem import get_active_report_path
+        from research_agent.utils.knowledge_filesystem import get_active_cited_response_path
         from deepagents.backends.utils import create_file_data
 
         state_files = {
-            "/final_report.md": create_file_data("1"),
-            "/final_report_1.md": create_file_data("2"),
-            "/final_report_2.md": create_file_data("3"),  # created this turn
+            "/cited_response.md": create_file_data("1"),
+            "/cited_response_1.md": create_file_data("2"),
+            "/cited_response_2.md": create_file_data("3"),  # created this turn
         }
-        existing_reports = ["/final_report.md", "/final_report_1.md"]
+        existing_reports = ["/cited_response.md", "/cited_response_1.md"]
 
         # Returns the newly created file in this turn
-        assert get_active_report_path(state_files, existing_reports) == "/final_report_2.md"
+        assert get_active_cited_response_path(state_files, existing_reports) == "/cited_response_2.md"
 
         # If no new file created this turn, returns the highest index
-        assert get_active_report_path(state_files, ["/final_report.md", "/final_report_1.md",
-                                                    "/final_report_2.md"]) == "/final_report_2.md"
+        assert get_active_cited_response_path(state_files, ["/cited_response.md", "/cited_response_1.md",
+                                                    "/cited_response_2.md"]) == "/cited_response_2.md"
 
     def test_after_model_wiki_query_complete_fallback(self) -> None:
         from agent import ResearchStateMiddleware
@@ -466,15 +466,18 @@ class TestTurnAwareReportNaming:
         _thread_wiki_query_complete["thread-abc"] = False
 
         updates = middleware.after_model(state, runtime)
-        # Should not save final report since wiki_query_complete is False and files is empty
-        assert updates is None or "files" not in updates
+        # Even when wiki_query_complete is False and files is empty,
+        # the chat response should be persisted as a new report artifact.
+        assert updates is not None
+        assert "files" in updates
+        assert "/cited_response.md" in updates["files"]
 
         # Test case 2: wiki_query_complete is False in state, but True in thread map
         _thread_wiki_query_complete["thread-abc"] = True
         updates = middleware.after_model(state, runtime)
-        # Should save final report since wiki_query_complete is True via global map fallback
+        # Should save cited response since wiki_query_complete is True via global map fallback
         assert updates is not None
-        assert "/final_report.md" in updates["files"]
+        assert "/cited_response.md" in updates["files"]
 
     def test_before_agent_wiki_query_complete_registration(self) -> None:
         from agent import ResearchStateMiddleware

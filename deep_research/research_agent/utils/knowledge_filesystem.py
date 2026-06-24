@@ -30,11 +30,17 @@ SUPPORTED_DOC_SUFFIXES = {".pdf", ".txt", ".md", ".docx", ".pptx", ".xlsx"}
 
 logger = setup_logger(__name__)
 
-# Global mapping of thread_id to existing_reports list to bypass injected state limitations in tools
-_thread_existing_reports: dict[str, list[str]] = {}
+# Global mapping of thread_id to existing_cited_responses list to bypass injected state limitations in tools
+_thread_existing_cited_responses: dict[str, list[str]] = {}
 
 # Global mapping of thread_id to wiki_query_complete status to bypass injected state limitations
 _thread_wiki_query_complete: dict[str, bool] = {}
+
+
+def clear_thread_cache(thread_id: str) -> None:
+    """Clear thread-specific cached global states to prevent memory leaks."""
+    _thread_existing_cited_responses.pop(str(thread_id), None)
+    _thread_wiki_query_complete.pop(str(thread_id), None)
 
 
 def send_files_to_state(updates: dict) -> None:
@@ -758,39 +764,40 @@ def normalize_citations_for_comparison(text: str) -> str:
     return "".join(text.split())
 
 
-def get_target_report_path(content: str, state_files: dict | None, existing_reports: list[str] | None) -> str:
-    """Resolve the file path to write the report to, avoiding overwriting reports from previous turns.
+def get_target_cited_response_path(content: str, state_files: dict | None,
+                                   existing_cited_responses: list[str] | None) -> str:
+    """Resolve the file path to write the cited response to, avoiding overwriting cited responses from previous turns.
     
-    If the content (ignoring sanitization/citation diffs) matches any report in state_files,
+    If the content (ignoring sanitization/citation diffs) matches any cited_response in state_files,
     that matching path is returned (in-place sanitization/update).
     
-    Otherwise, if a new report file (not in existing_reports) was already created during this turn,
+    Otherwise, if a new cited_response file (not in existing_cited_responses) was already created during this turn,
     that path is returned (so multiple writes in the same turn reuse the same new path).
     
-    Otherwise, a new report path is allocated (e.g. /final_report.md if it doesn't exist in existing_reports,
-    or /final_report_N.md where N is determined by incrementing the highest existing suffix).
+    Otherwise, a new cited_response path is allocated (e.g. /cited_response.md if it doesn't exist in existing_cited_responses,
+    or /cited_response_N.md where N is determined by incrementing the highest existing suffix).
     """
     state_files = state_files or {}
 
-    # Fallback to global thread mapping if existing_reports is None/empty
-    if not existing_reports:
+    # Fallback to global thread mapping if existing_cited_responses is None/empty
+    if not existing_cited_responses:
         try:
             from langgraph.config import get_config
             config = get_config()
             thread_id = config.get("configurable", {}).get("thread_id")
             if thread_id:
-                if str(thread_id) in _thread_existing_reports:
-                    existing_reports = _thread_existing_reports[str(thread_id)]
+                if str(thread_id) in _thread_existing_cited_responses:
+                    existing_cited_responses = _thread_existing_cited_responses[str(thread_id)]
         except Exception:
             pass
 
-    existing_reports = existing_reports or []
+    existing_cited_responses = existing_cited_responses or []
 
     norm_content = normalize_citations_for_comparison(content)
 
-    # 1. Check if the content is just a sanitized/variant version of a report currently in the state
+    # 1. Check if the content is just a sanitized/variant version of a cited_response currently in the state
     for r_path in state_files:
-        if r_path.startswith("/final_report"):
+        if r_path.startswith("/cited_response"):
             try:
                 existing_content = file_data_to_string(state_files[r_path])
                 if normalize_citations_for_comparison(existing_content) == norm_content:
@@ -798,60 +805,61 @@ def get_target_report_path(content: str, state_files: dict | None, existing_repo
             except Exception:
                 pass
 
-    # 2. Check if we already created a new report file during this turn (not in existing_reports)
-    new_reports_in_turn = [
+    # 2. Check if we already created a new cited_response file during this turn (not in existing_cited_responses)
+    new_cited_responses_in_turn = [
         p for p in state_files
-        if p.startswith("/final_report") and p not in existing_reports
+        if p.startswith("/cited_response") and p not in existing_cited_responses
     ]
-    if new_reports_in_turn:
+    if new_cited_responses_in_turn:
         # Return the first/active one created in this turn
-        return sorted(new_reports_in_turn)[0]
+        return sorted(new_cited_responses_in_turn)[0]
 
     # 3. Allocate a new path
-    if "/final_report.md" not in existing_reports:
-        return "/final_report.md"
+    if "/cited_response.md" not in existing_cited_responses:
+        return "/cited_response.md"
 
     max_n = 0
-    for r_path in existing_reports:
+    for r_path in existing_cited_responses:
         match = re.search(r'_(\d+)\.md$', r_path)
         if match:
             max_n = max(max_n, int(match.group(1)))
 
     next_n = max_n + 1
-    return f"/final_report_{next_n}.md"
+    return f"/cited_response_{next_n}.md"
 
 
-def get_active_report_path(state_files: dict | None, existing_reports: list[str] | None) -> str:
-    """Find the active report path for the current turn.
+def get_active_cited_response_path(state_files: dict | None, existing_cited_responses: list[str] | None) -> str:
+    """Find the active cited response path for the current turn.
     
     This is either:
-    1. A report file in state_files that is NOT in existing_reports (meaning it was created this turn).
-    2. Or if none, the highest index /final_report*.md in state_files.
-    3. Or default to "/final_report.md".
+    1. A cited response file in state_files that is NOT in existing_cited_responses (meaning it was created this turn).
+    2. Or if none, the highest index /cited_response*.md in state_files.
+    3. Or default to "/cited_response.md".
     """
     state_files = state_files or {}
 
-    # Fallback to global thread mapping if existing_reports is None/empty
-    if not existing_reports:
+    # Fallback to global thread mapping if existing_cited_responses is None/empty
+    if not existing_cited_responses:
         try:
             from langgraph.config import get_config
             config = get_config()
             thread_id = config.get("configurable", {}).get("thread_id")
             if thread_id:
-                if str(thread_id) in _thread_existing_reports:
-                    existing_reports = _thread_existing_reports[str(thread_id)]
+                if str(thread_id) in _thread_existing_cited_responses:
+                    existing_cited_responses = _thread_existing_cited_responses[str(thread_id)]
         except Exception:
             pass
 
-    existing_reports = existing_reports or []
+    existing_cited_responses = existing_cited_responses or []
 
-    # 1. Look for a brand new report file created in this turn
-    new_reports = [p for p in state_files if p.startswith("/final_report") and p not in existing_reports]
-    if new_reports:
-        return sorted(new_reports)[-1]
+    # 1. Look for a brand new cited_response file created in this turn
+    new_cited_responses = [p for p in state_files if
+                           p.startswith("/cited_response") and p not in existing_cited_responses]
+    if new_cited_responses:
+        return sorted(new_cited_responses)[-1]
 
-    # 2. Fall back to the highest numbered report that exists in state_files
-    existing_in_state = [p for p in state_files if p.startswith("/final_report")]
+    # 2. Fall back to the highest numbered cited_response that exists in state_files
+    existing_in_state = [p for p in state_files if p.startswith("/cited_response")]
     if existing_in_state:
         def get_suffix_num(path: str) -> int:
             match = re.search(r'_(\d+)\.md$', path)
@@ -861,4 +869,4 @@ def get_active_report_path(state_files: dict | None, existing_reports: list[str]
 
         return sorted(existing_in_state, key=get_suffix_num)[-1]
 
-    return "/final_report.md"
+    return "/cited_response.md"

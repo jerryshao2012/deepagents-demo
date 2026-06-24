@@ -12,15 +12,22 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import shutil
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+import server as _server
+from research_agent.utils.knowledge_filesystem import clear_thread_cache
 from . import progress as progress_tracker
 from .models import ThreadWikiPaths, WikiQueryResult
 from .service import run_ingest, run_lint, run_query
+
+logger = logging.getLogger(__name__)
 
 # ── Router setup ──────────────────────────────────────────────────────────────
 
@@ -111,7 +118,6 @@ async def _wiki_get_current_user(request: Request) -> dict:
     Delegates to server.get_current_user at request time (not import time)
     to avoid circular imports.
     """
-    import server as _server
     return await _server.get_current_user(request)
 
 
@@ -268,7 +274,6 @@ async def stream_wiki_progress(
     as the ingest proceeds. The stream ends when the ingest reaches a
     terminal state (ready, error, or cancelled).
     """
-    from fastapi.responses import StreamingResponse
 
     async def event_stream():
         seq = 0
@@ -422,8 +427,6 @@ async def delete_thread_wiki(
         current_user=Depends(_wiki_get_current_user),
 ) -> dict[str, Any]:
     """Delete a thread's LLM wiki workspace and uploaded documents."""
-    import shutil
-
     # 1. Cancel any active ingest for this thread.
     await progress_tracker.cancel_ingest(
         thread_id, reason="Thread wiki is being deleted."
@@ -433,23 +436,18 @@ async def delete_thread_wiki(
     paths = ThreadWikiPaths.resolve(thread_id, _BASE_DIR)
 
     # 3. Clean up uploaded documents directory if it exists.
-    if paths.docs_dir.exists():
-        if paths.docs_dir.is_dir():
-            await asyncio.to_thread(shutil.rmtree, paths.docs_dir, ignore_errors=True, onerror=None)
-            logger.info("Deleted documents folder for thread %s", thread_id)
+    if paths.docs_dir.exists() and paths.docs_dir.is_dir():
+        await asyncio.to_thread(shutil.rmtree, paths.docs_dir, ignore_errors=True, onerror=None)
+        logger.info("Deleted documents folder for thread %s", thread_id)
 
     # 4. Clean up wiki directory if it exists.
-    if paths.wiki_dir.exists():
-        if paths.wiki_dir.is_dir():
-            await asyncio.to_thread(shutil.rmtree, paths.wiki_dir, ignore_errors=True, onerror=None)
-            logger.info("Deleted wiki folder for thread %s", thread_id)
+    if paths.wiki_dir.exists() and paths.wiki_dir.is_dir():
+        await asyncio.to_thread(shutil.rmtree, paths.wiki_dir, ignore_errors=True, onerror=None)
+        logger.info("Deleted wiki folder for thread %s", thread_id)
+
+    clear_thread_cache(thread_id)
 
     return {
         "thread_id": thread_id,
         "message": "Thread wiki and documents deleted successfully.",
     }
-
-
-import logging
-
-logger = logging.getLogger(__name__)
