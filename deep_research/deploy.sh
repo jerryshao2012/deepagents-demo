@@ -95,7 +95,7 @@ if ! az acr repository show-tags --name $ACR_NAME --repository deep-research-age
 fi
 echo "✅ Verified image exists in ACR"
 
-NEW_VERSION=$(grep 'API_VERSION = ' webapp.py | grep -o '"[^"]*"' | tr -d '"')
+NEW_VERSION=$(grep -E 'API_VERSION(:\s*\w+)?\s*=\s*' webapp/config.py | grep -o '"[^"]*"' | tr -d '"')
 echo "ℹ️  Current API version: $NEW_VERSION"
 end_step
 
