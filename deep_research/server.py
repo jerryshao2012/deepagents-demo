@@ -516,8 +516,44 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
         from research_agent.utils.knowledge_filesystem import _thread_wiki_query_complete
         _thread_wiki_query_complete[str(thread_id)] = input_state.get("wiki_query_complete", False)
 
-        # Invoke the deep_research agent
-        result = await agent.ainvoke(input_state)
+        # ── Wiki-complete short-circuit ──────────────────────────────────
+        # When the wiki already produced a complete and sufficient answer,
+        # skip the agent entirely to prevent infinite write_todos/write_file
+        # tool-call loops.  The wiki answer is already saved as a
+        # cited_response file in input_state["files"]; we just need to
+        # wrap it as the final AI response message.
+        if input_state.get("wiki_query_complete"):
+            import logging
+            from langchain_core.messages import AIMessage
+            from deepagents.backends.utils import file_data_to_string
+            from research_agent.utils.knowledge_filesystem import get_active_cited_response_path
+
+            files = input_state.get("files", {})
+            existing_reports = input_state.get("existing_reports") or []
+            active_path = get_active_cited_response_path(files, existing_reports)
+            wiki_answer_text = file_data_to_string(files.get(active_path, {})) if active_path in files else ""
+
+            logging.getLogger(__name__).info(
+                "Wiki-complete short-circuit: skipping agent invoke, "
+                "returning wiki answer directly as chat response."
+            )
+
+            # Build result that mimics agent output format so downstream
+            # serialization / citation-validation / DB persistence work unchanged.
+            result = {
+                "messages": list(input_state.get("messages", [])) + [
+                    AIMessage(content=wiki_answer_text),
+                ],
+                "files": files,
+                "doc_folder": input_state.get("doc_folder"),
+                "skill": input_state.get("skill"),
+                "no_web": True,
+                "wiki_query_complete": True,
+                "existing_reports": existing_reports,
+            }
+        else:
+            # Invoke the deep_research agent
+            result = await agent.ainvoke(input_state)
 
         # Check if this run has been cancelled in the database/active tasks while executing
         # to prevent overwriting newer thread states in case of race conditions.

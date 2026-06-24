@@ -14,6 +14,7 @@ from deepagents.backends.utils import create_file_data
 from deepagents.middleware.filesystem import FilesystemState
 from dotenv import load_dotenv
 from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware import hook_config
 from langchain_core.messages import AIMessage as _AIMessage
 from langchain_core.messages import HumanMessage
 from langchain_core.messages import SystemMessage
@@ -91,6 +92,7 @@ class ResearchState(FilesystemState):
     chat_start_time: float | None
     chat_elapsed_seconds: float | None
     _eval_logged: bool
+    _wiki_answer_text: str | None
     existing_cited_responses: list[str] | None
 
 
@@ -641,6 +643,11 @@ class ResearchStateMiddleware(AgentMiddleware):
                 resolved_path = get_target_cited_response_path(wiki_answer, state_files, existing_cited_responses)
                 updates["files"][resolved_path] = create_file_data(wiki_answer)
 
+                # When wiki is complete, also seed the final AIMessage so the
+                # agent has a clear terminal response to converge on.
+                if updates.get("wiki_query_complete"):
+                    updates["_wiki_answer_text"] = wiki_answer
+
         if thread_id:
             _thread_wiki_query_complete[str(thread_id)] = updates.get("wiki_query_complete", False)
 
@@ -676,9 +683,42 @@ class ResearchStateMiddleware(AgentMiddleware):
 
         return result if result else None
 
+    @hook_config(can_jump_to=["end"])
     def before_model(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
-        """Capture chat_start_time before model calls, only initializing once per chat."""
-        # Initialize once; do not reset on subsequent model turns.
+        """Capture chat_start_time before model calls, only initializing once per chat.
+
+        Also short-circuits the agent loop when the wiki already produced a
+        complete answer: we inject the terminal AIMessage and jump straight to
+        END *before* the model runs, so the model never gets a chance to call
+        ``read_doc_folder`` / ``write_todos`` (which caused an infinite loop).
+        """
+        # ── Wiki-complete fast-exit ───────────────────────────────────────
+        # before_agent already saved the cited_response and set
+        # wiki_query_complete=True.  Skip the model entirely and terminate.
+        wiki_complete = state.get("wiki_query_complete", False)
+        if wiki_complete:
+            wiki_answer_text = state.get("_wiki_answer_text") or ""
+            if not wiki_answer_text:
+                from deepagents.backends.utils import file_data_to_string
+                files = state.get("files") or {}
+                cited_paths = sorted(p for p in files if p.startswith("/cited_response"))
+                cited_path = cited_paths[-1] if cited_paths else None
+                if cited_path and cited_path in files:
+                    wiki_answer_text = file_data_to_string(files[cited_path])
+            if wiki_answer_text:
+                logger.info(
+                    "Wiki-complete fast-exit (before_model): skipping model "
+                    "call and jumping to END with the wiki answer."
+                )
+                return {
+                    "jump_to": "end",
+                    "messages": [_AIMessage(content=wiki_answer_text)],
+                    "chat_start_time": state.get("chat_start_time") or time.time(),
+                    "chat_elapsed_seconds": state.get("chat_elapsed_seconds"),
+                    "_eval_logged": state.get("_eval_logged", False),
+                }
+
+        # Initialize chat_start_time once; do not reset on subsequent turns.
         if isinstance(state.get("chat_start_time"), (int, float)):
             return None
 
@@ -689,12 +729,16 @@ class ResearchStateMiddleware(AgentMiddleware):
             "_eval_logged": False,
         }
 
+    @hook_config(can_jump_to=["end"])
     def after_model(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
         """Calculate chat_elapsed_seconds after each model response and optionally track eval metrics.
 
-        Also handles two UX improvements:
+        Also handles:
         - Progress messages: when the model issues tool calls, emit a brief
           status message so the user can see what phase the agent is in.
+        - Wiki-complete guard: when the wiki already provided a complete answer,
+          strip ALL tool calls and inject the wiki answer text as the final
+          AIMessage to prevent infinite write_todos / write_file loops.
         """
         chat_start_time = state.get("chat_start_time")
         updates = {}
@@ -704,9 +748,61 @@ class ResearchStateMiddleware(AgentMiddleware):
         last_msg = messages[-1] if messages else None
         last_tool_calls = getattr(last_msg, "tool_calls", None) or []
 
-        if last_tool_calls:
+        # ── Wiki-complete guard ─────────────────────────────────────────────
+        # When wiki_query_complete is True the cited_response is already saved
+        # by before_agent.  The model should NOT be running tools at all, but
+        # some models ignore the <WikiCompleteAnswer> instruction and keep
+        # calling read_doc_folder / write_todos in an infinite loop.
+        #
+        # We terminate the loop definitively via TWO complementary mechanisms:
+        #   1. jump_to="end" — the framework routing edge checks this FIRST,
+        #      before even inspecting messages, so the graph exits immediately.
+        #   2. Append a final AIMessage with the wiki answer and NO tool calls
+        #      as a belt-and-suspenders so the chat response is correct even
+        #      if a middleware between us and the routing edge clears jump_to.
+        wiki_complete = state.get("wiki_query_complete", False)
+        if not wiki_complete:
+            thread_id = None
+            if isinstance(runtime, dict):
+                thread_id = runtime.get("configurable", {}).get("thread_id")
+            elif hasattr(runtime, "configurable"):
+                thread_id = getattr(runtime, "configurable", {}).get("thread_id")
+            if thread_id:
+                wiki_complete = _thread_wiki_query_complete.get(str(thread_id), False)
+
+        if wiki_complete and last_tool_calls:
+            tool_names = [
+                tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "")
+                for tc in last_tool_calls
+            ]
+            logger.warning(
+                "Wiki-complete guard: terminating loop, model emitted tool "
+                "calls %s despite wiki_query_complete=True. Injecting wiki "
+                "answer as final response and jumping to END.",
+                tool_names,
+            )
+            # Get the wiki answer text from state
+            wiki_answer_text = state.get("_wiki_answer_text") or ""
+            if not wiki_answer_text:
+                # Fallback: read from cited_response file in state
+                from deepagents.backends.utils import file_data_to_string
+                files = state.get("files") or {}
+                cited_paths = sorted(p for p in files if p.startswith("/cited_response"))
+                cited_path = cited_paths[-1] if cited_paths else None
+                if cited_path and cited_path in files:
+                    wiki_answer_text = file_data_to_string(files[cited_path])
+
+            # 1) Authoritative termination: jump_to is checked by the routing
+            #    edge before any message inspection, so this always exits.
+            updates["jump_to"] = "end"
+            # 2) Append the terminal AIMessage so the final chat reply is the
+            #    wiki answer (no tool_calls).
+            updates["messages"] = [_AIMessage(content=wiki_answer_text)]
+
+        if last_tool_calls and "messages" not in updates:
             # Agent is still working — emit a brief status based on the
             # tool(s) it just called so the user sees forward motion.
+            # (Skip if wiki-complete guard already set messages above.)
             _TOOL_STATUS = {
                 "tavily_search": "🔍 Searching the web…",
                 "fetch_webpage_content": "🌐 Fetching web page…",
@@ -973,9 +1069,8 @@ class ResearchStateMiddleware(AgentMiddleware):
 
         Appends a *State Context* block so the agent knows what files are
         already available.  This is the general mechanism that lets any skill
-        work correctly in follow-up turns — the agent can see existing
-        artifacts and decide whether to post-process them, extend them, or
-        start fresh, based on the user's message and the skill instructions.
+        work correctly in follow-up turns — the agent can decide the right
+        workflow for any skill (post-process, extend, or start fresh).
         """
         instruction = build_instruction(
             subject="",
@@ -984,6 +1079,33 @@ class ResearchStateMiddleware(AgentMiddleware):
             no_web=str2bool(state.get("no_web"), False),
         )
         instruction = instruction.replace("Research the following subject: ", "").strip()
+
+        # --- Wiki-complete fast-path ---
+        # When the wiki already produced a complete and sufficient answer (saved
+        # as cited_response.md by before_agent), instruct the agent to skip the
+        # full research workflow and simply output the existing content.  This
+        # prevents infinite write_todos / write_file loops.
+        wiki_complete = state.get("wiki_query_complete", False)
+        if wiki_complete:
+            files = state.get("files") or {}
+            cited_response_paths = sorted(
+                p for p in files if p.startswith("/cited_response")
+            )
+            cited_response_path = cited_response_paths[-1] if cited_response_paths else "/cited_response.md"
+            instruction += (
+                "\n\n<WikiCompleteAnswer>"
+                "\nIMPORTANT: The user's question has ALREADY been fully answered by the "
+                "document wiki. The complete answer is already saved as a cited_response file."
+                "\nYou MUST follow these steps and NOTHING ELSE:"
+                f"\n1. Use `read_file` to read `{cited_response_path}`."
+                "\n2. Output the EXACT content of that file as your final conversational reply."
+                "\n3. Do NOT call `write_todos`, `write_file`, `task()`, `tavily_search`, "
+                "or any other tool."
+                "\n4. Do NOT attempt to re-research, re-synthesize, or rewrite the answer."
+                "\nThe work is DONE. Just read the file and return its content verbatim."
+                "\n</WikiCompleteAnswer>"
+            )
+            return instruction
 
         # --- General state context ---
         # Tell the agent what files already exist so it can decide the right

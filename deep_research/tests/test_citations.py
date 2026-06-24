@@ -411,7 +411,8 @@ class TestTurnAwareReportNaming:
             "/cited_response_2.md": create_file_data("b")
         }
         existing_reports_gap = ["/cited_response.md", "/cited_response_2.md"]
-        assert get_target_cited_response_path("new content", state_files_gap, existing_reports_gap) == "/cited_response_3.md"
+        assert get_target_cited_response_path("new content", state_files_gap,
+                                              existing_reports_gap) == "/cited_response_3.md"
 
     def test_get_target_report_path_reuse_turn_path(self) -> None:
         from research_agent.utils.knowledge_filesystem import get_target_cited_response_path
@@ -447,7 +448,7 @@ class TestTurnAwareReportNaming:
 
         # If no new file created this turn, returns the highest index
         assert get_active_cited_response_path(state_files, ["/cited_response.md", "/cited_response_1.md",
-                                                    "/cited_response_2.md"]) == "/cited_response_2.md"
+                                                            "/cited_response_2.md"]) == "/cited_response_2.md"
 
     def test_after_model_wiki_query_complete_fallback(self) -> None:
         from agent import ResearchStateMiddleware
@@ -498,3 +499,126 @@ class TestTurnAwareReportNaming:
 
         # By default, wiki_query_complete is set to False in updates if no wiki context matches
         assert _thread_wiki_query_complete.get("thread-def") is False
+
+    def test_after_model_wiki_complete_strips_write_todos(self) -> None:
+        """When wiki_query_complete=True, ALL tool calls (including read_file) must be stripped
+        and the wiki answer text must be injected as the final AIMessage to prevent the
+        infinite loop described in the bug report."""
+        from agent import ResearchStateMiddleware
+        from deepagents.backends.utils import create_file_data
+        from langchain_core.messages import AIMessage
+
+        middleware = ResearchStateMiddleware()
+
+        # Simulate the model issuing write_todos + write_file while wiki is complete
+        ai_msg = AIMessage(
+            content="",
+            tool_calls=[
+                {"name": "write_todos", "args": {"todos": []}, "id": "tc1"},
+                {"name": "write_file", "args": {"file_path": "/cited_response.md", "content": "x"}, "id": "tc2"},
+            ],
+        )
+        wiki_answer = "This is the complete wiki answer."
+        state = {
+            "messages": [ai_msg],
+            "files": {"/cited_response.md": create_file_data(wiki_answer)},
+            "wiki_query_complete": True,
+            "_wiki_answer_text": wiki_answer,
+        }
+        runtime = {"configurable": {"thread_id": "thread-wiki-loop"}}
+
+        updates = middleware.after_model(state, runtime)
+        # The wiki guard should have injected a final AIMessage with the wiki answer text
+        assert updates is not None
+        assert "messages" in updates
+        override_msgs = updates["messages"]
+        assert len(override_msgs) == 1
+        final_msg = override_msgs[0]
+        # No tool calls should remain (agent will stop)
+        final_tool_calls = getattr(final_msg, "tool_calls", None) or []
+        assert final_tool_calls == []
+        # The wiki answer text must be the message content
+        assert final_msg.content == wiki_answer
+        # jump_to="end" must be set so the framework routing exits immediately
+        assert updates.get("jump_to") == "end"
+
+    def test_after_model_has_can_jump_to_end(self) -> None:
+        """after_model must declare can_jump_to=['end'] so the framework
+        registers a conditional edge that honors jump_to (otherwise a static
+        edge is created and jump_to is silently ignored)."""
+        from agent import ResearchStateMiddleware
+
+        can_jump = getattr(ResearchStateMiddleware.after_model, "__can_jump_to__", None)
+        assert can_jump == ["end"]
+
+    def test_before_model_wiki_complete_fast_exit(self) -> None:
+        """When wiki_query_complete=True, before_model must jump straight to
+        END without running the model, so the model never gets a chance to call
+        read_doc_folder (the root cause of the infinite loop)."""
+        from agent import ResearchStateMiddleware
+        from deepagents.backends.utils import create_file_data
+        from langchain_core.messages import HumanMessage
+
+        middleware = ResearchStateMiddleware()
+        wiki_answer = "The definitive wiki answer."
+        state = {
+            "messages": [HumanMessage(content="what is in the docs?")],
+            "files": {"/cited_response.md": create_file_data(wiki_answer)},
+            "wiki_query_complete": True,
+            "_wiki_answer_text": wiki_answer,
+        }
+        runtime = {"configurable": {"thread_id": "thread-fast-exit"}}
+
+        updates = middleware.before_model(state, runtime)
+        assert updates is not None
+        # Must signal the framework to terminate the loop immediately
+        assert updates.get("jump_to") == "end"
+        # Must inject the terminal AIMessage so the chat reply is correct
+        assert "messages" in updates
+        final_msg = updates["messages"][0]
+        assert final_msg.content == wiki_answer
+        assert (getattr(final_msg, "tool_calls", None) or []) == []
+
+    def test_before_model_has_can_jump_to_end(self) -> None:
+        """before_model must declare can_jump_to=['end'] so the framework
+        registers a conditional edge that honors jump_to."""
+        from agent import ResearchStateMiddleware
+
+        can_jump = getattr(ResearchStateMiddleware.before_model, "__can_jump_to__", None)
+        assert can_jump == ["end"]
+
+    def test_before_model_no_wiki_runs_normally(self) -> None:
+        """When wiki_query_complete is not True, before_model must behave as
+        before (initialize chat_start_time) and NOT jump to end."""
+        from agent import ResearchStateMiddleware
+        from langchain_core.messages import HumanMessage
+
+        middleware = ResearchStateMiddleware()
+        state = {
+            "messages": [HumanMessage(content="research topic X")],
+            "files": {},
+            "wiki_query_complete": False,
+        }
+        runtime = {"configurable": {"thread_id": "thread-normal"}}
+
+        updates = middleware.before_model(state, runtime)
+        assert updates is not None
+        assert "jump_to" not in updates
+        assert "chat_start_time" in updates
+
+    def test_build_system_instruction_wiki_complete_fastpath(self) -> None:
+        """When wiki_query_complete=True, _build_system_instruction must include
+        the WikiCompleteAnswer block telling the agent to skip the workflow."""
+        from agent import ResearchStateMiddleware
+        from deepagents.backends.utils import create_file_data
+
+        state = {
+            "files": {"/cited_response.md": create_file_data("wiki answer")},
+            "wiki_query_complete": True,
+            "no_web": True,
+        }
+        instruction = ResearchStateMiddleware._build_system_instruction(state)
+        assert "<WikiCompleteAnswer>" in instruction
+        assert "read_file" in instruction
+        assert "/cited_response.md" in instruction
+        assert "Do NOT call `write_todos`" in instruction
