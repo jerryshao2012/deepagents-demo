@@ -1,5 +1,6 @@
 import asyncio
 import concurrent.futures
+import hashlib
 import os
 import re
 import traceback
@@ -10,14 +11,21 @@ from typing import Any
 import sys
 import time
 from deepagents import create_deep_agent, SubAgent
-from deepagents.backends.utils import create_file_data
+from deepagents.backends.utils import (
+    create_file_data,
+    file_data_to_string,
+)
 from deepagents.middleware.filesystem import FilesystemState
 from dotenv import load_dotenv
-from langchain.agents.middleware import AgentMiddleware
-from langchain.agents.middleware import hook_config
-from langchain_core.messages import AIMessage as _AIMessage
-from langchain_core.messages import HumanMessage
-from langchain_core.messages import SystemMessage
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    hook_config,
+)
+from langchain_core.messages import (
+    AIMessage as _AIMessage,
+    HumanMessage,
+    SystemMessage,
+)
 from langchain_core.runnables import RunnableConfig
 
 from logger_utils import setup_logger
@@ -49,14 +57,20 @@ from research_agent.utils.content_extractors import (
 )
 from research_agent.utils.eval_tracking import log_server_metrics
 from research_agent.utils.json_utils import robust_json_loads
-from research_agent.utils.knowledge_filesystem import _thread_existing_cited_responses
-from research_agent.utils.knowledge_filesystem import _thread_wiki_query_complete
-from research_agent.utils.knowledge_filesystem import get_target_cited_response_path
+from research_agent.utils.knowledge_filesystem import (
+    _thread_existing_cited_responses,
+    _thread_wiki_queried_messages,
+    _thread_wiki_query_complete,
+    get_target_cited_response_path,
+)
 from research_agent.utils.retrieval import load_or_build_index
 from research_agent.utils.skill_registry import get_skill_registry
 from thread_wiki import progress as progress_tracker
-from thread_wiki.models import IngestPhase
-from thread_wiki.models import ThreadWikiPaths, WikiQueryResult
+from thread_wiki.models import (
+    IngestPhase,
+    ThreadWikiPaths,
+    WikiQueryResult,
+)
 from thread_wiki.service import run_query
 from utils import get_ssl_verify_config, str2bool
 
@@ -620,36 +634,79 @@ class ResearchStateMiddleware(AgentMiddleware):
         updates["existing_cited_responses"] = [k for k in state.get("files", {}) if k.startswith("/cited_response")]
         if thread_id:
             _thread_existing_cited_responses[str(thread_id)] = updates["existing_cited_responses"]
-        updates["wiki_query_complete"] = False
 
-        if thread_id and current_user_message:
-            wiki_sys_msg, wiki_answer = self._get_wiki_context_sync(str(thread_id), current_user_message)
-            if wiki_answer:
-                # Evaluate if we need continuous deep research to enhance it
-                needs_deep_research = self._check_if_needs_deep_research(current_user_message, wiki_answer)
-                if not needs_deep_research:
-                    logger.info(
-                        "Wiki answer is complete and sufficient. Saving report and disabling web search.")
-                    updates["no_web"] = True
-                    updates["wiki_query_complete"] = True
-                else:
-                    logger.info(
-                        "Wiki answer is incomplete/insufficient. Conducting continuous deep research to enhance it.")
-                    updates["wiki_query_complete"] = False
-                if "files" not in updates:
-                    updates["files"] = {}
-                state_files = state.get("files") or {}
-                existing_cited_responses = updates["existing_cited_responses"]
-                resolved_path = get_target_cited_response_path(wiki_answer, state_files, existing_cited_responses)
-                updates["files"][resolved_path] = create_file_data(wiki_answer)
+        # ── Wiki query deduplication ───────────────────────────────────────
+        # before_agent is called on EVERY model iteration (i.e. each tool-call
+        # re-entry within the same user turn), not just once per turn.
+        # Running the wiki query + LLM eval on every iteration:
+        #   - is very expensive (two extra LLM calls per loop)
+        #   - causes an infinite loop when wiki_query_complete=False because
+        #     write_todos re-triggers the loop without any exit condition
+        #
+        # Fix: track the hash of the last user message that was already
+        # wiki-queried for this thread.  If it matches the current message,
+        # skip re-querying and preserve the state values from the first call.
+        msg_hash = hashlib.md5((current_user_message or "").encode()).hexdigest() if current_user_message else ""
+        tid_key = str(thread_id) if thread_id else ""
+        already_queried = bool(
+            tid_key
+            and msg_hash
+            and _thread_wiki_queried_messages.get(tid_key) == msg_hash
+        )
 
-                # When wiki is complete, also seed the final AIMessage so the
-                # agent has a clear terminal response to converge on.
-                if updates.get("wiki_query_complete"):
-                    updates["_wiki_answer_text"] = wiki_answer
+        if already_queried:
+            # Within-turn re-entry: preserve the existing wiki_query_complete
+            # value from state (set during the first iteration) and skip the
+            # expensive wiki query + LLM eval.
+            existing_wqc = state.get("wiki_query_complete")
+            if existing_wqc is not None:
+                updates["wiki_query_complete"] = existing_wqc
+            else:
+                updates["wiki_query_complete"] = False
+            if thread_id:
+                _thread_wiki_query_complete[str(thread_id)] = updates["wiki_query_complete"]
+            logger.debug(
+                "before_agent: skipping wiki re-query (already queried for this message, "
+                "preserving wiki_query_complete=%s) for thread %s",
+                updates["wiki_query_complete"],
+                thread_id,
+            )
+        else:
+            # Fresh user message — run the wiki query for the first time.
+            updates["wiki_query_complete"] = False
 
-        if thread_id:
-            _thread_wiki_query_complete[str(thread_id)] = updates.get("wiki_query_complete", False)
+            if thread_id and current_user_message:
+                wiki_sys_msg, wiki_answer = self._get_wiki_context_sync(str(thread_id), current_user_message)
+                if wiki_answer:
+                    # Evaluate if we need continuous deep research to enhance it
+                    needs_deep_research = self._check_if_needs_deep_research(current_user_message, wiki_answer)
+                    if not needs_deep_research:
+                        logger.info(
+                            "Wiki answer is complete and sufficient. Saving report and disabling web search.")
+                        updates["no_web"] = True
+                        updates["wiki_query_complete"] = True
+                    else:
+                        logger.info(
+                            "Wiki answer is incomplete/insufficient. Conducting continuous deep research to enhance it.")
+                        updates["wiki_query_complete"] = False
+                    if "files" not in updates:
+                        updates["files"] = {}
+                    state_files = state.get("files") or {}
+                    existing_cited_responses = updates["existing_cited_responses"]
+                    resolved_path = get_target_cited_response_path(wiki_answer, state_files, existing_cited_responses)
+                    updates["files"][resolved_path] = create_file_data(wiki_answer)
+
+                    # When wiki is complete, also seed the final AIMessage so the
+                    # agent has a clear terminal response to converge on.
+                    if updates.get("wiki_query_complete"):
+                        updates["_wiki_answer_text"] = wiki_answer
+
+            if thread_id:
+                _thread_wiki_query_complete[str(thread_id)] = updates.get("wiki_query_complete", False)
+                # Mark this message as queried so subsequent iterations within
+                # this turn skip the expensive wiki query + eval.
+                if msg_hash:
+                    _thread_wiki_queried_messages[str(thread_id)] = msg_hash
 
         # Always re-extract parameters from the latest user message so that
         # follow-up requests (e.g. "use humanizer skill") are picked up even
@@ -699,7 +756,6 @@ class ResearchStateMiddleware(AgentMiddleware):
         if wiki_complete:
             wiki_answer_text = state.get("_wiki_answer_text") or ""
             if not wiki_answer_text:
-                from deepagents.backends.utils import file_data_to_string
                 files = state.get("files") or {}
                 cited_paths = sorted(p for p in files if p.startswith("/cited_response"))
                 cited_path = cited_paths[-1] if cited_paths else None
@@ -785,7 +841,6 @@ class ResearchStateMiddleware(AgentMiddleware):
             wiki_answer_text = state.get("_wiki_answer_text") or ""
             if not wiki_answer_text:
                 # Fallback: read from cited_response file in state
-                from deepagents.backends.utils import file_data_to_string
                 files = state.get("files") or {}
                 cited_paths = sorted(p for p in files if p.startswith("/cited_response"))
                 cited_path = cited_paths[-1] if cited_paths else None

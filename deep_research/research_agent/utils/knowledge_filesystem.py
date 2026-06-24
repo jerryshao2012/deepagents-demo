@@ -36,11 +36,18 @@ _thread_existing_cited_responses: dict[str, list[str]] = {}
 # Global mapping of thread_id to wiki_query_complete status to bypass injected state limitations
 _thread_wiki_query_complete: dict[str, bool] = {}
 
+# Global mapping of thread_id to the hash of the last user message that was
+# already wiki-queried during the current turn. Used by before_agent to skip
+# re-running the expensive wiki query + LLM eval on every within-turn
+# model iteration (which caused the write_todos infinite loop).
+_thread_wiki_queried_messages: dict[str, str] = {}
+
 
 def clear_thread_cache(thread_id: str) -> None:
     """Clear thread-specific cached global states to prevent memory leaks."""
     _thread_existing_cited_responses.pop(str(thread_id), None)
     _thread_wiki_query_complete.pop(str(thread_id), None)
+    _thread_wiki_queried_messages.pop(str(thread_id), None)
 
 
 def send_files_to_state(updates: dict) -> None:

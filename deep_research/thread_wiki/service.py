@@ -495,8 +495,9 @@ def _build_ingest_review_prompt(topic: str, staged_names: list[str], note: str |
         "- Distinguish direct evidence from inference.\n"
         "- Prefer canonical page updates over creating fragmented pages.\n"
         "- Preserve uncertainty; do not invent unsupported claims.\n"
-        "- Use source filename citations for non-trivial claims.\n\n"
-        "Required output format (markdown):\n"
+        "- Use source filename citations for non-trivial claims.\n"
+        + _DOCUMENT_CITATION_RULES
+        + "\nRequired output format (markdown):\n"
         "## 1) Source-by-source extraction\n"
         "## 2) Proposed wiki change set\n"
         "## 3) Cross-source synthesis and structure\n"
@@ -525,13 +526,24 @@ def _build_ingest_apply_prompt(topic: str, staged_names: list[str], review_summa
         "Writing standards:\n"
         "- Keep pages scannable with clear headings and concise prose.\n"
         "- Use source filename citations for non-trivial claims.\n"
-        "- Avoid duplicative pages; merge into canonical pages when possible.\n\n"
+        + _DOCUMENT_CITATION_RULES
+        + "- Avoid duplicative pages; merge into canonical pages when possible.\n\n"
         "Return a concise apply report:\n"
         "A) Files created  B) Files updated  C) Key synthesis  D) Remaining uncertainties\n\n"
         f"Approved review plan:\n{review_summary}\n\n"
         f"Staged sources:\n{source_block}\n\n"
         f"Operator note: {note_block}\n"
     )
+
+
+_DOCUMENT_CITATION_RULES = """\
+Document citation format rules (MANDATORY):
+- Cite raw document sources as plain text: (/raw/filename.pdf.md, p. N) or (Source: /raw/filename.pdf.md, p. N)
+- NEVER use markdown link syntax for document paths. The following is WRONG: ([/filename.pdf](p. N))
+  The correct form is: (/raw/filename.pdf.md, p. N)
+- For web URLs you MAY use markdown links: [Title](https://example.com)
+- Multiple pages: (/raw/filename.pdf.md, pp. 14, 30)
+"""
 
 
 def _build_query_prompt(topic: str, question: str) -> str:
@@ -547,7 +559,8 @@ def _build_query_prompt(topic: str, question: str) -> str:
         "5) CRITICAL: If the wiki pages do not contain the full answer, you MUST search and read the raw source documents in `/raw/` (using the `retrieve_raw_documents` tool if the files are too large to read directly).\n"
         "6) Provide a grounded answer with wiki or raw file path citations.\n"
         "7) Decide whether this answer should be filed as a durable wiki page.\n\n"
-        "Output format (exact keys):\n"
+        + _DOCUMENT_CITATION_RULES
+        + "\nOutput format (exact keys):\n"
         "ANSWER:\n<markdown answer with citations>\n\n"
         "FILING_DECISION: file|skip\n"
         "FILING_REASON: <one sentence>\n"
