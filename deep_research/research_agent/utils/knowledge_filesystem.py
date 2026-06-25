@@ -602,6 +602,49 @@ def write_file_impl(
         return f"Error writing file `{file_path}`: {str(e)}"
 
 
+def _check_thread_wiki_ready(folder_path: str) -> tuple[bool, str | None]:
+    """Check if the folder being read is a docs/threads/<thread_id> folder with a built wiki.
+
+    Returns a tuple of (is_thread_docs_folder, wiki_content_path).
+    If is_thread_docs_folder is True and wiki is ready, wiki_content_path points to the wiki dir.
+    """
+    try:
+        # Resolve to absolute path for reliable pattern matching
+        resolved = Path(folder_path).resolve()
+        parts = resolved.parts
+
+        # Look for the docs/threads/<thread_id> pattern anywhere in the path
+        for i, part in enumerate(parts):
+            if part == "threads" and i > 0 and parts[i - 1] == "docs":
+                # Found docs/threads — the thread_id is either this component or next
+                if i + 1 < len(parts):
+                    thread_id = parts[i + 1]
+                else:
+                    # The folder itself is the threads dir, not a specific thread
+                    return False, None
+
+                # Build the expected wiki path:
+                # docs/threads/<thread_id>  →  docs/threads-wiki/<thread_id>/wiki/
+                base = Path(*parts[:i - 1])  # everything before "docs"
+                wiki_content = base / "docs" / "threads-wiki" / thread_id / "wiki"
+                index_path = wiki_content / "index.md"
+
+                if index_path.exists():
+                    content = index_path.read_text(encoding="utf-8")
+                    if "_No pages yet._" not in content:
+                        logger.info(
+                            "[read_doc_folder] docs/threads/%s folder detected — wiki is ready at %s",
+                            thread_id,
+                            wiki_content,
+                        )
+                        return True, str(wiki_content)
+
+                return True, None  # It IS a thread docs folder, but wiki not ready yet
+    except Exception:
+        pass
+    return False, None
+
+
 def read_doc_folder_impl(
         folder_path: str,
         specific_files: list[str] | None = None,
@@ -625,6 +668,28 @@ def read_doc_folder_impl(
     Returns:
         Extracted text from supported documents, a summary for large folders, or an error message.
     """
+    # ── Early exit: thread docs folder with a ready wiki ──────────────────
+    # When documents have already been ingested into the wiki workspace, do NOT
+    # re-process the raw PDFs from docs/threads/<thread_id>.  Skip straight to
+    # the wiki so the agent uses the synthesised pages instead.
+    is_thread_docs, wiki_content_path = _check_thread_wiki_ready(folder_path)
+    if is_thread_docs and wiki_content_path:
+        logger.info(
+            "[read_doc_folder] Skipping raw document extraction for thread docs folder '%s' "
+            "— wiki is already built. Redirecting agent to wiki at '%s'.",
+            folder_path,
+            wiki_content_path,
+        )
+        wiki_index_path = str(Path(wiki_content_path) / "index.md")
+        return (
+            "The documents in this folder have already been ingested into the wiki workspace. "
+            "Do NOT re-process the raw files. "
+            "Instead, use the `read_file` tool to read the synthesised wiki pages. "
+            f"Start with the wiki index at `{wiki_index_path}` for an overview and list of all pages, "
+            "then read individual wiki pages for detailed information.\n\n"
+            "Do NOT call `read_doc_folder` again on this folder."
+        )
+
     configured_doc_folder: str | None = None
     if state and isinstance(state, dict):
         configured_doc_folder = state.get("doc_folder")
