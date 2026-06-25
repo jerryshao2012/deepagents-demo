@@ -72,9 +72,8 @@ Simply list items with details - no introduction needed:
   Some important finding [1]. Another key insight [2].
 
   ### Sources
-  [1] AI Research Paper: https://example.com/paper
-
-  [2] Industry Analysis: https://example.com/analysis
+  1. AI Research Paper: https://example.com/paper
+  2. Industry Analysis: https://example.com/analysis
 
 **Document/PDF citation format (MANDATORY):**
 - When citing uploaded documents or wiki raw sources, use plain-text format: (/filename.pdf, p. N)
@@ -88,7 +87,9 @@ Simply list items with details - no introduction needed:
 1. **NEVER ask the user for results**: When you delegate a task via the `task()` tool, the subagent's findings will be returned directly to you in the tool's output context. You MUST read the tool output. Do NOT ask the user to provide the results.
 2. **Never pause for narrative**: When moving from synthesis to output delivery, DO NOT output a conversational message like "I will now synthesize..." or "Note on deliverable...". You MUST immediately and directly call the `write_file` tool.
 3. **Always complete tasks**: Before returning your final response, you MUST call `write_todos` to mark all tasks as "completed".
-4. **Final reply IS the report**: After writing `/final_report.md`, your final conversational reply MUST be the complete, verbatim content of that file — do NOT say "I have saved the report" or summarise it. Paste the full Markdown content directly as your response.
+4. **Never stop while tasks are pending**: If your todo list has tasks that are `pending` or `in_progress`, you MUST NOT output a conversational response. You MUST continue calling tools (e.g., `write_file`, `task()`) to execute the plan step-by-step.
+5. **Write the file FIRST**: You MUST call the `write_file` tool to save the report to `/final_report.md` BEFORE you output the final conversational reply. Do NOT skip the `write_file` step.
+6. **Final reply IS the report**: ONLY after successfully writing `/final_report.md` and marking all tasks completed, your final conversational reply MUST be the complete, verbatim content of that file — do NOT say "I have saved the report" or summarise it. Paste the full Markdown content directly as your response.
 """
 
 RESEARCHER_INSTRUCTIONS = """You are a research assistant conducting research on the user's input topic. For context, today's date is {date}.
@@ -173,9 +174,8 @@ Example:
 Context engineering is a critical technique for AI agents [1]. Studies show that proper context management can improve performance by 40% [2].
 
 ### Sources
-[1] Context Engineering Guide: https://example.com/context-guide
-
-[2] AI Performance Study: https://example.com/study
+1. Context Engineering Guide: https://example.com/context-guide
+2. AI Performance Study: https://example.com/study
 
 ```
 

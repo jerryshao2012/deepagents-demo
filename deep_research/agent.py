@@ -363,19 +363,19 @@ class ResearchStateMiddleware(AgentMiddleware):
                 continue
 
             # 3) Ingest finished (or never started) but wiki is not ready
-            if entry and not entry.progress.is_active():
-                if entry.progress.phase == IngestPhase.ERROR:
+            if not entry or not entry.progress.is_active():
+                if entry and entry.progress.phase == IngestPhase.ERROR:
                     logger.warning(
                         "Wiki ingest failed (error) for thread %s: %s",
                         thread_id,
                         entry.progress.error,
                     )
-                elif entry.progress.phase == IngestPhase.CANCELLED:
+                elif entry and entry.progress.phase == IngestPhase.CANCELLED:
                     logger.warning(
                         "Wiki ingest was cancelled for thread %s",
                         thread_id,
                     )
-            return False
+                return False
 
         logger.warning(
             "Timed out waiting for wiki ingest after %ds for thread %s",
@@ -855,25 +855,7 @@ class ResearchStateMiddleware(AgentMiddleware):
             updates["messages"] = [_AIMessage(content=wiki_answer_text)]
 
         if last_tool_calls and "messages" not in updates:
-            # Agent is still working — emit a brief status based on the
-            # tool(s) it just called so the user sees forward motion.
-            # (Skip if wiki-complete guard already set messages above.)
-            _TOOL_STATUS = {
-                "tavily_search": "🔍 Searching the web…",
-                "fetch_webpage_content": "🌐 Fetching web page…",
-                "read_doc_folder": "📂 Reading uploaded documents…",
-                "retrieve_thread_documents": "🧠 Querying document index…",
-                "read_file": "📄 Reading file…",
-                "write_file": "💾 Saving report…",
-            }
-            tool_names = [tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "") for tc in
-                          last_tool_calls]
-            status = next(
-                (_TOOL_STATUS[n] for n in tool_names if n in _TOOL_STATUS),
-                f"⚙️ Running {', '.join(tool_names)}…" if tool_names else None,
-            )
-            if status:
-                updates["messages"] = [_AIMessage(content=status)]
+            pass  # Removed AIMessage status append to prevent masking tool calls from the router
 
         if isinstance(chat_start_time, (int, float)):
             chat_elapsed_seconds = time.time() - chat_start_time
