@@ -22,7 +22,7 @@ from langchain.agents.middleware import (
     hook_config,
 )
 from langchain_core.messages import (
-    AIMessage as _AIMessage,
+    AIMessage,
     HumanMessage,
     SystemMessage,
 )
@@ -615,9 +615,9 @@ class ResearchStateMiddleware(AgentMiddleware):
         )
         updates.setdefault("messages", [])
         if isinstance(updates["messages"], list):
-            updates["messages"] = [_AIMessage(content=status_text)] + updates["messages"]
+            updates["messages"] = [AIMessage(content=status_text)] + updates["messages"]
         else:
-            updates["messages"] = [_AIMessage(content=status_text)]
+            updates["messages"] = [AIMessage(content=status_text)]
 
         # Inject Wiki Context if we are running in LangGraph dev / native LangGraph
         wiki_sys_msg = None
@@ -768,7 +768,7 @@ class ResearchStateMiddleware(AgentMiddleware):
                 )
                 return {
                     "jump_to": "end",
-                    "messages": [_AIMessage(content=wiki_answer_text)],
+                    "messages": [AIMessage(content=wiki_answer_text)],
                     "chat_start_time": state.get("chat_start_time") or time.time(),
                     "chat_elapsed_seconds": state.get("chat_elapsed_seconds"),
                     "_eval_logged": state.get("_eval_logged", False),
@@ -852,7 +852,7 @@ class ResearchStateMiddleware(AgentMiddleware):
             updates["jump_to"] = "end"
             # 2) Append the terminal AIMessage so the final chat reply is the
             #    wiki answer (no tool_calls).
-            updates["messages"] = [_AIMessage(content=wiki_answer_text)]
+            updates["messages"] = [AIMessage(content=wiki_answer_text)]
 
         if last_tool_calls and "messages" not in updates:
             pass  # Removed AIMessage status append to prevent masking tool calls from the router
