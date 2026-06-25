@@ -7,7 +7,7 @@ from logger_utils import setup_logger
 logger = setup_logger(__name__)
 
 
-def _render_page_chunk(page_number: int, markdown: str) -> str:
+def _render_page_chunk(page_number: int, content_page_number: int, markdown: str) -> str:
     """Render a single page chunk with machine + human-readable page markers.
 
     Emits an HTML-comment sentinel (``<!-- page: N -->``) that is invisible in
@@ -16,7 +16,7 @@ def _render_page_chunk(page_number: int, markdown: str) -> str:
     target an individual page.
     """
     body = markdown.strip()
-    return f"<!-- page: {page_number} -->\n## Page {page_number}\n\n{body}"
+    return f"<!-- page: {page_number} -->\n## Page {content_page_number}\n\n{body}"
 
 
 def _infer_page_number_from_boxes(text: str, boxes: list) -> int | None:
@@ -71,21 +71,19 @@ def _extract_pdf_text(file_path: Path) -> str:
             for index, chunk in enumerate(markdown_content, start=1):
                 # page_chunks=True returns dicts like {"metadata": {...}, "content": ...}
                 if isinstance(chunk, dict):
-                    # metadata = chunk.get("metadata") or {}
-                    # page_number = metadata.get("page_number") or metadata.get("page") or index
+                    metadata = chunk.get("metadata") or {}
+                    page_number = metadata.get("page_number") or metadata.get("page") or index
                     body = chunk.get("text") or chunk.get("content") or chunk.get("markdown") or ""
 
-                    page_blocks.append(_render_page_chunk(index, str(body)))
+                    inferred_page = None
+                    if "page_boxes" in chunk:
+                        inferred_page = _infer_page_number_from_boxes(str(body), chunk["page_boxes"])
 
-                    # inferred_page = None
-                    # if "page_boxes" in chunk:
-                    #     inferred_page = _infer_page_number_from_boxes(str(body), chunk["page_boxes"])
-                    #
-                    # final_page_num = inferred_page if inferred_page is not None else page_number
-                    # page_blocks.append(_render_page_chunk(int(final_page_num), str(body)))
+                    final_page_num = inferred_page if inferred_page is not None else page_number
+                    page_blocks.append(_render_page_chunk(index, int(final_page_num), str(body)))
                 else:
                     # Unexpected item shape; render with enumerated page number.
-                    page_blocks.append(_render_page_chunk(index, str(chunk)))
+                    page_blocks.append(_render_page_chunk(index, index, str(chunk)))
             return "\n\n".join(page_blocks)
 
         # Older pymupdf4llm versions or non-chunked mode return a flat string.
@@ -112,7 +110,7 @@ def _extract_pdf_text(file_path: Path) -> str:
             for index, page in enumerate(reader.pages, start=1):
                 text = (page.extract_text() or "").strip()
                 if text:
-                    page_texts.append(_render_page_chunk(index, text))
+                    page_texts.append(_render_page_chunk(index, index, text))
             return "\n\n".join(page_texts)
         except Exception as e:
             return f"Error extracting PDF text: {e}"
