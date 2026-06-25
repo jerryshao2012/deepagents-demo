@@ -32,12 +32,12 @@ def _infer_page_number_from_boxes(text: str, boxes: list) -> int | None:
                 continue
 
             # Match number at beginning (e.g. "**104** BMO Annual Report")
-            m_start = re.match(r'^(?:Page\s+)?[\*\s\-]*(\d+)[\*\s\-]*(?:\s|$)', box_text, re.IGNORECASE)
+            m_start = re.match(r'^(?:Page\s+)?[*\s\-]*(\d+)[*\s\-]*(?:\s|$)', box_text, re.IGNORECASE)
             if m_start:
                 return int(m_start.group(1))
 
             # Match number at end (e.g. "BMO Annual Report **104**")
-            m_end = re.search(r'(?:^|\s)(?:Page\s+)?[\*\s\-]*(\d+)[\*\s\-]*$', box_text, re.IGNORECASE)
+            m_end = re.search(r'(?:^|\s)(?:Page\s+)?[*\s\-]*(\d+)[*\s\-]*$', box_text, re.IGNORECASE)
             if m_end:
                 return int(m_end.group(1))
     return None
@@ -71,16 +71,18 @@ def _extract_pdf_text(file_path: Path) -> str:
             for index, chunk in enumerate(markdown_content, start=1):
                 # page_chunks=True returns dicts like {"metadata": {...}, "content": ...}
                 if isinstance(chunk, dict):
-                    metadata = chunk.get("metadata") or {}
-                    page_number = metadata.get("page_number") or metadata.get("page") or index
+                    # metadata = chunk.get("metadata") or {}
+                    # page_number = metadata.get("page_number") or metadata.get("page") or index
                     body = chunk.get("text") or chunk.get("content") or chunk.get("markdown") or ""
 
-                    inferred_page = None
-                    if "page_boxes" in chunk:
-                        inferred_page = _infer_page_number_from_boxes(str(body), chunk["page_boxes"])
+                    page_blocks.append(_render_page_chunk(index, str(body)))
 
-                    final_page_num = inferred_page if inferred_page is not None else page_number
-                    page_blocks.append(_render_page_chunk(int(final_page_num), str(body)))
+                    # inferred_page = None
+                    # if "page_boxes" in chunk:
+                    #     inferred_page = _infer_page_number_from_boxes(str(body), chunk["page_boxes"])
+                    #
+                    # final_page_num = inferred_page if inferred_page is not None else page_number
+                    # page_blocks.append(_render_page_chunk(int(final_page_num), str(body)))
                 else:
                     # Unexpected item shape; render with enumerated page number.
                     page_blocks.append(_render_page_chunk(index, str(chunk)))

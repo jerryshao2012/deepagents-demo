@@ -91,6 +91,101 @@ def register_storage_routes(app) -> None:
 # ── Document CRUD ─────────────────────────────────────────────────────────────
 
 def register_document_routes(app) -> None:
+    @app.get("/documents/view/{filename}")
+    async def view_document(
+            request: Request,
+            filename: str,
+            folder: str = "policy",
+            x_api_key: str | None = Header(None),
+    ):
+        """Serve a document for inline viewing (browser renders instead of downloading)."""
+        if not is_authenticated(x_api_key, request):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or missing API key. Provide X-API-Key header or Authorization header.",
+            )
+
+        safe_name = safe_filename(filename)
+        m = _webapp_module()
+        relative_folder = safe_relative_folder(folder)
+        file_path = m.DOCS_ROOT.joinpath(*relative_folder.parts, safe_name)
+
+        if not (await asyncio.to_thread(file_path.exists)):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"File '{filename}' not found in folder '{folder}'",
+            )
+
+        if not (await asyncio.to_thread(file_path.is_file)):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'{filename}' is not a file",
+            )
+
+        return FileResponse(
+            path=file_path,
+            filename=safe_name,
+            media_type=detect_media_type(file_path),
+            headers={"Content-Disposition": "inline"},
+        )
+
+    @app.get("/documents/extract/{filename}")
+    async def extract_document(
+            request: Request,
+            filename: str,
+            folder: str = "policy",
+            x_api_key: str | None = Header(None),
+    ) -> dict:
+        """Extract text/markdown content from a document for preview."""
+        if not is_authenticated(x_api_key, request):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or missing API key. Provide X-API-Key header or Authorization header.",
+            )
+
+        safe_name = safe_filename(filename)
+        m = _webapp_module()
+        relative_folder = safe_relative_folder(folder)
+        file_path = m.DOCS_ROOT.joinpath(*relative_folder.parts, safe_name)
+
+        if not (await asyncio.to_thread(file_path.exists)):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"File '{filename}' not found in folder '{folder}'",
+            )
+
+        if not (await asyncio.to_thread(file_path.is_file)):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"'{filename}' is not a file",
+            )
+
+        supported_extensions = {".pdf", ".docx", ".pptx", ".xlsx", ".txt", ".md"}
+        if file_path.suffix.lower() not in supported_extensions:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Extraction not supported for '{file_path.suffix}' files",
+            )
+
+        try:
+            from research_agent.utils.content_extractors import extract_supported_document
+            content = await asyncio.to_thread(extract_supported_document, file_path)
+            return {
+                "filename": safe_name,
+                "content": content,
+            }
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
+        except Exception as e:
+            logger.error(f"Document extraction failed for '{safe_name}': {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to extract document content: {e}",
+            )
+
     @app.post("/documents/upload", status_code=status.HTTP_201_CREATED)
     async def upload_documents(
             request: Request,
