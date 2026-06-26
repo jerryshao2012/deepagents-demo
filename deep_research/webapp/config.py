@@ -23,7 +23,7 @@ load_dotenv()
 DOCS_ROOT: Path = Path(__file__).resolve().parent.parent / "docs"
 
 # Semantic API version — bump on every public-facing change
-API_VERSION: str = "1.8.71"
+API_VERSION: str = "1.8.72"
 
 # ── Authentication ────────────────────────────────────────────────────────────
 
@@ -66,6 +66,8 @@ _frontend_origins: list[str] = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "https://smith.langchain.com",
+    "https://bmo-deepagent-ui.vercel.app",
+    "https://bmo-deepagent-qqkdniiw0-agentic-ui.vercel.app",
 ]
 
 _env_frontend_urls = os.environ.get("FRONTEND_URL", "")
