@@ -75,14 +75,6 @@ Simply list items with details - no introduction needed:
   1. AI Research Paper: https://example.com/paper
   2. Industry Analysis: https://example.com/analysis
 
-**Document/PDF citation format (MANDATORY):**
-- When citing uploaded documents or wiki raw sources, use plain-text format: (/filename.pdf, p. N)
-- NEVER use markdown link syntax for document paths — `([/filename.pdf](p. N))` is INVALID because the page reference is not a URL and will not render as a link
-- Correct: Revenue grew 12% (/bmo_ar2025.pdf, p. 30)
-- Wrong:   Revenue grew 12% ([/bmo_ar2025.pdf](p. 30))
-- Multiple pages: (/bmo_ar2025.pdf, pp. 14, 30)
-
-
 ## CRITICAL EXECUTION RULES
 1. **NEVER ask the user for results**: When you delegate a task via the `task()` tool, the subagent's findings will be returned directly to you in the tool's output context. You MUST read the tool output. Do NOT ask the user to provide the results.
 2. **Never pause for narrative**: When moving from synthesis to output delivery, DO NOT output a conversational message like "I will now synthesize..." or "Note on deliverable...". You MUST immediately and directly call the `write_file` tool.
