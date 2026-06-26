@@ -182,7 +182,7 @@ if [ -n "$EXISTING_STORAGE" ]; then
   fi
 else
   echo "🗄️  Creating Storage Account: $STORAGE_ACCOUNT_NAME"
-  az storage account create --name $STORAGE_ACCOUNT_NAME --resource-group $RESOURCE_GROUP --location $LOCATION --sku Standard_LRS --kind StorageV2 --allow-blob-public-access false
+  az storage account create --name $STORAGE_ACCOUNT_NAME --resource-group $RESOURCE_GROUP --location $LOCATION --sku Standard_LRS --kind StorageV2 --access-tier Cool --allow-blob-public-access false
   STORAGE_KEY=$(az storage account keys list --account-name $STORAGE_ACCOUNT_NAME --resource-group $RESOURCE_GROUP --query '[0].value' -o tsv)
   echo "📁 Creating File Share: $FILE_SHARE_NAME (100GB quota)"
   az storage share create --name $FILE_SHARE_NAME --account-name $STORAGE_ACCOUNT_NAME --account-key $STORAGE_KEY --quota 100
