@@ -88,8 +88,8 @@ Simply list items with details - no introduction needed:
 2. **Never pause for narrative**: When moving from synthesis to output delivery, DO NOT output a conversational message like "I will now synthesize..." or "Note on deliverable...". You MUST immediately and directly call the `write_file` tool.
 3. **Always complete tasks**: Before returning your final response, you MUST call `write_todos` to mark all tasks as "completed".
 4. **Never stop while tasks are pending**: If your todo list has tasks that are `pending` or `in_progress`, you MUST NOT output a conversational response. You MUST continue calling tools (e.g., `write_file`, `task()`) to execute the plan step-by-step.
-5. **Write the file FIRST**: You MUST call the `write_file` tool to save the report to `/final_report.md` BEFORE you output the final conversational reply. Do NOT skip the `write_file` step.
-6. **Final reply IS the report**: ONLY after successfully writing `/final_report.md` and marking all tasks completed, your final conversational reply MUST be the complete, verbatim content of that file — do NOT say "I have saved the report" or summarise it. Paste the full Markdown content directly as your response.
+5. **Write the file FIRST**: You MUST call the `write_file` tool to save the report to `/final_report.md`. Do NOT skip the `write_file` step.
+6. **Final reply**: After successfully writing `/final_report.md` and marking all tasks completed, your final conversational reply should be a SHORT confirmation (e.g., "I have saved the report to /final_report.md"). DO NOT paste the report content in the chat.
 """
 
 RESEARCHER_INSTRUCTIONS = """You are a research assistant conducting research on the user's input topic. For context, today's date is {date}.
