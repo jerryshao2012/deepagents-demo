@@ -1,12 +1,9 @@
 export SEED="0312"
 export APP_NAME="deep-research-agent-$SEED"
 
-# Create resource group
+# 1. Create resource group
 export RESOURCE_GROUP="resource-group-deep-agents-$SEED"
 export LOCATION="canadacentral"
-
-# 1. Build and push Docker image
-export ACR_NAME="acrdeepagents$SEED"
 
 # 2. Create Container Apps environment
 export ENV_NAME="env-name-deep-agents-$SEED"

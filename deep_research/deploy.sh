@@ -74,6 +74,18 @@ source ./env.sh
 
 echo "🚀 Starting Deep Research Agent deployment (using existing image)..."
 
+if [ -f "./.env" ]; then
+  set -a
+  source "./.env"
+  set +a
+fi
+
+if [ -z "$DOCKER_HUB_USERNAME" ]; then
+  echo "❌ Error: Please set DOCKER_HUB_USERNAME in .env before running deploy.sh"
+  exit 1
+fi
+echo "✅ Using Docker Hub user: $DOCKER_HUB_USERNAME"
+
 # 1. Set Azure Subscription
 start_step "Set Azure Subscription"
 AZURE_SUBSCRIPTION_ID="66fadccd-d26d-4dd0-b108-46b3c581cdb3"
@@ -88,11 +100,7 @@ if [ ! -f .build_version ]; then
     exit 1
 fi
 BUILD_VERSION=$(cat .build_version)
-if ! az acr repository show-tags --name $ACR_NAME --repository deep-research-agent --query "contains(@, '$BUILD_VERSION')" -o tsv 2>/dev/null | grep -q "true"; then
-  echo "⚠️  WARNING: Image 'deep-research-agent:$BUILD_VERSION' not found in ACR!"
-  echo "   Please run './build.sh' first to build and push the image."
-  exit 1
-fi
+# No direct ACR check for Docker Hub image in bash
 echo "✅ Verified image exists in ACR"
 
 NEW_VERSION=$(grep -E 'API_VERSION(:\s*\w+)?\s*=\s*' webapp/config.py | grep -o '"[^"]*"' | tr -d '"')
@@ -143,8 +151,12 @@ fi
 if [ -f "./secrets.sh" ]; then
   echo "🔑 Running secrets.sh to populate API keys..."
   ./secrets.sh
-else
   echo "💡 Tip: Create a secrets.sh file to automatically populate API keys."
+fi
+
+if [ -n "$DOCKER_HUB_PAT" ]; then
+  echo "🔐 Storing Docker Hub PAT in Key Vault..."
+  az keyvault secret set --vault-name $KV_NAME --name DOCKER-HUB-PAT --value "$DOCKER_HUB_PAT" > /dev/null
 fi
 end_step
 
@@ -206,18 +218,7 @@ USER_IDENTITY_PRINCIPAL_ID=$(az identity show --name "$USER_IDENTITY_NAME" --res
 echo "🔐 Ensuring Managed Identity has Key Vault access..."
 az keyvault set-policy --name "$KV_NAME" --secret-permissions get list --object-id "$USER_IDENTITY_PRINCIPAL_ID" > /dev/null
 
-echo "🔐 Ensuring Managed Identity has ACR Pull access..."
-ACR_RESOURCE_ID=$(az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query id -o tsv 2>/dev/null || echo "")
-if [ -n "$ACR_RESOURCE_ID" ]; then
-  az role assignment create \
-    --assignee-object-id "$USER_IDENTITY_PRINCIPAL_ID" \
-    --assignee-principal-type "ServicePrincipal" \
-    --role "AcrPull" \
-    --scope "$ACR_RESOURCE_ID" >/dev/null 2>&1 || true
-  echo "✅ ACR pull role assignment set successfully"
-else
-  echo "⚠️  Could not find ACR registry resource ID"
-fi
+echo "✅ Skipping ACR permissions since we use Docker Hub"
 
 if az containerapp show --name $AGENT_NAME --resource-group $RESOURCE_GROUP &> /dev/null; then
   echo "📝 Container app already exists. Updating..."
@@ -230,17 +231,30 @@ else
     --name $AGENT_NAME \
     --resource-group $RESOURCE_GROUP \
     --environment $ENV_NAME \
-    --image $ACR_NAME.azurecr.io/deep-research-agent:$BUILD_VERSION \
-    --registry-server $ACR_NAME.azurecr.io \
+    --image $DOCKER_HUB_USERNAME/deep-research-agent:$BUILD_VERSION \
+    --registry-server docker.io \
+    --registry-username "$DOCKER_HUB_USERNAME" \
+    --registry-password "$DOCKER_HUB_PAT" \
     --target-port 2024 \
-    --ingress internal \
+    --ingress external \
     --transport auto \
-    --min-replicas 1 \
+    --min-replicas 0 \
     --max-replicas 1 \
     --cpu 2.0 \
     --memory 4Gi \
     --user-assigned "$USER_IDENTITY_ID"
 fi
+
+echo "⏳ Waiting for any active provisioning operations to complete..."
+for i in {1..60}; do
+  STATE=$(az containerapp show --name $AGENT_NAME --resource-group $RESOURCE_GROUP --query properties.provisioningState -o tsv 2>/dev/null || echo "Unknown")
+  if [[ "$STATE" == "Succeeded" || "$STATE" == "Failed" || "$STATE" == "Canceled" ]]; then
+    echo "✅ Provisioning state: $STATE"
+    break
+  fi
+  echo "   Current state: $STATE... waiting 5s ($i/60)"
+  sleep 5
+done
 
 echo "⚙️  Applying comprehensive configuration update..."
 #      - name: azure-openai-endpoint
@@ -264,6 +278,10 @@ RESTART_TRIGGER=$(date +%s)
 cat > "$UPDATE_YAML" <<EOF
 properties:
   configuration:
+    ingress:
+      external: true
+      targetPort: 2024
+      transport: auto
     secrets:
       - name: tavily-api-key
         keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/TAVILY-API-KEY
@@ -286,9 +304,13 @@ properties:
       - name: google-api-key
         keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/GOOGLE-API-KEY
         identity: ${USER_IDENTITY_ID}
-    registries:
-      - server: ${ACR_NAME}.azurecr.io
+      - name: docker-hub-pat
+        keyVaultUrl: https://${KV_NAME}.vault.azure.net/secrets/DOCKER-HUB-PAT
         identity: ${USER_IDENTITY_ID}
+    registries:
+      - server: docker.io
+        username: ${DOCKER_HUB_USERNAME}
+        passwordSecretRef: docker-hub-pat
   template:
     volumes:
       - name: persistent-storage
@@ -296,7 +318,7 @@ properties:
         storageType: AzureFile
     containers:
       - name: deep-research-agent
-        image: ${ACR_NAME}.azurecr.io/deep-research-agent:$BUILD_VERSION
+        image: "${DOCKER_HUB_USERNAME}/deep-research-agent:${BUILD_VERSION}"
         resources:
           cpu: 2.0
           memory: 4Gi
@@ -375,7 +397,7 @@ properties:
           - volumeName: persistent-storage
             mountPath: $MOUNT_PATH
     scale:
-      minReplicas: 1
+      minReplicas: 0
       maxReplicas: 1
 EOF
 az containerapp update --name $AGENT_NAME --resource-group $RESOURCE_GROUP --yaml "$UPDATE_YAML"

@@ -37,6 +37,16 @@ print_timing_summary() {
 
 # Configuration
 source ./env.sh
+if [ -f "../.env" ]; then
+  set -a
+  source "../.env"
+  set +a
+fi
+if [ -f "./.env" ]; then
+  set -a
+  source "./.env"
+  set +a
+fi
 
 echo "🚀 Starting Deep Research Agent build..."
 
@@ -67,12 +77,16 @@ az provider register -n Microsoft.ManagedIdentity --wait
 echo "✅ Providers registered."
 end_step
 
-# 4. Create ACR
-start_step "Container Registry Setup"
-if az acr show --name $ACR_NAME --resource-group $RESOURCE_GROUP &> /dev/null; then
-  echo "✅ Container Registry '$ACR_NAME' already exists. Skipping creation."
-else
-  az acr create --resource-group $RESOURCE_GROUP --name $ACR_NAME --sku Standard --admin-enabled true
+# 4. Check Docker Hub Username
+start_step "Docker Hub Setup"
+if [ -z "$DOCKER_HUB_USERNAME" ]; then
+  echo "❌ Error: Please set DOCKER_HUB_USERNAME in .env"
+  exit 1
+fi
+echo "✅ Using Docker Hub user: $DOCKER_HUB_USERNAME"
+if [ -n "$DOCKER_HUB_PAT" ]; then
+  echo "🔐 Logging into Docker Hub..."
+  echo "$DOCKER_HUB_PAT" | docker login -u "$DOCKER_HUB_USERNAME" --password-stdin
 fi
 end_step
 
@@ -92,10 +106,9 @@ echo "🔨 Building Docker image with tags: latest, $BUILD_VERSION"
 # Ensure we're in the correct directory (where Dockerfile is located)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
-docker build --platform linux/amd64 -t $ACR_NAME.azurecr.io/deep-research-agent:latest -t $ACR_NAME.azurecr.io/deep-research-agent:$BUILD_VERSION .
-az acr login --name $ACR_NAME
-docker push $ACR_NAME.azurecr.io/deep-research-agent:latest
-docker push $ACR_NAME.azurecr.io/deep-research-agent:$BUILD_VERSION
+docker build --platform linux/amd64 -t $DOCKER_HUB_USERNAME/deep-research-agent:latest -t $DOCKER_HUB_USERNAME/deep-research-agent:$BUILD_VERSION .
+docker push $DOCKER_HUB_USERNAME/deep-research-agent:latest
+docker push $DOCKER_HUB_USERNAME/deep-research-agent:$BUILD_VERSION
 echo "✅ Image built and pushed successfully"
 end_step
 

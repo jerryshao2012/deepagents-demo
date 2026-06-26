@@ -23,7 +23,7 @@ load_dotenv()
 DOCS_ROOT: Path = Path(__file__).resolve().parent.parent / "docs"
 
 # Semantic API version — bump on every public-facing change
-API_VERSION: str = "1.8.66"
+API_VERSION: str = "1.8.70"
 
 # ── Authentication ────────────────────────────────────────────────────────────
 
