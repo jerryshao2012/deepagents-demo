@@ -11,10 +11,6 @@ from research_agent.prompts import (
 )
 from research_agent.tools import (
     think_tool,
-    frontend_slides,
-    frontend_slides_export_pdf,
-    frontend_slides_deploy,
-    frontend_slides_extract_pptx,
     render_skill_output,
     finalize_golden_dataset_output,
     ls,
@@ -27,10 +23,6 @@ from research_agent.tools import (
 
 __all__ = [
     "think_tool",
-    "frontend_slides",
-    "frontend_slides_export_pdf",
-    "frontend_slides_deploy",
-    "frontend_slides_extract_pptx",
     "render_skill_output",
     "finalize_golden_dataset_output",
     "ls",

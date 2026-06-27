@@ -1,9 +1,3 @@
 skill:
   available:
-    - autoresearch-universal
-    - code-generator
     - golden-dataset
-    - humanizer
-    - interview
-    - interview-coach-pro
-    - study-slides

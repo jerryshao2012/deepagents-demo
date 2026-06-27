@@ -1,15 +1,6 @@
 ---
 name: code-generator
-title: Code Generator
 description: A straightforward script and code generator. Use this when the user asks to generate a script or code snippet from scratch. This target produces the requested code directly as a markdown code block, bypassing the setup overhead of the full coding-agent workflow.
-keywords:
-  - "code-generator"
-  - "generate.*code"
-  - "generate.*script"
-  - "write.*script"
-  - "write.*code"
-  - "generate.*python"
-  - "generate.*javascript"
 ---
 
 # Code Generator Skill

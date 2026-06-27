@@ -1049,14 +1049,20 @@ class ResearchStateMiddleware(AgentMiddleware):
 
         message_lower = user_message.lower()
 
-        # Direct skill-id match: check if any registered skill ID appears in
-        # the user message (e.g. "use humanizer skill" contains "humanizer").
+        # Combine legacy and migrated skill IDs for direct matching
+        all_skill_ids = (
+                list(skill_registry.skill_ids)
+                + list(skill_registry.MIGRATED_SKILL_IDS)
+        )
+        # Direct skill-id match: check if any skill ID appears in the user
+        # message (e.g. "use humanizer skill" contains "humanizer").
         # Prefer longer IDs first to avoid partial matches.
-        for sid in sorted(skill_registry.skill_ids, key=len, reverse=True):
+        for sid in sorted(all_skill_ids, key=len, reverse=True):
             if sid in message_lower:
                 return sid
 
         # Fallback: use skill registry keyword / description matching
+        # (legacy skills only — migrated skills have no keyword lists)
         matches = skill_registry.find_skills_by_keyword(message_lower)
         if matches:
             # Return the first match (most relevant based on keyword priority)
@@ -1207,6 +1213,8 @@ RECURSION_LIMIT = int(os.environ.get("GRAPH_RECURSION_LIMIT", "200"))
 # Create the agent
 # Orchestrator owns document/filesystem tools and structured-output finalization.
 # Web discovery can still be delegated to `research-agent` via task().
+# The `skills` parameter auto-creates SkillsMiddleware backed by the agent's
+# internal FilesystemBackend — migrated skills live in .deepagents/skills/.
 agent = create_deep_agent(
     model=model,
     tools=[
@@ -1222,6 +1230,7 @@ agent = create_deep_agent(
     system_prompt=INSTRUCTIONS,
     subagents=[research_sub_agent],
     middleware=[ResearchStateMiddleware()],
+    skills=[".deepagents/skills/"],
 ).with_config(
     RunnableConfig(recursion_limit=RECURSION_LIMIT)
 )

@@ -21,14 +21,14 @@ def test_configure_output_folder_overwrites_stale_env_value(monkeypatch) -> None
     output_folder = configure_output_folder("./doc/policy")
 
     assert output_folder == Path("output") / "policy"
-    assert os.environ["OUTPUT_FOLDER"] == "output/policy"
+    assert os.environ["OUTPUT_FOLDER"] == "./output/policy"
 
 
 def test_select_output_content_prefers_rendered_structured_output_over_last_ai_message() -> None:
     result = {
         "messages": [
             ToolMessage(
-                content="# Presentation: Claude Code Memory\n\n## Slide 1: Basics\n",
+                content="# Golden Dataset Starter: HR Policy\n\n## Coverage Areas\n\n- Leave\n\n### Q1. Leave\n",
                 tool_call_id="tool-1",
                 name="render_skill_output",
             ),
@@ -38,7 +38,7 @@ def test_select_output_content_prefers_rendered_structured_output_over_last_ai_m
         ]
     }
 
-    assert select_output_content(result, "study-slides").startswith("# Presentation:")
+    assert select_output_content(result, "golden-dataset").startswith("# Golden Dataset")
 
 
 def test_select_output_content_ignores_failed_render_and_uses_task_output_for_structured_skills() -> None:
@@ -50,7 +50,7 @@ def test_select_output_content_ignores_failed_render_and_uses_task_output_for_st
                 name="render_skill_output",
             ),
             ToolMessage(
-                content="# Presentation: Claude Code Memory\n\n## Slide 1: Basics\n",
+                content="# Golden Dataset Starter: HR Policy\n\n## Coverage Areas\n\n- Leave\n",
                 tool_call_id="tool-2",
                 name="task",
             ),
@@ -58,4 +58,4 @@ def test_select_output_content_ignores_failed_render_and_uses_task_output_for_st
         ]
     }
 
-    assert select_output_content(result, "study-slides").startswith("# Presentation:")
+    assert select_output_content(result, "golden-dataset").startswith("# Golden Dataset")

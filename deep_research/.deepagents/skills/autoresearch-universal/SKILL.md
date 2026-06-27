@@ -6,14 +6,6 @@ description: >-
   metrics, and runs an autonomous generate-eval-score-mutate loop to improve
   prompts over time. Use when the user asks to optimize, improve, or run
   autoresearch on anything in their codebase.
-keywords:
-  - "autoresearch"
-  - "auto research"
-  - "research.*topic"
-  - "research.*subject"
-  - "investigate"
-  - "optimize.*prompt"
-  - "improve.*prompt"
 ---
 
 # Autoresearch Universal

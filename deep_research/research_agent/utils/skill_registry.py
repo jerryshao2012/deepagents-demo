@@ -61,6 +61,21 @@ class SkillRegistry:
     Supports hot-reloading by checking file modification times on access.
     """
 
+    # Skills that have been migrated to the deep agents SkillsMiddleware.
+    # These are skipped during loading so they are handled exclusively by
+    # SkillsMiddleware.  Only golden-dataset remains as a legacy skill
+    # with project-specific pipeline.py code and dedicated tools.
+    MIGRATED_SKILL_IDS: set[str] = {
+        "autoresearch-universal",
+        "code-generator",
+        "find-skills",
+        "frontend-slides",
+        "humanizer",
+        "interview",
+        "interview-coach-pro",
+        "study-slides",
+    }
+
     _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
     _JSON_BLOCK_RE = re.compile(r"```json\n(.*?)\n```", re.DOTALL)
     _SCHEMA_SECTION_RE = re.compile(r"^## Schema\s*$", re.MULTILINE)
@@ -166,6 +181,11 @@ class SkillRegistry:
                 if parsed_skill:
                     # Use the 'name' field from frontmatter as skill_id (not directory name)
                     skill_id = parsed_skill.get("name", skill_path.name)
+
+                    # Skip skills that have been migrated to SkillsMiddleware
+                    if skill_id in self.MIGRATED_SKILL_IDS:
+                        skipped_count += 1
+                        continue
 
                     # Check if skill is in the allowed list (if config exists)
                     if self._available_skills is not None and skill_id not in self._available_skills:

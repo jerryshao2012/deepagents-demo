@@ -14,132 +14,28 @@ from research_agent.tools import (
 from research_agent.utils.skill_registry import get_skill_registry
 
 
-def test_get_skill_definition_renders_slides_from_definition() -> None:
-    result = get_skill_registry().get_skill_definition.invoke(
-        {
-            "skill_id": "study-slides",
-            "payload_json": """
-            {
-              "topic": "AI Agents",
-              "slides": [
-                {
-                  "title": "What Matters",
-                  "bullets": ["Agents plan work", "Agents use tools"],
-                  "speaker_notes": "Keep this high level."
-                },
-                {
-                  "title": "What To Practice",
-                  "bullets": ["Ground outputs in sources"],
-                  "speaker_notes": "Close with next steps."
-                }
-              ]
-            }
-            """
-        }
-    )
-
-    assert result.startswith("# Presentation: AI Agents")
-    assert result.count("## Slide") == 2
-    assert "### Speaking Notes" in result
-
-
-def test_get_skill_definition_formats_45_minute_interview_kit() -> None:
-    result = get_skill_registry().get_skill_definition.invoke(
-        {
-            "skill_id": "interview",
-            "payload_json": """
-            {
-              "topic": "AI Agents",
-              "objective": "Assess practical agent design judgment.",
-              "questions": [
-                {
-                  "question": "How would you ground an agent in local documents?",
-                  "timebox_minutes": 10,
-                  "potential_answer": "A strong answer would cover retrieval, source selection, and citation strategy.",
-                  "follow_up": "What trade-offs would you watch for?"
-                }
-              ]
-            }
-            """
-        }
-    )
-
-    assert "# Interview Kit: AI Agents" in result
-    assert "45-minute interview objective" in result
-    assert "Timebox: 10 minutes" in result
-    assert "Potential Answer:" in result
-    assert "Follow-up:" in result
-    assert "Total planned time: 10 minutes" in result
-
-
 def test_get_skill_definition_reports_schema_validation_errors() -> None:
     result = get_skill_registry().get_skill_definition.invoke(
         {
-            "skill_id": "study-slides",
-            "payload_json": "{\"topic\": \"AI Agents\", \"slides\": [{\"title\": \"Missing fields\"}]}",
+            "skill_id": "golden-dataset",
+            "payload_json": "{\"items\": [{\"id\": \"Q1\", \"coverage_area\": \"General\", \"question\": \"Q?\"}]}",
         }
     )
 
     assert "Schema validation failed" in result
-
-
-def test_get_skill_definition_accepts_dict_payload_for_study_slides() -> None:
-    result = get_skill_registry().get_skill_definition.invoke(
-        {
-            "skill_id": "study-slides",
-            "payload_json": {
-                "topic": "AI Agents",
-                "slides": [
-                    {
-                        "title": "What Matters",
-                        "bullets": ["Agents plan work", "Agents use tools"],
-                        "speaker_notes": "Keep this high level.",
-                    }
-                ],
-            },
-        }
-    )
-
-    assert result.startswith("# Presentation: AI Agents")
-    assert "## Slide 1: What Matters" in result
-
-
-def test_get_skill_definition_normalizes_legacy_study_slides_fields() -> None:
-    result = get_skill_registry().get_skill_definition.invoke(
-        {
-            "skill_id": "study-slides",
-            "payload_json": {
-                "slides": [
-                    {
-                        "title": "Understanding Memory",
-                        "content": ["Hierarchy of memory", "Project and user memory files"],
-                        "speaker_notes": "Explain where long-lived guidance belongs.",
-                        "slide_number": 1,
-                    }
-                ]
-            },
-        }
-    )
-
-    assert result.startswith("# Presentation:")
-    assert "## Slide 1: Understanding Memory" in result
-    assert "- Hierarchy of memory" in result
-    assert "slide_number" not in result
 
 
 def test_get_skill_definition_rejects_missing_required_fields() -> None:
     result = get_skill_registry().get_skill_definition.invoke(
         {
-            "skill_id": "interview",
+            "skill_id": "golden-dataset",
             "payload_json": """
             {
-              "topic": "AI Agents",
-              "objective": "Assess practical agent design judgment.",
-              "questions": [
+              "items": [
                 {
-                  "question": "How would you ground an agent in local documents?",
-                  "timebox_minutes": 10,
-                  "follow_up": "What trade-offs would you watch for?"
+                  "id": "Q1",
+                  "coverage_area": "Leave",
+                  "question": "How do I request parental leave?"
                 }
               ]
             }
@@ -148,32 +44,7 @@ def test_get_skill_definition_rejects_missing_required_fields() -> None:
     )
 
     assert "Schema validation failed" in result
-    assert "potential_answer" in result
-
-
-def test_get_skill_definition_coerces_integer_like_floats() -> None:
-    result = get_skill_registry().get_skill_definition.invoke(
-        {
-            "skill_id": "interview",
-            "payload_json": """
-            {
-              "topic": "AI Agents",
-              "objective": "Assess practical agent design judgment.",
-              "questions": [
-                {
-                  "question": "How would you ground an agent in local documents?",
-                  "timebox_minutes": 10.0,
-                  "potential_answer": "A strong answer would cover retrieval, source selection, and citation strategy.",
-                  "follow_up": "What trade-offs would you watch for?"
-                }
-              ]
-            }
-            """
-        }
-    )
-
-    assert "# Interview Kit: AI Agents" in result
-    assert "Timebox: 10 minutes" in result
+    assert "answer" in result
 
 
 def test_get_skill_definition_uses_declarative_render_spec(tmp_path, monkeypatch) -> None:
@@ -604,13 +475,16 @@ def test_glob_handles_nonexistent_base_path() -> None:
     assert "Error: Base path" in result
 
 
-def test_finalize_golden_dataset_output_rejects_non_golden_skill_state() -> None:
+def test_finalize_golden_dataset_output_processes_payload(tmp_path, monkeypatch) -> None:
+    """finalize_golden_dataset_output works regardless of active skill (tool doesn't gate on skill state)."""
+    monkeypatch.setattr(tools, "REPORTS_OUTPUT_FOLDER", str(tmp_path))
+
     result = finalize_golden_dataset_output.func(
         payload_json='{"items": [{"id": "Q1", "coverage_area": "General", "question": "Q?", "answer": "A"}]}',
-        state={"skill": "study-slides"},
+        state={"skill": "humanizer"},
     )
 
-    assert "only available when the active skill is `golden-dataset`" in result
+    assert "Successfully exported" in result
 
 
 def test_fetch_webpage_content_returns_markdown_for_valid_url() -> None:

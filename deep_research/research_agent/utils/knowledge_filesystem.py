@@ -28,6 +28,11 @@ SECTION_CHUNK_LIMIT = int(os.environ.get("SECTION_CHUNK_LIMIT", "3"))
 
 SUPPORTED_DOC_SUFFIXES = {".pdf", ".txt", ".md", ".docx", ".pptx", ".xlsx"}
 
+# Project root for resolving SkillsMiddleware backend paths to filesystem paths.
+# SkillsMiddleware uses the agent's internal FilesystemBackend, which produces
+# paths like /skills/.deepagents/skills/<name>/SKILL.md relative to cwd.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 logger = setup_logger(__name__)
 
 # Global mapping of thread_id to existing_cited_responses list to bypass injected state limitations in tools
@@ -327,6 +332,9 @@ def ls_impl(
     # Try 2: Use local filesystem
     normalized_path = normalize_path_for_filesystem_tools(path)
     p = Path(normalized_path)
+    # Resolve SkillsMiddleware backend paths to filesystem paths
+    if p.is_absolute() and str(p).startswith("/skills/"):
+        p = _PROJECT_ROOT / str(p)[len("/skills/"):]
     if not p.exists():
         return f"Error: Path '{path}' not found"
     if not p.is_dir():
@@ -497,7 +505,13 @@ def read_file_impl(
     # 2) relative to OUTPUT_FOLDER (for short paths like "extracted/foo.md")
     input_path = Path(normalized_path)
     if input_path.is_absolute():
-        full_path = input_path
+        # Resolve SkillsMiddleware backend paths (e.g., /skills/.deepagents/skills/...)
+        # to actual filesystem paths under the project root.
+        path_str = str(input_path)
+        if path_str.startswith("/skills/"):
+            full_path = _PROJECT_ROOT / path_str[len("/skills/"):]
+        else:
+            full_path = input_path
     else:
         cwd_candidate = Path(normalized_path)
         if cwd_candidate.exists():

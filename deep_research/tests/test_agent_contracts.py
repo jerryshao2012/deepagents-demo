@@ -1,8 +1,8 @@
 from pathlib import Path
 
 
-def test_agent_registers_frontend_slides_tool() -> None:
+def test_agent_source_registers_tools_list() -> None:
     agent_source = Path("agent.py").read_text(encoding="utf-8")
 
-    assert "frontend_slides" in agent_source
     assert "tools=[" in agent_source
+    assert "create_deep_agent" in agent_source

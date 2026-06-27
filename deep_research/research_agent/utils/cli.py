@@ -64,9 +64,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable web search (Tavily) during research",
     )
+    # Collect both legacy (SkillRegistry) and migrated (SkillsMiddleware) skill IDs
+    _all_skill_ids = get_skill_registry().list_skill_ids() + list(
+        get_skill_registry().MIGRATED_SKILL_IDS
+    )
     parser.add_argument(
         "--skill",
-        choices=["list", *(get_skill_registry().list_skill_ids())],
+        choices=["list", *_all_skill_ids],
         help="Optional structured output skill. Use '--skill list' to see all options.",
     )
     parser.add_argument("--title", type=str, help="Optional research title for output file")
@@ -128,24 +132,34 @@ def build_instruction(
         )
 
     if skill:
-        definition = get_skill_registry().get_skill_definition(skill)
-        instruction += (
-            f"\n\nThe requested output skill is `{skill}`."
-            f"\nDescription: {definition['description']}"
-            f"\nInstructions:\n{definition['instructions']}"
-        )
-        if definition.get("schema"):
+        # Check if this skill has been migrated to the deep agents SkillsMiddleware
+        if skill in get_skill_registry().MIGRATED_SKILL_IDS:
             instruction += (
-                "\nAfter researching, please call `render_skill_output` with the selected "
-                "skill id and a JSON payload that matches that skill schema exactly."
+                f"\n\nThe requested output skill is `{skill}`. "
+                f"This skill is available in the Skills library. "
+                f"Use `read_file` to load the skill's SKILL.md for full instructions "
+                f"and follow its workflow precisely. "
+                f"Save your final output using `write_file` to `/final_report.md`."
             )
         else:
+            definition = get_skill_registry().get_skill_definition(skill)
             instruction += (
-                "\nFollow the skill instructions above precisely. "
-                "Use the `write_file` tool to save your output to `/final_report.md`. "
-                "Do NOT use `render_skill_output` since this is an unstructured skill. "
-                "Do NOT just say you will write it; you must actually call the `write_file` tool with the text."
+                f"\n\nThe requested output skill is `{skill}`."
+                f"\nDescription: {definition['description']}"
+                f"\nInstructions:\n{definition['instructions']}"
             )
+            if definition.get("schema"):
+                instruction += (
+                    "\nAfter researching, please call `render_skill_output` with the selected "
+                    "skill id and a JSON payload that matches that skill schema exactly."
+                )
+            else:
+                instruction += (
+                    "\nFollow the skill instructions above precisely. "
+                    "Use the `write_file` tool to save your output to `/final_report.md`. "
+                    "Do NOT use `render_skill_output` since this is an unstructured skill. "
+                    "Do NOT just say you will write it; you must actually call the `write_file` tool with the text."
+                )
         if skill == "golden-dataset":
             instruction += (
                 "\n\n**Golden dataset delivery — MANDATORY tool-call sequence (zero exceptions):**\n"

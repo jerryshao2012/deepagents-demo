@@ -3,7 +3,6 @@
 import json
 import os
 import re
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Literal
@@ -15,8 +14,6 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
 from logger_utils import setup_logger
-from research_agent.skills.frontend_slides.pipeline import _SKILL_DIR
-from research_agent.skills.frontend_slides.pipeline import _parse_sections, _build_html, _slugify_filename
 from research_agent.skills.golden_dataset.pipeline import (
     export_golden_dataset_csv,
     evaluate_and_report_golden_dataset,
@@ -301,7 +298,10 @@ def think_tool(
 
 @tool
 def list_available_skills() -> str:
-    """List all available skills with their descriptions."""
+    """List available legacy skills (golden-dataset, frontend-slides) with their descriptions.
+
+    Migrated skills are auto-discovered by the system and do not appear in this list.
+    """
     logger.debug("Listing available skills")
     registry = get_skill_registry()
     summaries = registry.get_all_summaries()
@@ -357,16 +357,16 @@ def render_skill_output(
         skill_id: str,
         payload_json: str | dict,
 ) -> str:
-    """Render structured skill output using a reusable skill definition.
+    """Render structured skill output for legacy skills (golden-dataset only).
 
-    Use this tool ONLY for structured output skills (skills with a JSON schema).
-    DO NOT use this tool for 'Unstructured Markdown Document' skills.
-    Provide the skill id and a JSON payload that matches the selected skill schema exactly.
+    Use this tool ONLY for the golden-dataset structured output skill.
+    DO NOT use this tool for other skills — use write_file to save output directly.
+    Provide the skill id and a JSON payload that matches the skill schema exactly.
     The payload may be either a JSON object string or a dict-like JSON object.
     NEVER put raw markdown into payload_json.
 
     Args:
-        skill_id: The skill definition id to use for validation and rendering.
+        skill_id: The skill definition id to use for validation and rendering (golden-dataset).
         payload_json: A JSON object string or dict matching the skill schema.
 
     Returns:
@@ -480,218 +480,3 @@ def finalize_golden_dataset_output(
         f"{return_msg}"
         f"## Golden Dataset Quality Metrics\n\n{markdown_content}"
     )
-
-
-# --- Frontend Slides Tools ---
-
-@tool("frontend-slides", parse_docstring=True)
-def frontend_slides(
-        presentation_markdown: str,
-        output_filename: str | None = None,
-        deck_title: str | None = None,
-        style_preset: str = "Creative Voltage",
-        animation_feeling: str = "professional",
-        enable_inline_editing: bool = False,
-) -> str:
-    """Generate a self-contained HTML slide deck from markdown-style slide content.
-
-    Use this tool when the user wants an actual browser-ready presentation rather than
-    plain markdown. It accepts content in the frontend-slides format, such as:
-    ``# [Slide 1] Title: ...`` followed by ``**Headline:**``, ``**Subtitle:**``,
-    ``**Body:**``, bullet lists, and optional ``**Callout:**`` blocks.
-
-    **Before calling this tool, read these supporting files for guidance:**
-    - Use `read_skill_supporting_file('frontend_slides', 'html-template.md')` to understand HTML architecture
-    - Use `read_skill_supporting_file('frontend_slides', 'animation-patterns.md')` for animation reference
-    - Use `read_skill_supporting_file('frontend_slides', 'viewport-base.css')` for mandatory CSS rules
-
-    These files provide the architectural patterns and best practices you should follow when
-    structuring your presentation content and choosing animation styles.
-
-    Args:
-        presentation_markdown: Markdown-style slide content to convert into HTML slides.
-        output_filename: Optional filename for the generated HTML. Saved under OUTPUT_FOLDER.
-        deck_title: Optional browser title for the presentation. Defaults to the first slide title.
-        style_preset: Visual preset name. Supported: Bold Signal, Electric Studio, Creative Voltage, Dark Botanical, Notebook Tabs, Pastel Geometry, Split Pastel, Vintage Editorial, Neon Cyber, Terminal Green, Swiss Modern, Paper & Ink.
-        animation_feeling: Animation style feeling. Options: dramatic (cinematic), techy (futuristic), playful (bouncy), professional (subtle), calm (gentle), editorial (staggered).
-        enable_inline_editing: Whether to include in-browser text editing capabilities. Options: True / False.
-
-    Returns:
-        str: Confirmation containing the generated file path and slide count, or an error message.
-    """
-    logger.info(f"Generating frontend slides - Style: {style_preset}, Animation: {animation_feeling}")
-
-    # Parse the markdown content into structured slide data
-    logger.debug("Parsing presentation markdown into slides")
-    slides = _parse_sections(presentation_markdown)
-    if not slides:
-        logger.warning("No slides detected in presentation markdown")
-        return (
-            "Error: No slides were detected. Use headings like:\n"
-            "- `# [Slide 1] Title: My Slide` (explicit numbering)\n"
-            "- `## Slide 1: My Slide` (alternative format)\n"
-            "- `# My Slide Title` (plain heading, auto-numbered)\n"
-            "Separate slides with `---` on a new line."
-        )
-    logger.info(f"Parsed {len(slides)} slides from markdown")
-
-    # Build HTML using the template engine with dynamic resources
-    resolved_title = deck_title or str(slides[0]["title"])
-    logger.debug(f"Building HTML with title: '{resolved_title}'")
-    html_content = _build_html(resolved_title, slides, style_preset, animation_feeling, enable_inline_editing)
-    logger.debug(f"HTML content generated ({len(html_content)} bytes)")
-
-    # Determine safe filename
-    if output_filename:
-        safe_name = Path(output_filename).name
-        if not safe_name.endswith(".html"):
-            safe_name = f"{safe_name}.html"
-    else:
-        safe_name = f"{_slugify_filename(resolved_title)}.html"
-    logger.debug(f"Output filename: {safe_name}")
-
-    # Save to BOTH output folders: ./output and ./reports
-    reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
-    output_folder = Path(reports_output_folder)
-    output_folder.mkdir(parents=True, exist_ok=True)
-    output_path = output_folder / safe_name
-    logger.info(f"Writing HTML presentation to: {output_path}")
-    output_path.write_text(html_content, encoding="utf-8")
-
-    reports_path = output_folder / safe_name
-    reports_path.write_text(html_content, encoding="utf-8")
-    logger.info(f"Presentation saved to both output and reports folders")
-
-    # Persist to LangGraph state via the channel API so the file
-    # survives the node boundary.
-    try:
-        send_files_to_state({f"/{safe_name}": create_file_data(html_content)})
-        logger.debug("Persisted generated HTML file to state")
-    except Exception as e:
-        logger.warning(f"Could not persist HTML to state: {e}")
-
-    normalized_output_path = normalize_path_for_filesystem_tools(str(output_path))
-    normalized_reports_path = normalize_path_for_filesystem_tools(str(reports_path))
-    logger.info(f"Frontend slides generation completed successfully: {len(slides)} slides")
-    return (
-        f"Generated `{style_preset}` HTML presentation with {len(slides)} slide(s).\n"
-        f"- Saved to output folder: `{normalized_output_path}`\n"
-        f"- Saved to reports folder: `{normalized_reports_path}`"
-    )
-
-
-@tool("frontend-slides-export-pdf", parse_docstring=True)
-def frontend_slides_export_pdf(
-        html_file_path: str,
-        output_pdf_path: str | None = None,
-        compact: bool = False,
-) -> str:
-    """Export an HTML presentation to PDF.
-
-    Use this tool when the user wants to convert a generated HTML presentation into a PDF file.
-    This calls the `scripts/export-pdf.sh` script, which uses Playwright to capture screenshots
-    of each slide and compile them. Note that animations are not preserved in the PDF.
-
-    Args:
-        html_file_path: The absolute path to the generated HTML presentation file.
-        output_pdf_path: Optional absolute path for the output PDF. If not provided, it saves next to the HTML file.
-        compact: Whether to render the PDF in compact mode (1280x720 instead of 1920x1080) for smaller file sizes.
-
-    Returns:
-        str: The path to the generated PDF file or an error message.
-    """
-    logger.info(f"Exporting HTML to PDF - Source: {html_file_path}, Compact: {compact}")
-
-    script_path = _SKILL_DIR / "scripts" / "export-pdf.sh"
-    logger.debug(f"Using export script: {script_path}")
-
-    cmd = ["bash", str(script_path), html_file_path]
-    if output_pdf_path:
-        cmd.append(output_pdf_path)
-        logger.debug(f"Custom output PDF path: {output_pdf_path}")
-    if compact:
-        cmd.append("--compact")
-        logger.debug("Compact mode enabled")
-
-    try:
-        logger.info(f"Executing PDF export command: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        logger.info(f"PDF export completed successfully")
-        logger.debug(f"Export output: {result.stdout[:200]}...")
-        return f"Successfully exported PDF.\\n\\n{result.stdout}"
-    except subprocess.CalledProcessError as e:
-        logger.error(f"PDF export failed: {e.stderr}")
-        return f"Error exporting PDF: {e.stderr}\\n\\n{e.stdout}"
-
-
-@tool("frontend-slides-deploy", parse_docstring=True)
-def frontend_slides_deploy(
-        html_file_path: str,
-) -> str:
-    """Deploy an HTML presentation to a live Vercel URL.
-
-    Use this tool when the user wants to share the presentation online.
-    This calls the `scripts/deploy.sh` script which deploys the presentation to Vercel.
-    The user must have Vercel CLI installed and be logged in.
-
-    Args:
-        html_file_path: The absolute path to the generated HTML presentation file or directory.
-
-    Returns:
-        str: The deployment output including the live URL, or an error message.
-    """
-    logger.info(f"Deploying HTML presentation to Vercel: {html_file_path}")
-
-    script_path = _SKILL_DIR / "scripts" / "deploy.sh"
-    logger.debug(f"Using deploy script: {script_path}")
-
-    cmd = ["bash", str(script_path), html_file_path]
-
-    try:
-        logger.info(f"Executing deployment command: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        logger.info(f"Deployment completed successfully")
-        logger.debug(f"Deployment output: {result.stdout[:200]}...")
-        return f"Successfully deployed presentation.\\n\\n{result.stdout}"
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Deployment failed: {e.stderr}")
-        return f"Error deploying presentation: {e.stderr}\\n\\n{e.stdout}"
-
-
-@tool("frontend-slides-extract-pptx", parse_docstring=True)
-def frontend_slides_extract_pptx(
-        pptx_file_path: str,
-        output_dir: str | None = None,
-) -> str:
-    """Extract content and images from a PowerPoint (.pptx) file.
-
-    Use this tool when the user provides a .pptx file and wants to convert it
-    into an HTML presentation. This runs `scripts/extract-pptx.py` which returns
-    a JSON structure containing slides, text, and images.
-
-    Args:
-        pptx_file_path: The absolute path to the input PowerPoint file.
-        output_dir: Optional absolute path to the directory where extracted data and images should be saved.
-
-    Returns:
-        str: The output of the extraction process, including the path to the extracted JSON.
-    """
-    logger.info(f"Extracting PowerPoint content from: {pptx_file_path}")
-
-    script_path = _SKILL_DIR / "scripts" / "extract-pptx.py"
-    logger.debug(f"Using extraction script: {script_path}")
-
-    cmd = ["python3", str(script_path), pptx_file_path]
-    if output_dir:
-        cmd.append(output_dir)
-        logger.debug(f"Output directory specified: {output_dir}")
-
-    try:
-        logger.info(f"Executing PPTX extraction command: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        logger.info(f"PowerPoint extraction completed successfully")
-        logger.debug(f"Extraction output: {result.stdout[:200]}...")
-        return f"Successfully extracted PowerPoint content.\\n\\n{result.stdout}"
-    except subprocess.CalledProcessError as e:
-        logger.error(f"PowerPoint extraction failed: {e.stderr}")
-        return f"Error extracting PowerPoint content: {e.stderr}\\n\\n{e.stdout}"

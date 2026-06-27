@@ -70,14 +70,10 @@ def test_keyword_search():
 
     registry = SkillRegistry()
 
-    # Test various queries
+    # Test queries against the sole remaining legacy skill
     test_queries = [
-        ("presentation", "frontend-slides"),
-        ("slides", "frontend-slides"),
         ("golden", "golden-dataset"),
         ("dataset", "golden-dataset"),
-        ("code", "code-generator"),
-        ("script", "code-generator"),
     ]
 
     for query, expected_skill in test_queries:
@@ -106,8 +102,8 @@ def test_skill_instructions():
 
     registry = SkillRegistry()
 
-    # Test with frontend-slides
-    skill_id = "frontend-slides"
+    # Test with golden-dataset
+    skill_id = "golden-dataset"
     instructions = registry.get_skill_instructions(skill_id)
 
     if instructions:
@@ -134,8 +130,8 @@ def test_supporting_files():
 
     registry = SkillRegistry()
 
-    # Test with frontend-slides which has supporting files
-    skill_id = "frontend-slides"
+    # Test with golden-dataset which has supporting files
+    skill_id = "golden-dataset"
     supporting_files = registry.get_supporting_files(skill_id)
 
     print(f"\n✓ Found {len(supporting_files)} supporting file(s) for '{skill_id}':")
@@ -170,7 +166,7 @@ def test_hot_reloading():
     registry = SkillRegistry()
 
     # Get initial instruction
-    skill_id = "frontend-slides"
+    skill_id = "golden-dataset"
     initial_instructions = registry.get_skill_instructions(skill_id)
 
     print(f"\n✓ Initial load completed for '{skill_id}'")
