@@ -621,11 +621,86 @@ def register_oauth_routes(app) -> None:
         }
 
 
+# ── Skills ────────────────────────────────────────────────────────────────────
+
+def register_skills_routes(app) -> None:
+    @app.get("/skills")
+    async def list_skills(request: Request, x_api_key: str | None = Header(None)):
+        """List all available skills from deep_research."""
+        if not is_authenticated(x_api_key, request):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or missing API key. Provide X-API-Key header or Authorization header.",
+            )
+        try:
+            import re
+            import yaml
+            from pathlib import Path
+            from research_agent.utils.skill_registry import get_skill_registry
+
+            registry = get_skill_registry()
+            skills_list = []
+            seen_ids = set()
+
+            # 1. Standard loaded skills from skill_registry
+            if registry:
+                for s_id in registry.list_skill_ids():
+                    info = registry.get_skill_info(s_id)
+                    if info:
+                        skills_list.append({
+                            "id": info.skill_id,
+                            "name": info.name,
+                            "description": info.description,
+                            "source": "legacy",
+                            "keywords": info.keywords,
+                        })
+                        seen_ids.add(info.skill_id)
+                        seen_ids.add(info.name)
+
+            # 2. Migrated skills from .deepagents/skills/
+            deepagents_skills_dir = Path(__file__).resolve().parent.parent / ".deepagents" / "skills"
+            frontmatter_re = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
+            if deepagents_skills_dir.is_dir():
+                for skill_dir in deepagents_skills_dir.iterdir():
+                    if not skill_dir.is_dir():
+                        continue
+                    skill_file = skill_dir / "SKILL.md"
+                    if not skill_file.is_file():
+                        continue
+                    try:
+                        content = skill_file.read_text(encoding="utf-8")
+                        match = frontmatter_re.match(content)
+                        if match:
+                            fm = yaml.safe_load(match.group(1)) or {}
+                            name = fm.get("name", skill_dir.name)
+                            if name not in seen_ids and skill_dir.name not in seen_ids:
+                                skills_list.append({
+                                    "id": skill_dir.name,
+                                    "name": name,
+                                    "description": (fm.get("description") or "").strip(),
+                                    "source": "migrated",
+                                    "keywords": fm.get("keywords", []),
+                                })
+                                seen_ids.add(name)
+                                seen_ids.add(skill_dir.name)
+                    except Exception as err:
+                        logger.warning(f"Error parsing skill in {skill_dir}: {err}")
+
+            return {"skills": skills_list, "total": len(skills_list)}
+        except Exception as e:
+            logger.error(f"Failed to list skills: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to load skills: {str(e)}",
+            )
+
+
 # ── Convenience: register everything at once ────────────────────────────────────
 
 def register_all_routes(app) -> None:
-    """Register health, storage, document, and OAuth routes on *app*."""
+    """Register health, storage, document, OAuth, and skills routes on *app*."""
     register_health_routes(app)
     register_storage_routes(app)
     register_document_routes(app)
     register_oauth_routes(app)
+    register_skills_routes(app)

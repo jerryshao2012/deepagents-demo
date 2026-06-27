@@ -24,7 +24,7 @@ def test_parser_exposes_all_skill_skills() -> None:
     parser = build_parser()
     # Parser choices include both legacy + migrated skill IDs + "list"
     expected = ALL_SKILL_TARGET_IDS | {"list"}
-    for sid in get_skill_registry().MIGRATED_SKILL_IDS:
+    for sid in get_skill_registry().SKILL_IDS:
         expected.add(sid)
     assert set(parser._option_string_actions["--skill"].choices) == expected
 

@@ -61,21 +61,6 @@ class SkillRegistry:
     Supports hot-reloading by checking file modification times on access.
     """
 
-    # Skills that have been migrated to the deep agents SkillsMiddleware.
-    # These are skipped during loading so they are handled exclusively by
-    # SkillsMiddleware.  Only golden-dataset remains as a legacy skill
-    # with project-specific pipeline.py code and dedicated tools.
-    MIGRATED_SKILL_IDS: set[str] = {
-        "autoresearch-universal",
-        "code-generator",
-        "find-skills",
-        "frontend-slides",
-        "humanizer",
-        "interview",
-        "interview-coach-pro",
-        "study-slides",
-    }
-
     _FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
     _JSON_BLOCK_RE = re.compile(r"```json\n(.*?)\n```", re.DOTALL)
     _SCHEMA_SECTION_RE = re.compile(r"^## Schema\s*$", re.MULTILINE)
@@ -102,7 +87,43 @@ class SkillRegistry:
         self._skills: dict[str, SkillInfo] = {}
         self._load_timestamps: dict[str, float] = {}
         self._skill_definitions: dict[str, dict[str, Any]] = {}
+        self._skills_ids: set[str] | None = None  # cached, populated lazily by SKILL_IDS property
         self._load_all_skills()
+
+    @property
+    def SKILL_IDS(self) -> set[str]:
+        """Skill IDs auto-discovered from .deepagents/skills/.
+
+        Scans the directory on first access and caches the result so that
+        adding a new skill only requires dropping its folder into
+        .deepagents/skills/ — no code changes needed.
+        """
+        if self._skills_ids is not None:
+            return self._skills_ids
+
+        ids: set[str] = set()
+        deepagents_skills_dir = (
+                Path(__file__).resolve().parent.parent.parent / ".deepagents" / "skills"
+        )
+        if deepagents_skills_dir.is_dir():
+            for skill_dir in deepagents_skills_dir.iterdir():
+                if not skill_dir.is_dir():
+                    continue
+                skill_file = skill_dir / "SKILL.md"
+                if not skill_file.is_file():
+                    continue
+                try:
+                    content = skill_file.read_text(encoding="utf-8")
+                    match = self._FRONTMATTER_RE.match(content)
+                    if match:
+                        frontmatter = yaml.safe_load(match.group(1))
+                        name = frontmatter.get("name", skill_dir.name)
+                        ids.add(name)
+                except Exception:
+                    continue
+
+        self._skills_ids = ids
+        return ids
 
     @staticmethod
     def _load_skill_config(config_file: str | Path | None = None) -> list[str] | None:
@@ -183,7 +204,7 @@ class SkillRegistry:
                     skill_id = parsed_skill.get("name", skill_path.name)
 
                     # Skip skills that have been migrated to SkillsMiddleware
-                    if skill_id in self.MIGRATED_SKILL_IDS:
+                    if skill_id in self.SKILL_IDS:
                         skipped_count += 1
                         continue
 

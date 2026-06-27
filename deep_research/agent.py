@@ -1052,7 +1052,7 @@ class ResearchStateMiddleware(AgentMiddleware):
         # Combine legacy and migrated skill IDs for direct matching
         all_skill_ids = (
                 list(skill_registry.skill_ids)
-                + list(skill_registry.MIGRATED_SKILL_IDS)
+                + list(skill_registry.SKILL_IDS)
         )
         # Direct skill-id match: check if any skill ID appears in the user
         # message (e.g. "use humanizer skill" contains "humanizer").

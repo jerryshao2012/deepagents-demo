@@ -66,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     # Collect both legacy (SkillRegistry) and migrated (SkillsMiddleware) skill IDs
     _all_skill_ids = get_skill_registry().list_skill_ids() + list(
-        get_skill_registry().MIGRATED_SKILL_IDS
+        get_skill_registry().SKILL_IDS
     )
     parser.add_argument(
         "--skill",
@@ -133,7 +133,7 @@ def build_instruction(
 
     if skill:
         # Check if this skill has been migrated to the deep agents SkillsMiddleware
-        if skill in get_skill_registry().MIGRATED_SKILL_IDS:
+        if skill in get_skill_registry().SKILL_IDS:
             instruction += (
                 f"\n\nThe requested output skill is `{skill}`. "
                 f"This skill is available in the Skills library. "
