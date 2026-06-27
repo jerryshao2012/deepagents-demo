@@ -8,17 +8,24 @@ Routes are registered on module-level functions decorated directly with
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import os
+import re
 import shutil
-from pathlib import PurePosixPath
+import zipfile
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import sys
+import yaml
 from fastapi import File, Form, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
 
 import webapp.config as _cfg
+from auth import _logged_oauth_users
+from research_agent.utils.content_extractors import extract_supported_document
+from research_agent.utils.skill_registry import get_skill_registry
 from webapp.auth_helpers import is_authenticated
 from webapp.model_diagnostics import run_model_diagnostics
 from webapp.utils import (
@@ -168,7 +175,6 @@ def register_document_routes(app) -> None:
             )
 
         try:
-            from research_agent.utils.content_extractors import extract_supported_document
             content = await asyncio.to_thread(extract_supported_document, file_path)
             return {
                 "filename": safe_name,
@@ -605,14 +611,9 @@ def register_oauth_routes(app) -> None:
             )
 
         # Clean up the logged users tracking in auth module
-        try:
-            from auth import _logged_oauth_users
-
-            if identity in _logged_oauth_users:
-                _logged_oauth_users.discard(identity)
-                print(f"✅ Cleaned up logged user tracking for: {identity}")
-        except ImportError:
-            pass
+        if identity in _logged_oauth_users:
+            _logged_oauth_users.discard(identity)
+            print(f"✅ Cleaned up logged user tracking for: {identity}")
 
         return {
             "success": True,
@@ -633,11 +634,6 @@ def register_skills_routes(app) -> None:
                 detail="Invalid or missing API key. Provide X-API-Key header or Authorization header.",
             )
         try:
-            import re
-            import yaml
-            from pathlib import Path
-            from research_agent.utils.skill_registry import get_skill_registry
-
             registry = get_skill_registry()
             skills_list = []
             seen_ids = set()
@@ -692,6 +688,103 @@ def register_skills_routes(app) -> None:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to load skills: {str(e)}",
+            )
+
+    @app.post("/skills/upload", status_code=status.HTTP_201_CREATED)
+    async def upload_skill(
+            request: Request,
+            file: UploadFile | None = File(None),
+            files: list[UploadFile] | None = File(None),
+            paths: list[str] | None = Form(None),
+            x_api_key: str | None = Header(None),
+    ):
+        """Upload and install a new agent skill archive (.zip), SKILL.md file, or full skill directory into .deepagents/skills/."""
+        if not is_authenticated(x_api_key, request):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or missing API key. Provide X-API-Key header or Authorization header.",
+            )
+        try:
+
+            deepagents_skills_dir = Path(__file__).resolve().parent.parent / ".deepagents" / "skills"
+            deepagents_skills_dir.mkdir(parents=True, exist_ok=True)
+
+            installed_name = "custom_skill"
+
+            # Multi-file folder upload handling
+            if files and len(files) > 0:
+                for idx, upload in enumerate(files):
+                    rel_path_str = paths[idx] if (paths and idx < len(paths)) else upload.filename
+                    if not rel_path_str:
+                        continue
+                    clean_p = PurePosixPath(rel_path_str)
+                    parts = [pt for pt in clean_p.parts if
+                             pt not in ("..", ".", "__MACOSX") and not pt.startswith("._")]
+                    if not parts:
+                        continue
+                    installed_name = parts[0]
+                    dest_file = deepagents_skills_dir.joinpath(*parts)
+                    dest_file.parent.mkdir(parents=True, exist_ok=True)
+                    content = await upload.read()
+                    dest_file.write_bytes(content)
+
+            elif file is not None:
+                content = await file.read()
+                filename = file.filename or "uploaded_skill"
+                skill_stem = safe_filename(Path(filename).stem)
+
+                if filename.lower().endswith(".zip"):
+                    with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                        members = zf.infolist()
+                        valid_members = [
+                            m for m in members
+                            if not m.filename.startswith("__MACOSX") and not m.filename.startswith("._")
+                        ]
+                        first_parts = {m.filename.split("/")[0] for m in valid_members if "/" in m.filename}
+                        has_root_skill_md = any(m.filename == "SKILL.md" for m in valid_members)
+
+                        if len(first_parts) == 1 and not has_root_skill_md:
+                            zf.extractall(deepagents_skills_dir, members=valid_members)
+                            installed_name = list(first_parts)[0]
+                        else:
+                            installed_name = skill_stem
+                            out_dir = deepagents_skills_dir / installed_name
+                            out_dir.mkdir(parents=True, exist_ok=True)
+                            zf.extractall(out_dir, members=valid_members)
+                elif filename == "SKILL.md" or filename.lower().endswith(".md"):
+                    installed_name = skill_stem if skill_stem != "SKILL" else "custom_skill"
+                    out_dir = deepagents_skills_dir / installed_name
+                    out_dir.mkdir(parents=True, exist_ok=True)
+                    (out_dir / "SKILL.md").write_bytes(content)
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Unsupported file format. Please upload a .zip skill archive, SKILL.md file, or skill directory.",
+                    )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No file or folder data provided for upload.",
+                )
+
+            # Instantly refresh registry
+            registry = get_skill_registry()
+            if registry:
+                registry._skills_ids = None
+                registry.reload_all()
+
+            return {
+                "success": True,
+                "message": f"Skill '{installed_name}' uploaded and active immediately.",
+                "skill_name": installed_name,
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to process skill upload: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to upload skill: {str(e)}",
             )
 
 
