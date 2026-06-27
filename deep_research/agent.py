@@ -1230,7 +1230,7 @@ agent = create_deep_agent(
     system_prompt=INSTRUCTIONS,
     subagents=[research_sub_agent],
     middleware=[ResearchStateMiddleware()],
-    skills=[".deepagents/skills/"],
+    skills=[".deepagents/skills/", "./doc/.deepagents/skills/"],
 ).with_config(
     RunnableConfig(recursion_limit=RECURSION_LIMIT)
 )

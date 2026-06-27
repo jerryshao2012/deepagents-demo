@@ -654,11 +654,11 @@ def register_skills_routes(app) -> None:
                             seen_ids.add(info.skill_id)
                             seen_ids.add(info.name)
 
-                # 2. Migrated skills from .deepagents/skills/
-                deepagents_skills_dir = Path(__file__).resolve().parent.parent / ".deepagents" / "skills"
+                # 2. Uploaded / Migrated skills from ./doc/.deepagents/skills/
+                doc_skills_dir = Path(__file__).resolve().parent.parent / "doc" / ".deepagents" / "skills"
                 frontmatter_re = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
-                if deepagents_skills_dir.is_dir():
-                    for skill_dir in deepagents_skills_dir.iterdir():
+                if doc_skills_dir.is_dir():
+                    for skill_dir in doc_skills_dir.iterdir():
                         if not skill_dir.is_dir():
                             continue
                         skill_file = skill_dir / "SKILL.md"
@@ -675,7 +675,8 @@ def register_skills_routes(app) -> None:
                                         "id": skill_dir.name,
                                         "name": name,
                                         "description": (fm.get("description") or "").strip(),
-                                        "source": "migrated",
+                                        "source": "uploaded",
+                                        "is_removable": True,
                                         "keywords": fm.get("keywords", []),
                                     })
                                     seen_ids.add(name)
@@ -701,16 +702,15 @@ def register_skills_routes(app) -> None:
             paths: list[str] | None = Form(None),
             x_api_key: str | None = Header(None),
     ):
-        """Upload and install a new agent skill archive (.zip), SKILL.md file, or full skill directory into .deepagents/skills/."""
+        """Upload and install a new agent skill archive (.zip), SKILL.md file, or full skill directory into ./doc/.deepagents/skills/."""
         if not is_authenticated(x_api_key, request):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or missing API key. Provide X-API-Key header or Authorization header.",
             )
         try:
-
-            deepagents_skills_dir = Path(__file__).resolve().parent.parent / ".deepagents" / "skills"
-            deepagents_skills_dir.mkdir(parents=True, exist_ok=True)
+            doc_skills_dir = Path(__file__).resolve().parent.parent / "doc" / ".deepagents" / "skills"
+            doc_skills_dir.mkdir(parents=True, exist_ok=True)
 
             installed_name = "custom_skill"
 
@@ -726,7 +726,7 @@ def register_skills_routes(app) -> None:
                     if not parts:
                         continue
                     installed_name = parts[0]
-                    dest_file = deepagents_skills_dir.joinpath(*parts)
+                    dest_file = doc_skills_dir.joinpath(*parts)
                     dest_file.parent.mkdir(parents=True, exist_ok=True)
                     content = await upload.read()
                     dest_file.write_bytes(content)
@@ -747,16 +747,16 @@ def register_skills_routes(app) -> None:
                         has_root_skill_md = any(m.filename == "SKILL.md" for m in valid_members)
 
                         if len(first_parts) == 1 and not has_root_skill_md:
-                            zf.extractall(deepagents_skills_dir, members=valid_members)
+                            zf.extractall(doc_skills_dir, members=valid_members)
                             installed_name = list(first_parts)[0]
                         else:
                             installed_name = skill_stem
-                            out_dir = deepagents_skills_dir / installed_name
+                            out_dir = doc_skills_dir / installed_name
                             out_dir.mkdir(parents=True, exist_ok=True)
                             zf.extractall(out_dir, members=valid_members)
                 elif filename == "SKILL.md" or filename.lower().endswith(".md"):
                     installed_name = skill_stem if skill_stem != "SKILL" else "custom_skill"
-                    out_dir = deepagents_skills_dir / installed_name
+                    out_dir = doc_skills_dir / installed_name
                     out_dir.mkdir(parents=True, exist_ok=True)
                     (out_dir / "SKILL.md").write_bytes(content)
                 else:
@@ -778,7 +778,7 @@ def register_skills_routes(app) -> None:
 
             return {
                 "success": True,
-                "message": f"Skill '{installed_name}' uploaded and active immediately.",
+                "message": f"Skill '{installed_name}' uploaded to ./doc/.deepagents/skills/ and active immediately.",
                 "skill_name": installed_name,
             }
         except HTTPException:
@@ -788,6 +788,42 @@ def register_skills_routes(app) -> None:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Failed to upload skill: {str(e)}",
+            )
+
+    @app.delete("/skills/{skill_id}")
+    async def delete_skill(skill_id: str, request: Request, x_api_key: str | None = Header(None)):
+        """Remove an uploaded skill from ./doc/.deepagents/skills/."""
+        if not is_authenticated(x_api_key, request):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or missing API key.",
+            )
+        try:
+            doc_skills_dir = Path(__file__).resolve().parent.parent / "doc" / ".deepagents" / "skills"
+            skill_dir = doc_skills_dir / skill_id
+            if not skill_dir.exists() or not skill_dir.is_dir():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Uploaded skill '{skill_id}' not found in ./doc/.deepagents/skills/ or cannot be removed.",
+                )
+            await asyncio.to_thread(shutil.rmtree, skill_dir)
+
+            registry = get_skill_registry()
+            if registry:
+                registry._skills_ids = None
+                registry.reload_all()
+
+            return {
+                "success": True,
+                "message": f"Skill '{skill_id}' removed successfully.",
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to delete skill '{skill_id}': {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to remove skill: {str(e)}",
             )
 
 

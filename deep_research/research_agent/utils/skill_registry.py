@@ -92,11 +92,11 @@ class SkillRegistry:
 
     @property
     def SKILL_IDS(self) -> set[str]:
-        """Skill IDs auto-discovered from .deepagents/skills/.
+        """Skill IDs auto-discovered from .deepagents/skills/ and ./doc/.deepagents/skills/.
 
-        Scans the directory on first access and caches the result so that
+        Scans the directories on access and caches the result so that
         adding a new skill only requires dropping its folder into
-        .deepagents/skills/ — no code changes needed.
+        .deepagents/skills/ or ./doc/.deepagents/skills/ — no code changes needed.
         """
         if self._skills_ids is not None:
             return self._skills_ids
@@ -105,22 +105,27 @@ class SkillRegistry:
         deepagents_skills_dir = (
                 Path(__file__).resolve().parent.parent.parent / ".deepagents" / "skills"
         )
-        if deepagents_skills_dir.is_dir():
-            for skill_dir in deepagents_skills_dir.iterdir():
-                if not skill_dir.is_dir():
-                    continue
-                skill_file = skill_dir / "SKILL.md"
-                if not skill_file.is_file():
-                    continue
-                try:
-                    content = skill_file.read_text(encoding="utf-8")
-                    match = self._FRONTMATTER_RE.match(content)
-                    if match:
-                        frontmatter = yaml.safe_load(match.group(1))
-                        name = frontmatter.get("name", skill_dir.name)
-                        ids.add(name)
-                except Exception:
-                    continue
+        doc_skills_dir = (
+                Path(__file__).resolve().parent.parent.parent / "doc" / ".deepagents" / "skills"
+        )
+
+        for s_dir in (deepagents_skills_dir, doc_skills_dir):
+            if s_dir.is_dir():
+                for skill_dir in s_dir.iterdir():
+                    if not skill_dir.is_dir():
+                        continue
+                    skill_file = skill_dir / "SKILL.md"
+                    if not skill_file.is_file():
+                        continue
+                    try:
+                        content = skill_file.read_text(encoding="utf-8")
+                        match = self._FRONTMATTER_RE.match(content)
+                        if match:
+                            frontmatter = yaml.safe_load(match.group(1))
+                            name = frontmatter.get("name", skill_dir.name)
+                            ids.add(name)
+                    except Exception:
+                        continue
 
         self._skills_ids = ids
         return ids
@@ -434,6 +439,7 @@ class SkillRegistry:
         Args:
             reload_config: If True, also reload the skill configuration file
         """
+        self._skills_ids = None
         self._skills.clear()
         self._load_timestamps.clear()
         self._skill_definitions.clear()
