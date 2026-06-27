@@ -14,10 +14,10 @@ import asyncio
 import json
 import logging
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -450,4 +450,135 @@ async def delete_thread_wiki(
     return {
         "thread_id": thread_id,
         "message": "Thread wiki and documents deleted successfully.",
+    }
+
+
+def _build_directory_tree(root_dir: Path, current_dir: Path) -> dict[str, Any]:
+    """Recursively build a directory tree dict."""
+    try:
+        relative_path = str(current_dir.relative_to(root_dir))
+    except ValueError:
+        relative_path = ""
+    if relative_path == ".":
+        relative_path = ""
+
+    children = []
+    if current_dir.exists() and current_dir.is_dir():
+        items = sorted(list(current_dir.iterdir()), key=lambda p: (not p.is_dir(), p.name.lower()))
+        for item in items:
+            if item.name.startswith("."):
+                continue
+            item_rel = str(item.relative_to(root_dir))
+            if item.is_dir():
+                children.append(_build_directory_tree(root_dir, item))
+            else:
+                children.append({
+                    "name": item.name,
+                    "path": item_rel,
+                    "type": "file",
+                    "size": item.stat().st_size if item.exists() else 0,
+                })
+
+    return {
+        "name": current_dir.name if relative_path != "" else "threads-wiki",
+        "path": relative_path,
+        "type": "directory",
+        "children": children,
+    }
+
+
+def _count_files(node: dict[str, Any]) -> int:
+    if node.get("type") == "file":
+        return 1
+    count = 0
+    for child in node.get("children", []):
+        count += _count_files(child)
+    return count
+
+
+@router.get(
+    "/threads/{thread_id}/wiki/tree",
+)
+async def get_thread_wiki_tree(
+        thread_id: str,
+        current_user=Depends(_wiki_get_current_user),
+) -> dict[str, Any]:
+    """Get the full directory tree structure for a thread's wiki workspace."""
+    paths = ThreadWikiPaths.resolve(thread_id, _BASE_DIR)
+    if not paths.wiki_dir.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Wiki directory does not exist for thread '{thread_id}'. Run ingest first.",
+        )
+
+    tree = await asyncio.to_thread(_build_directory_tree, paths.wiki_dir, paths.wiki_dir)
+    file_count = _count_files(tree)
+    return {
+        "thread_id": thread_id,
+        "tree": tree,
+        "file_count": file_count,
+    }
+
+
+@router.get(
+    "/threads/{thread_id}/wiki/file",
+)
+async def get_thread_wiki_file(
+        thread_id: str,
+        path: str = Query(..., description="Relative file path inside threads-wiki/<thread_id>"),
+        current_user=Depends(_wiki_get_current_user),
+) -> dict[str, Any]:
+    """Read and return the text content of a specific file in the thread's wiki workspace."""
+    paths = ThreadWikiPaths.resolve(thread_id, _BASE_DIR)
+    if not paths.wiki_dir.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Wiki directory does not exist for thread '{thread_id}'.",
+        )
+
+    # Validate safe relative path
+    rel_path = PurePosixPath(path.replace("\\", "/").strip().strip("/"))
+    if any(part in {"", ".", ".."} for part in rel_path.parts):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid relative file path.",
+        )
+
+    target_file = paths.wiki_dir.joinpath(*rel_path.parts)
+    try:
+        target_file.relative_to(paths.wiki_dir)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Path outside wiki directory.",
+        )
+
+    if not (await asyncio.to_thread(target_file.exists)) or not (await asyncio.to_thread(target_file.is_file)):
+        raise HTTPException(
+            status_code=404,
+            detail=f"File '{path}' not found in thread wiki workspace.",
+        )
+
+    size = await asyncio.to_thread(lambda: target_file.stat().st_size)
+
+    if target_file.suffix.lower() in {".faiss", ".pkl"} or (len(rel_path.parts) > 0 and rel_path.parts[0] == "index"):
+        return {
+            "thread_id": thread_id,
+            "path": str(rel_path),
+            "name": target_file.name,
+            "size": size,
+            "content": "Content view is unavailable",
+        }
+
+    def _read_file():
+        return target_file.read_text(encoding="utf-8", errors="replace")
+
+    content = await asyncio.to_thread(_read_file)
+
+    return {
+        "thread_id": thread_id,
+        "path": str(rel_path),
+        "name": target_file.name,
+        "size": size,
+        "content": content,
     }
