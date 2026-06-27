@@ -634,54 +634,57 @@ def register_skills_routes(app) -> None:
                 detail="Invalid or missing API key. Provide X-API-Key header or Authorization header.",
             )
         try:
-            registry = get_skill_registry()
-            skills_list = []
-            seen_ids = set()
+            def _load_skills():
+                registry = get_skill_registry()
+                skills_list = []
+                seen_ids = set()
 
-            # 1. Standard loaded skills from skill_registry
-            if registry:
-                for s_id in registry.list_skill_ids():
-                    info = registry.get_skill_info(s_id)
-                    if info:
-                        skills_list.append({
-                            "id": info.skill_id,
-                            "name": info.name,
-                            "description": info.description,
-                            "source": "legacy",
-                            "keywords": info.keywords,
-                        })
-                        seen_ids.add(info.skill_id)
-                        seen_ids.add(info.name)
+                # 1. Standard loaded skills from skill_registry
+                if registry:
+                    for s_id in registry.list_skill_ids():
+                        info = registry.get_skill_info(s_id)
+                        if info:
+                            skills_list.append({
+                                "id": info.skill_id,
+                                "name": info.name,
+                                "description": info.description,
+                                "source": "legacy",
+                                "keywords": info.keywords,
+                            })
+                            seen_ids.add(info.skill_id)
+                            seen_ids.add(info.name)
 
-            # 2. Migrated skills from .deepagents/skills/
-            deepagents_skills_dir = Path(__file__).resolve().parent.parent / ".deepagents" / "skills"
-            frontmatter_re = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
-            if deepagents_skills_dir.is_dir():
-                for skill_dir in deepagents_skills_dir.iterdir():
-                    if not skill_dir.is_dir():
-                        continue
-                    skill_file = skill_dir / "SKILL.md"
-                    if not skill_file.is_file():
-                        continue
-                    try:
-                        content = skill_file.read_text(encoding="utf-8")
-                        match = frontmatter_re.match(content)
-                        if match:
-                            fm = yaml.safe_load(match.group(1)) or {}
-                            name = fm.get("name", skill_dir.name)
-                            if name not in seen_ids and skill_dir.name not in seen_ids:
-                                skills_list.append({
-                                    "id": skill_dir.name,
-                                    "name": name,
-                                    "description": (fm.get("description") or "").strip(),
-                                    "source": "migrated",
-                                    "keywords": fm.get("keywords", []),
-                                })
-                                seen_ids.add(name)
-                                seen_ids.add(skill_dir.name)
-                    except Exception as err:
-                        logger.warning(f"Error parsing skill in {skill_dir}: {err}")
+                # 2. Migrated skills from .deepagents/skills/
+                deepagents_skills_dir = Path(__file__).resolve().parent.parent / ".deepagents" / "skills"
+                frontmatter_re = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
+                if deepagents_skills_dir.is_dir():
+                    for skill_dir in deepagents_skills_dir.iterdir():
+                        if not skill_dir.is_dir():
+                            continue
+                        skill_file = skill_dir / "SKILL.md"
+                        if not skill_file.is_file():
+                            continue
+                        try:
+                            content = skill_file.read_text(encoding="utf-8")
+                            match = frontmatter_re.match(content)
+                            if match:
+                                fm = yaml.safe_load(match.group(1)) or {}
+                                name = fm.get("name", skill_dir.name)
+                                if name not in seen_ids and skill_dir.name not in seen_ids:
+                                    skills_list.append({
+                                        "id": skill_dir.name,
+                                        "name": name,
+                                        "description": (fm.get("description") or "").strip(),
+                                        "source": "migrated",
+                                        "keywords": fm.get("keywords", []),
+                                    })
+                                    seen_ids.add(name)
+                                    seen_ids.add(skill_dir.name)
+                        except Exception as err:
+                            logger.warning(f"Error parsing skill in {skill_dir}: {err}")
+                return skills_list
 
+            skills_list = await asyncio.to_thread(_load_skills)
             return {"skills": skills_list, "total": len(skills_list)}
         except Exception as e:
             logger.error(f"Failed to list skills: {e}")
