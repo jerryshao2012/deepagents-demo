@@ -638,6 +638,7 @@ def register_skills_routes(app) -> None:
                 registry = get_skill_registry()
                 skills_list = []
                 seen_ids = set()
+                frontmatter_re = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
 
                 # 1. Standard loaded skills from skill_registry
                 if registry:
@@ -648,15 +649,44 @@ def register_skills_routes(app) -> None:
                                 "id": info.skill_id,
                                 "name": info.name,
                                 "description": info.description,
-                                "source": "legacy",
+                                "source": "system",
+                                "is_removable": False,
                                 "keywords": info.keywords,
                             })
                             seen_ids.add(info.skill_id)
                             seen_ids.add(info.name)
 
-                # 2. Uploaded / Migrated skills from ./doc/.deepagents/skills/
+                # 2. System / Migrated skills from .deepagents/skills/
+                deepagents_skills_dir = Path(__file__).resolve().parent.parent / ".deepagents" / "skills"
+                if deepagents_skills_dir.is_dir():
+                    for skill_dir in deepagents_skills_dir.iterdir():
+                        if not skill_dir.is_dir():
+                            continue
+                        skill_file = skill_dir / "SKILL.md"
+                        if not skill_file.is_file():
+                            continue
+                        try:
+                            content = skill_file.read_text(encoding="utf-8")
+                            match = frontmatter_re.match(content)
+                            if match:
+                                fm = yaml.safe_load(match.group(1)) or {}
+                                name = fm.get("name", skill_dir.name)
+                                if name not in seen_ids and skill_dir.name not in seen_ids:
+                                    skills_list.append({
+                                        "id": skill_dir.name,
+                                        "name": name,
+                                        "description": (fm.get("description") or "").strip(),
+                                        "source": "system",
+                                        "is_removable": False,
+                                        "keywords": fm.get("keywords", []),
+                                    })
+                                    seen_ids.add(name)
+                                    seen_ids.add(skill_dir.name)
+                        except Exception as err:
+                            logger.warning(f"Error parsing skill in {skill_dir}: {err}")
+
+                # 3. Uploaded custom skills from ./doc/.deepagents/skills/
                 doc_skills_dir = Path(__file__).resolve().parent.parent / "doc" / ".deepagents" / "skills"
-                frontmatter_re = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
                 if doc_skills_dir.is_dir():
                     for skill_dir in doc_skills_dir.iterdir():
                         if not skill_dir.is_dir():
@@ -683,6 +713,9 @@ def register_skills_routes(app) -> None:
                                     seen_ids.add(skill_dir.name)
                         except Exception as err:
                             logger.warning(f"Error parsing skill in {skill_dir}: {err}")
+
+                # Server-side sorting by skill name (case-insensitive)
+                skills_list.sort(key=lambda s: s["name"].lower())
                 return skills_list
 
             skills_list = await asyncio.to_thread(_load_skills)
