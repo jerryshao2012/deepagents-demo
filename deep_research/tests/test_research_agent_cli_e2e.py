@@ -29,7 +29,7 @@ class FakeAgent:
 
 def _run_cli(monkeypatch, tmp_path: Path, argv: list[str], fake_agent: FakeAgent, title: str) -> Path:
     monkeypatch.setattr(research_agent_cli, "agent", fake_agent)
-    monkeypatch.setattr(research_agent_cli, "REPORTS_OUTPUT_FOLDER", str(tmp_path))
+    monkeypatch.setenv("REPORTS_OUTPUT_FOLDER", str(tmp_path))
     monkeypatch.setattr(research_agent_cli, "generate_research_title", lambda _content: title)
     monkeypatch.setattr(research_agent_cli, "show_prompt", lambda *args, **kwargs: None)
     monkeypatch.setattr(research_agent_cli, "format_messages", lambda *args, **kwargs: None)
