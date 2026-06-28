@@ -86,8 +86,56 @@ async def _lifespan(app: FastAPI):
     except (ImportError, AttributeError):
         pass
 
+    # Set up persistent LangGraph checkpointer if MEMORY_TYPE=sqlite|postgres.
+    # Module-level import defaults to InMemorySaver; we swap it here once the
+    # event loop is running.
+    _checkpointer_conn = None
+    try:
+        import os as _os
+        _mem_type = _os.environ.get("MEMORY_TYPE", "memory").strip().lower()
+
+        if _mem_type == "sqlite":
+            import aiosqlite
+            from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+            from pathlib import Path as _Path
+
+            _sqlite_path = _os.environ.get(
+                "SQLITE_DB_PATH",
+                str(_Path(__file__).resolve().parent / "checkpoints.db"),
+            )
+            _checkpointer_conn = await aiosqlite.connect(_sqlite_path)
+            _saver = AsyncSqliteSaver(_checkpointer_conn)
+            await _saver.setup()
+
+            from agent import agent as _agent
+            _agent.checkpointer = _saver
+            print(f"✅ Checkpointer initialized: AsyncSqliteSaver → {_sqlite_path}")
+
+        elif _mem_type in ("postgres", "postgresql"):
+            from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+            _pg_uri = _os.environ["POSTGRES_URI"]
+            _saver = AsyncPostgresSaver.from_conn_string(_pg_uri)
+            # from_conn_string is not a context manager for postgres; returns directly
+            if hasattr(_saver, "__aenter__"):
+                async with _saver as _s:
+                    await _s.setup()
+                    from agent import agent as _agent
+                    _agent.checkpointer = _s
+            else:
+                await _saver.setup()
+                from agent import agent as _agent
+                _agent.checkpointer = _saver
+            print(f"✅ Checkpointer initialized: AsyncPostgresSaver")
+    except Exception as _exc:
+        print(f"⚠️  Persistent checkpointer setup skipped (using InMemorySaver): {_exc}")
+
     yield
-    # (reserved for future shutdown logic)
+
+    # Cleanup: close checkpointer connection if we opened one
+    if _checkpointer_conn is not None:
+        await _checkpointer_conn.close()
+        print("✅ Checkpointer connection closed")
 
 
 # ── Application factory ───────────────────────────────────────────────────────

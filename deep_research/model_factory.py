@@ -68,10 +68,12 @@ from langchain_core.embeddings import Embeddings
 import hashlib
 import numpy as np
 
+
 class SimpleLocalEmbeddings(Embeddings):
     """A deterministic, completely local bag-of-words projection embedding model.
     Used as an offline fallback that works with FAISS.
     """
+
     def __init__(self, size=1536):
         self.size = size
 
@@ -80,7 +82,7 @@ class SimpleLocalEmbeddings(Embeddings):
         vec = np.zeros(self.size, dtype=np.float32)
         if not words:
             return vec.tolist()
-        
+
         for word in words:
             if not word:
                 continue
@@ -89,7 +91,7 @@ class SimpleLocalEmbeddings(Embeddings):
             idx = h % self.size
             sign = 1 if ((h >> 4) % 2 == 0) else -1
             vec[idx] += sign
-            
+
         norm = np.linalg.norm(vec)
         if norm > 0:
             vec = vec / norm
@@ -106,10 +108,10 @@ def create_embedding_model():
     """Create an embedding model instance with graceful fallbacks."""
     # 1. Try Azure OpenAI if configured
     if (
-        os.getenv("AZURE_EMBEDDING_NAME")
-        and os.getenv("AZURE_OPENAI_ENDPOINT")
-        and os.getenv("AZURE_EMBEDDING_DEPLOYMENT_NAME")
-        and os.getenv("AZURE_OPENAI_API_VERSION")
+            os.getenv("AZURE_EMBEDDING_NAME")
+            and os.getenv("AZURE_OPENAI_ENDPOINT")
+            and os.getenv("AZURE_EMBEDDING_DEPLOYMENT_NAME")
+            and os.getenv("AZURE_OPENAI_API_VERSION")
     ):
         try:
             logger.info("Using Azure OpenAI embedding model.")
@@ -162,20 +164,43 @@ def create_embedding_model():
     return SimpleLocalEmbeddings(size=1536)
 
 
-
 def create_memory_saver():
-    # Initialize memory checkpointer for conversation state
-    memory_type = os.environ["MEMORY_TYPE"]
-    if memory_type == 'memory':
+    """Create a LangGraph checkpointer based on the MEMORY_TYPE env var.
+
+    Supported types:
+      - ``"memory"`` (default): ephemeral InMemorySaver — no persistence across restarts
+      - ``"sqlite"``: AsyncSqliteSaver — persistent, local file-based checkpoints
+      - ``"postgres"``: AsyncPostgresSaver — persistent, production-grade
+      - ``"cosmosdb"``: CosmosDBSaver — Azure CosmosDB-backed (sync, use with care in async)
+
+    Note: sqlite and postgres AsyncSavers require an active event loop and are
+    typically created via ``setup_checkpointer()`` from the server lifespan.
+    This function returns InMemorySaver when MEMORY_TYPE is unset or set to "memory".
+    """
+    memory_type = os.environ.get("MEMORY_TYPE", "memory").strip().lower()
+
+    if memory_type == "memory":
         return InMemorySaver()
-    elif memory_type == 'cosmosdb':
+
+    if memory_type == "cosmosdb":
         return CosmosDBSaver(
             database_name=os.environ["COSMOSDB_DB_NAME"],
-            container_name=os.environ["COSMOSDB_CONTAINER_NAME"]
+            container_name=os.environ["COSMOSDB_CONTAINER_NAME"],
         )
-    else:
-        logger.error(f"Unsupported MEMORY_TYPE: {memory_type}")
-        raise ValueError(f"Unsupported MEMORY_TYPE: {memory_type}")
+
+    # For sqlite / postgres: return InMemorySaver at module-load time.
+    # The real saver is set up later via setup_checkpointer() once the
+    # event loop is running (in the FastAPI lifespan).
+    if memory_type in ("sqlite", "postgres", "postgresql"):
+        logger.info(
+            "MEMORY_TYPE=%s — using InMemorySaver at import time; "
+            "persistent checkpointer will be set up during server startup.",
+            memory_type,
+        )
+        return InMemorySaver()
+
+    logger.error("Unsupported MEMORY_TYPE: %s", memory_type)
+    raise ValueError(f"Unsupported MEMORY_TYPE: {memory_type}")
 
 
 def get_configured_model():

@@ -29,7 +29,7 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableConfig
 
 from logger_utils import setup_logger
-from model_factory import create_embedding_model, get_configured_model
+from model_factory import create_embedding_model, create_memory_saver, get_configured_model
 from research_agent import (
     RESEARCH_WORKFLOW_INSTRUCTIONS,
     RESEARCHER_INSTRUCTIONS,
@@ -46,9 +46,6 @@ from research_agent.tools import (
     tavily_search,
     fetch_webpage_content,
 )
-from research_agent.utils.knowledge_filesystem import (
-    normalize_path_for_filesystem_tools,
-)
 from research_agent.utils.cli import (
     build_instruction,
 )
@@ -62,6 +59,9 @@ from research_agent.utils.knowledge_filesystem import (
     _thread_wiki_queried_messages,
     _thread_wiki_query_complete,
     get_target_cited_response_path,
+)
+from research_agent.utils.knowledge_filesystem import (
+    normalize_path_for_filesystem_tools,
 )
 from research_agent.utils.retrieval import load_or_build_index
 from research_agent.utils.skill_registry import get_skill_registry
@@ -1217,6 +1217,9 @@ RECURSION_LIMIT = int(os.environ.get("GRAPH_RECURSION_LIMIT", "200"))
 # Web discovery can still be delegated to `research-agent` via task().
 # The `skills` parameter auto-creates SkillsMiddleware backed by the agent's
 # internal FilesystemBackend — all skills live in .deepagents/skills/.
+# The checkpointer provides persistent state per thread_id — configurable via
+# MEMORY_TYPE env var (memory=silent|sqlite|postgres|cosmosdb).
+checkpointer = create_memory_saver()
 agent = create_deep_agent(
     model=model,
     tools=[
@@ -1231,6 +1234,7 @@ agent = create_deep_agent(
     subagents=[research_sub_agent],
     middleware=[ResearchStateMiddleware()],
     skills=[".deepagents/skills/", "./doc/.deepagents/skills/", "./docs/.deepagents/skills/"],
+    checkpointer=checkpointer,
 ).with_config(
     RunnableConfig(recursion_limit=RECURSION_LIMIT)
 )

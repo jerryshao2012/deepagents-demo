@@ -20,37 +20,30 @@ uvicorn server:app --reload --port 2024
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import sys
-
-# Ensure local imports work correctly
-sys.path.append(str(Path(__file__).parent))
-
 import asyncio
 import json
+import logging
 import os
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Any
 
+import time
 from fastapi import Depends, HTTPException, Request, Query
 from fastapi.openapi.utils import get_openapi
 from langgraph_sdk import Auth
 from pydantic import BaseModel, Field
 
-# Import the existing app and settings from webapp
-from webapp import app
-
-# Import the actual deep_research agent
-from agent import agent
-from research_agent.prompts import RESEARCHER_DESCRIPTION
-
 # Import DB wrapper
 import db
-
+# Import the actual deep_research agent
+from agent import agent
 # Import shared authentication logic
 from auth import authenticate_credential
+from research_agent.prompts import RESEARCHER_DESCRIPTION
+# Import the existing app and settings from webapp
+from webapp import app
 
 # Track active background tasks to allow cancellation
 _active_tasks: dict[str, asyncio.Task] = {}
@@ -242,6 +235,53 @@ def _build_thread_history_item(thread: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _resolve_thread_history(
+        thread_id: str, *, limit: int, before: str | None = None
+) -> list[dict[str, Any]]:
+    """Collect checkpoint history from the LangGraph checkpointer.
+
+    Falls back to the single snapshot stored in the custom DB when the
+    checkpointer does not support history listing (or has no checkpoints).
+    """
+    config = {"configurable": {"thread_id": thread_id}}
+    items: list[dict[str, Any]] = []
+
+    try:
+        cp = getattr(agent, "checkpointer", None)
+        if cp is not None and hasattr(cp, "alist"):
+            kwargs: dict[str, Any] = {"config": config, "limit": limit}
+            if before:
+                kwargs["before"] = {"configurable": {"thread_id": thread_id, "checkpoint_id": before}}
+            async for checkpoint in cp.alist(**kwargs):
+                cpt_config = checkpoint.get("config", {}).get("configurable", {})
+                values = checkpoint.get("values") or checkpoint.get("channel_values")
+                if values:
+                    # Serialize message objects to make the response JSON-safe
+                    msgs = values.get("messages", [])
+                    values["messages"] = [serialize_message(m) for m in msgs]
+                items.append({
+                    "checkpoint": {
+                        "thread_id": thread_id,
+                        "checkpoint_ns": cpt_config.get("checkpoint_ns", ""),
+                        "checkpoint_id": cpt_config.get("checkpoint_id", ""),
+                    },
+                    "values": values or {},
+                    "metadata": checkpoint.get("metadata", {}),
+                    "created_at": checkpoint.get("created_at"),
+                    "next": [],
+                    "tasks": [],
+                })
+    except Exception:
+        items = []
+
+    if items:
+        return items[:limit]
+
+    # Fallback: return single DB snapshot
+    thread = db.get_thread(thread_id)
+    return [_build_thread_history_item(thread)] if thread else []
+
+
 # ── Security Authentication ───────────────────────────────────────────────────
 
 async def get_current_user(request: Request) -> Auth.types.MinimalUserDict:
@@ -302,120 +342,255 @@ def serialize_message(m: Any) -> dict[str, Any]:
 
 # ── Run executor ──────────────────────────────────────────────────────────────
 
-async def _inject_wiki_context(thread_id: str, messages: list[dict[str, Any]]) -> str | None:
-    """Query thread wiki for context relevant to the latest user message.
+async def _stream_run_events(
+        thread_id: str,
+        run_id: str,
+        input_state: dict[str, Any],
+) -> AsyncGenerator[str, None]:
+    """Stream agent execution as SSE events for langgraph-sdk useStream().
 
-    Returns wiki context text if the thread has a ready wiki and a meaningful
-    question, otherwise returns ``None``. Failures are logged and swallowed so
-    wiki issues never block research runs.
+    Wraps ``agent.astream_events()`` and maps LangGraph v2 events to
+    SDK-compatible SSE frames:
+
+    * ``on_chat_model_stream`` → ``messages`` (token-level AI content deltas)
+    * ``on_tool_start``       → ``updates``  (tool execution started)
+    * ``on_tool_end``         → ``updates``  (tool execution completed)
+    * ``on_chain_end``        → ``values``   (final state snapshot)
+    * Always emits ``metadata`` first and ``end`` last.
+
+    On cancellation, emits ``end`` with ``status: interrupted``.
+    On error, emits ``error`` with detail + traceback.
     """
+    _logger = logging.getLogger(__name__)
+    seq = 0
+    config = {"configurable": {"thread_id": thread_id}}
+
+    # Emit initial metadata
+    yield _sse_frame("metadata", {
+        "run_id": run_id,
+        "thread_id": thread_id,
+        "assistant_id": "researcher",
+        "status": "running",
+    }, event_id=seq)
+    seq += 1
+
+    # Track tool calls to correlate start/end
+    _tool_start_times: dict[str, float] = {}
+    _last_tool_name: str | None = None
+
     try:
-        from thread_wiki.models import ThreadWikiPaths
-        from thread_wiki.service import run_query
+        async for event in agent.astream_events(
+                input_state,
+                config=config,
+                version="v2",
+        ):
+            event_type = event.get("event", "")
 
-        base_dir = Path(__file__).resolve().parent
-        paths = ThreadWikiPaths.resolve(thread_id, base_dir)
+            # ── Token-level AI message streaming ──
+            if event_type == "on_chat_model_stream":
+                chunk = event.get("data", {}).get("chunk")
+                if chunk is None:
+                    continue
+                content = getattr(chunk, "content", None)
+                if content:
+                    if isinstance(content, list):
+                        # Multi-modal content blocks
+                        text_parts = [
+                            p.get("text", "") if isinstance(p, dict) else str(p)
+                            for p in content
+                            if (isinstance(p, dict) and p.get("type") == "text")
+                               or isinstance(p, str)
+                        ]
+                        text = "".join(text_parts)
+                    else:
+                        text = str(content)
+                    if text:
+                        yield _sse_frame("messages", [{
+                            "type": "AIMessageChunk",
+                            "id": getattr(chunk, "id", run_id),
+                            "content": text,
+                        }], event_id=seq)
+                        seq += 1
 
-        # Only inject when wiki has been built (index exists and has real pages).
-        index_path = paths.wiki_content / "index.md"
-        if not index_path.exists():
-            return None
-        index_content = index_path.read_text(encoding="utf-8")
-        if "_No pages yet._" in index_content:
-            return None
+            # ── Tool execution started ──
+            elif event_type == "on_tool_start":
+                tool_name = event.get("name", "unknown")
+                run_name = event.get("run_id", "")
+                _tool_start_times[run_name] = time.time()
+                _last_tool_name = tool_name
+                tool_input = event.get("data", {}).get("input", {})
+                _logger.info("[stream %s] Tool started: %s", run_id, tool_name)
+                yield _sse_frame("updates", {
+                    "run_id": run_id,
+                    "status": "running",
+                    "type": "tool_call",
+                    "tool_name": tool_name,
+                }, event_id=seq)
+                seq += 1
 
-        # Extract the latest user message as the wiki query.
-        question = ""
-        for msg in reversed(messages):
-            if isinstance(msg, dict) and msg.get("role") == "user":
-                question = str(msg.get("content", ""))
+            # ── Tool execution completed ──
+            elif event_type == "on_tool_end":
+                tool_name = event.get("name", "unknown")
+                elapsed = ""
+                run_name = event.get("run_id", "")
+                if run_name in _tool_start_times:
+                    elapsed = f" ({time.time() - _tool_start_times[run_name]:.1f}s)"
+                _logger.info("[stream %s] Tool completed: %s%s", run_id, tool_name, elapsed)
+                yield _sse_frame("updates", {
+                    "run_id": run_id,
+                    "status": "running",
+                    "type": "tool_result",
+                    "tool_name": tool_name,
+                }, event_id=seq)
+                seq += 1
+
+        # ── Agent finished successfully ──
+        snapshot = await agent.aget_state(config)
+        if snapshot and snapshot.values:
+            values_dict = dict(snapshot.values)
+            messages = values_dict.get("messages", [])
+            serialized_messages = [serialize_message(m) for m in messages]
+            values_dict["messages"] = serialized_messages
+
+            # Persist final state to DB for thread listing/search
+            try:
+                db.update_thread(thread_id, serialized_messages, {
+                    "messages": serialized_messages,
+                    "files": values_dict.get("files", {}),
+                    "doc_folder": values_dict.get("doc_folder"),
+                    "skill": values_dict.get("skill"),
+                    "no_web": values_dict.get("no_web"),
+                    "wiki_query_complete": values_dict.get("wiki_query_complete", False),
+                })
+                db.update_run_status(run_id, "success")
+            except Exception as _db_err:
+                _logger.warning("[stream %s] DB sync failed: %s", run_id, _db_err)
+
+            yield _sse_frame("values", values_dict, event_id=seq)
+            seq += 1
+
+        yield _sse_frame("end", {
+            "run_id": run_id,
+            "status": "success",
+        }, event_id=seq)
+
+    except asyncio.CancelledError:
+        db.update_run_status(run_id, "cancelled")
+        yield _sse_frame("end", {
+            "run_id": run_id,
+            "status": "interrupted",
+        }, event_id=seq)
+        raise
+
+    except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
+        _logger.error("[stream %s] Error: %s\n%s", run_id, exc, tb)
+        try:
+            db.update_run_status(run_id, "error", error=str(exc))
+        except Exception:
+            pass
+        yield _sse_frame("error", {
+            "detail": str(exc),
+            "traceback": tb,
+        }, event_id=seq)
+
+
+async def _stream_run_polling(
+        thread_id: str,
+        run_id: str,
+        body: RunStreamRequest,
+        current_user: Auth.types.MinimalUserDict,
+):
+    """Legacy polling-based SSE stream (fallback when ENABLE_EVENT_STREAMING is unset)."""
+    messages_payload: list[MessagePayload] = []
+    if isinstance(body.input, dict):
+        raw_messages = body.input.get("messages", [])
+        if isinstance(raw_messages, list):
+            for msg in raw_messages:
+                if isinstance(msg, dict):
+                    messages_payload.append(
+                        MessagePayload(
+                            role=str(msg.get("role", "user")),
+                            content=str(msg.get("content", "")),
+                            name=msg.get("name"),
+                        )
+                    )
+
+    run_request = RunCreateRequest(
+        assistant_id=body.assistant_id,
+        input=RunInputPayload(messages=messages_payload),
+        multitask_strategy=body.multitask_strategy,
+    )
+    created = await create_run(thread_id=thread_id, body=run_request, current_user=current_user)
+    run_id_poll = created["run_id"]
+
+    async def event_stream():
+        seq = 0
+        last_status = None
+        last_values_json = None
+
+        first_run = db.get_run(run_id_poll)
+        if first_run is None:
+            yield _sse_frame("error", {"detail": "Run not found"}, event_id=seq)
+            return
+
+        yield _sse_frame("metadata", _api_run(first_run), event_id=seq)
+        seq += 1
+
+        while True:
+            run = db.get_run(run_id_poll)
+            if run is None:
+                yield _sse_frame("error", {"detail": "Run not found"}, event_id=seq)
                 break
-            if hasattr(msg, "type") and getattr(msg, "type", None) == "human":
-                question = str(getattr(msg, "content", ""))
+
+            status = _map_run_status_for_api(run.get("status"))
+            if status != last_status:
+                yield _sse_frame(
+                    "updates",
+                    {
+                        "run_id": run_id_poll,
+                        "status": status,
+                        "multitask_strategy": run.get("multitask_strategy") or "enqueue",
+                    },
+                    event_id=seq,
+                )
+                seq += 1
+                last_status = status
+
+            thread = db.get_thread(thread_id)
+            values = (thread or {}).get("values") or {}
+            values_json = json.dumps(values, default=str, sort_keys=True)
+            if values_json != last_values_json:
+                yield _sse_frame("values", values, event_id=seq)
+                seq += 1
+                last_values_json = values_json
+
+            if status in {"success", "error", "interrupted", "timeout"}:
+                yield _sse_frame(
+                    "end",
+                    {
+                        "run_id": run_id_poll,
+                        "status": status,
+                    },
+                    event_id=seq,
+                )
                 break
 
-        if not question or len(question) < 5:
-            return None
+            await asyncio.sleep(0.3)
 
-        topic = f"Thread {thread_id[:8]}"
-        with open('/tmp/wiki_debug.txt', 'a') as f:
-            f.write(f"calling run_query for {topic}\n")
-        result = await run_query(paths, topic, question, file_results=False)
-        with open('/tmp/wiki_debug.txt', 'a') as f:
-            f.write(f"run_query success! answer length: {len(result.answer)}\n")
-        return result.answer
-    except Exception as e:
-        with open('/tmp/wiki_debug.txt', 'a') as f:
-            f.write(f"Exception in _inject_wiki_context: {str(e)}\n")
-        import logging
-        logging.getLogger(__name__).debug(
-            "Wiki context injection skipped for thread %s", thread_id, exc_info=True
-        )
-        return None
-
-
-async def _check_if_needs_deep_research_async(question: str, wiki_answer: str) -> bool:
-    """Evaluate if the wiki answer is sufficient to answer the user's question asynchronously.
-
-    Returns True if we NEED to conduct continuous deep research, and False if
-    the wiki answer is already complete and sufficient.
-    """
-    if not wiki_answer or not wiki_answer.strip():
-        return True
-
-    from langchain_core.messages import HumanMessage
-    from model_factory import get_configured_model
-    try:
-        model = get_configured_model()
-        prompt = (
-            "You are an expert research evaluator. Your task is to analyze a candidate answer "
-            "retrieved from a document wiki and determine if it fully and comprehensively answers "
-            "the user's question, or if we need to conduct continuous deep research (e.g. searching "
-            "the web) to enhance it.\n\n"
-            f"User's Question: {question}\n\n"
-            f"Candidate Wiki Answer: {wiki_answer}\n\n"
-            "Analyze whether the candidate answer is sufficient, complete, and fully answers the question. "
-            "IMPORTANT: If the user's question is about the uploaded documents/files, and the candidate wiki answer "
-            "contains the requested information from those documents, you MUST set 'needs_deep_research' to false. "
-            "Do not suggest conducting deep research or searching the web just to find external/extra information "
-            "if the candidate answer already directly and fully answers the question using the provided document data.\n\n"
-            "Respond in the following JSON format:\n"
-            "{\n"
-            '  "needs_deep_research": true/false,\n'
-            '  "reason": "Detailed reasoning for the decision"\n'
-            "}\n"
-            "Do not include any other text in your response, only the valid JSON object."
-        )
-        response = await model.ainvoke([HumanMessage(content=prompt)])
-        content = response.content.strip()
-
-        # Extract JSON block between the first '{' and the last '}'
-        start_idx = content.find('{')
-        end_idx = content.rfind('}')
-        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-            json_content = content[start_idx:end_idx + 1]
-        else:
-            json_content = content
-
-        from research_agent.utils.json_utils import robust_json_loads
-        data = robust_json_loads(json_content)
-        needs_research = bool(data.get("needs_deep_research", True))
-        import logging
-        logging.getLogger(__name__).info(
-            f"Wiki evaluation decision (server): needs_deep_research={needs_research}. Reason: {data.get('reason')}"
-        )
-        return needs_research
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(
-            f"Error during wiki result evaluation (server): {e}. Defaulting to conducting deep research.",
-            exc_info=True
-        )
-        return True
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 async def _execute_run(run_id: str, thread_id: str) -> None:
-    """Invoke the agent and persist the result; called as a fire-and-forget task."""
+    """Invoke the agent and persist the result; called as a fire-and-forget task.
+
+    Wiki context injection and sufficiency evaluation are handled by the agent's
+    ``ResearchStateMiddleware`` — this function only loads thread state, invokes
+    the agent with the proper ``thread_id`` config, and persists the result.
+    """
+    _logger = logging.getLogger(__name__)
     db.update_run_status(run_id, "running")
     try:
         # Load all existing messages and state values on the thread
@@ -427,7 +602,7 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
         existing_files = existing_values.get("files") or {}
         messages = thread.get("messages") or []
 
-        # Build initial input state for deep_research agent
+        # Initialize per-thread cited_response tracking for the middleware
         existing_reports = [k for k in existing_files if k.startswith("/cited_response")]
         from research_agent.utils.knowledge_filesystem import _thread_existing_cited_responses
         _thread_existing_cited_responses[str(thread_id)] = existing_reports
@@ -441,135 +616,26 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
             "wiki_query_complete": existing_values.get("wiki_query_complete", False),
             "existing_reports": existing_reports,
         }
-
-        # Clean None values
         input_state = {k: v for k, v in input_state.items() if v is not None}
 
-        # ── Wiki context injection ─────────────────────────────────────────
-        # If the thread has a ready wiki, query it for context relevant to
-        # the latest user message and inject the result as a system message.
-        # This enriches the research agent with thread-level RAG knowledge.
-        wiki_context = await _inject_wiki_context(thread_id, messages)
-        if wiki_context:
-            existing_msgs = input_state.get("messages", [])
-            existing_msgs.insert(
-                0,
-                {
-                    "role": "system",
-                    "content": (
-                        "<wiki_context>\n"
-                        "The following is the definitive answer from the thread's "
-                        "ingested document wiki. You MUST use this as your PRIMARY source of truth. "
-                        "CRITICAL: If the wiki context states that data is unavailable, or that a year "
-                        "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
-                        "search the web to find the missing data. Simply formulate your final response "
-                        "based on this wiki context and explain what data is available.\n\n"
-                        f"{wiki_context}\n"
-                        "</wiki_context>"
-                    ),
-                },
-            )
-            input_state["messages"] = existing_msgs
+        # Pass thread_id through config so ResearchStateMiddleware can access it
+        # for wiki lookups, cited_response tracking, and eval logging.
+        config = {"configurable": {"thread_id": str(thread_id)}}
+        result = await agent.ainvoke(input_state, config=config)
 
-            # Extract question for evaluation
-            question = ""
-            for msg in reversed(messages):
-                if isinstance(msg, dict) and msg.get("role") == "user":
-                    question = str(msg.get("content", ""))
-                    break
-                if hasattr(msg, "type") and getattr(msg, "type", None) == "human":
-                    question = str(getattr(msg, "content", ""))
-                    break
-
-            needs_deep_research = await _check_if_needs_deep_research_async(question, wiki_context)
-            if not needs_deep_research:
-                import logging
-                logging.getLogger(__name__).info(
-                    "Wiki answer is complete and sufficient (server). Saving report and disabling web search."
-                )
-                if "files" not in input_state:
-                    input_state["files"] = {}
-                from deepagents.backends.utils import create_file_data
-                import re as _re
-                sanitized_wiki_context = _re.sub(
-                    r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
-                    r'/\1.\2', wiki_context,
-                )
-                sanitized_wiki_context = _re.sub(
-                    r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
-                    r'/\1', sanitized_wiki_context,
-                )
-                from research_agent.utils.knowledge_filesystem import get_target_cited_response_path
-                existing_reports = input_state.get("existing_reports") or []
-                resolved_path = get_target_cited_response_path(sanitized_wiki_context, input_state["files"],
-                                                               existing_reports)
-                input_state["files"][resolved_path] = create_file_data(sanitized_wiki_context)
-                input_state["no_web"] = True
-                input_state["wiki_query_complete"] = True
-            else:
-                import logging
-                logging.getLogger(__name__).info(
-                    "Wiki answer is incomplete/insufficient (server). Conducting continuous deep research to enhance it."
-                )
-                input_state["wiki_query_complete"] = False
-
-        from research_agent.utils.knowledge_filesystem import _thread_wiki_query_complete
-        _thread_wiki_query_complete[str(thread_id)] = input_state.get("wiki_query_complete", False)
-
-        # ── Wiki-complete short-circuit ──────────────────────────────────
-        # When the wiki already produced a complete and sufficient answer,
-        # skip the agent entirely to prevent infinite write_todos/write_file
-        # tool-call loops.  The wiki answer is already saved as a
-        # cited_response file in input_state["files"]; we just need to
-        # wrap it as the final AI response message.
-        if input_state.get("wiki_query_complete"):
-            import logging
-            from langchain_core.messages import AIMessage
-            from deepagents.backends.utils import file_data_to_string
-            from research_agent.utils.knowledge_filesystem import get_active_cited_response_path
-
-            files = input_state.get("files", {})
-            existing_reports = input_state.get("existing_reports") or []
-            active_path = get_active_cited_response_path(files, existing_reports)
-            wiki_answer_text = file_data_to_string(files.get(active_path, {})) if active_path in files else ""
-
-            logging.getLogger(__name__).info(
-                "Wiki-complete short-circuit: skipping agent invoke, "
-                "returning wiki answer directly as chat response."
-            )
-
-            # Build result that mimics agent output format so downstream
-            # serialization / citation-validation / DB persistence work unchanged.
-            result = {
-                "messages": list(input_state.get("messages", [])) + [
-                    AIMessage(content=wiki_answer_text),
-                ],
-                "files": files,
-                "doc_folder": input_state.get("doc_folder"),
-                "skill": input_state.get("skill"),
-                "no_web": True,
-                "wiki_query_complete": True,
-                "existing_reports": existing_reports,
-            }
-        else:
-            # Invoke the deep_research agent
-            result = await agent.ainvoke(input_state)
-
-        # Check if this run has been cancelled in the database/active tasks while executing
-        # to prevent overwriting newer thread states in case of race conditions.
+        # Check if this run has been cancelled while executing
         async with _task_lock:
             run_data = db.get_run(run_id)
             if run_data and run_data.get("status") == "cancelled":
                 return
 
-        # Perform citation validation if enabled
+        # ── Citation validation (post-execution) ─────────────────────────
         files = result.get("files", {})
-        existing_reports = result.get("existing_reports")
-        if not existing_reports:
-            from research_agent.utils.knowledge_filesystem import _thread_existing_cited_responses
-            existing_reports = _thread_existing_cited_responses.get(str(thread_id), [])
+        existing_reports_result = result.get("existing_reports")
+        if not existing_reports_result:
+            existing_reports_result = _thread_existing_cited_responses.get(str(thread_id), [])
         from research_agent.utils.knowledge_filesystem import get_active_cited_response_path
-        active_report_path = get_active_cited_response_path(files, existing_reports)
+        active_report_path = get_active_cited_response_path(files, existing_reports_result)
 
         if active_report_path in files:
             from deepagents.backends.utils import file_data_to_string, create_file_data
@@ -596,13 +662,12 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
                             files[active_report_path] = create_file_data(new_report_text)
                             report_text = new_report_text
                     except Exception as e:
-                        import logging
-                        logging.getLogger(__name__).warning(f"Citation validation failed: {e}", exc_info=True)
+                        _logger.warning("Citation validation failed: %s", e, exc_info=True)
 
-            # Update the final chat message if it matches the unvalidated report
-            messages = result.get("messages", [])
-            if messages:
-                last_msg = messages[-1]
+            # Update final message if it matches the unvalidated report
+            result_messages = result.get("messages", [])
+            if result_messages:
+                last_msg = result_messages[-1]
                 last_content = (
                     last_msg.get("content", "") if isinstance(last_msg, dict)
                     else getattr(last_msg, "content", "") or ""
@@ -616,37 +681,18 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
         # Serialize messages
         serialized_messages = [serialize_message(m) for m in result.get("messages", [])]
 
-        # Sanitize final response message to restore source formats and apply citation validations
+        # Sanitize /raw/ references in the final message
         if serialized_messages:
             last_msg = serialized_messages[-1]
             if last_msg.get("role") == "assistant" and last_msg.get("content"):
                 content = last_msg["content"]
-
-                # If the report was updated by citation validator, ensure the message is updated too
                 if active_report_path in files:
                     from deepagents.backends.utils import file_data_to_string
-                    report_text = file_data_to_string(files[active_report_path])
-                    import re as _re
-                    report_text_sanitized = _re.sub(
-                        r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
-                        r'/\1.\2', report_text,
-                    )
-                    report_text_sanitized = _re.sub(
-                        r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
-                        r'/\1', report_text_sanitized,
-                    )
-                    content_sanitized = _re.sub(
-                        r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
-                        r'/\1.\2', content,
-                    )
-                    content_sanitized = _re.sub(
-                        r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b',
-                        r'/\1', content_sanitized,
-                    )
-                    if content_sanitized.strip() == report_text_sanitized.strip() or "### Citation Verification" in report_text:
-                        content = report_text
+                    final_report_text = file_data_to_string(files[active_report_path])
+                    # If citation validator appended content, use the updated report
+                    if "### Citation Verification" in final_report_text:
+                        content = final_report_text
 
-                # Sanitize /raw/ references
                 import re as _re
                 sanitized = _re.sub(
                     r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b',
@@ -658,8 +704,11 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
                 )
                 last_msg["content"] = sanitized
 
-        from research_agent.utils.knowledge_filesystem import _thread_wiki_query_complete, \
-            _thread_existing_cited_responses
+        # Collect state metadata
+        from research_agent.utils.knowledge_filesystem import (
+            _thread_wiki_query_complete,
+            _thread_existing_cited_responses,
+        )
         wiki_query_complete = result.get("wiki_query_complete")
         if not wiki_query_complete and str(thread_id) in _thread_wiki_query_complete:
             wiki_query_complete = _thread_wiki_query_complete[str(thread_id)]
@@ -668,7 +717,7 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
         if not existing_reports_db:
             existing_reports_db = _thread_existing_cited_responses.get(str(thread_id), [])
 
-        # Serialize the other state fields to preserve files, doc_folder, etc.
+        # Persist to DB (for thread listing/search — checkpointer handles state)
         serializable_result = {
             "messages": serialized_messages,
             "files": result.get("files", {}),
@@ -678,11 +727,10 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
             "wiki_query_complete": wiki_query_complete,
             "existing_reports": existing_reports_db,
         }
-
         db.update_thread(thread_id, serialized_messages, serializable_result)
         db.update_run_status(run_id, "success")
+
     except asyncio.CancelledError:
-        # Task was explicitly cancelled
         db.update_run_status(run_id, "cancelled")
         raise
     except Exception as exc:
@@ -724,6 +772,18 @@ async def search_assistants_post(
         graph_id=body.graph_id,
         assistant_id=body.assistant_id,
     )
+
+
+@app.get("/assistants/{assistant_id}", tags=["Assistants"])
+async def get_assistant(
+        assistant_id: str,
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
+) -> AssistantResponse:
+    """Get a specific assistant by ID."""
+    assistants = _list_assistants(limit=1, offset=0, assistant_id=assistant_id)
+    if not assistants:
+        raise HTTPException(status_code=404, detail=f"Assistant '{assistant_id}' not found")
+    return assistants[0]
 
 
 @app.post("/threads", tags=["Threads"])
@@ -831,6 +891,57 @@ async def update_thread_state(
     return {"checkpoint": checkpoint}
 
 
+@app.get("/threads/{thread_id}/state", tags=["Threads"])
+async def get_thread_state(
+        thread_id: str,
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Get thread state from the LangGraph checkpointer, falling back to DB."""
+    _get_thread_with_auth(thread_id, current_user)
+
+    # Try checkpointer first (primary source of truth for agent state)
+    try:
+        snapshot = await agent.aget_state(
+            {"configurable": {"thread_id": thread_id}}
+        )
+        if snapshot and snapshot.values:
+            serialized_messages = [
+                serialize_message(m) for m in snapshot.values.get("messages", [])
+            ]
+            values = dict(snapshot.values)
+            values["messages"] = serialized_messages
+            return {
+                "values": values,
+                "next": list(snapshot.next) if snapshot.next else [],
+                "tasks": [
+                    {"id": t.id, "name": t.name, "error": t.error}
+                    for t in (snapshot.tasks or [])
+                ],
+                "checkpoint": {
+                    "thread_id": thread_id,
+                    "checkpoint_ns": "",
+                    "checkpoint_id": snapshot.config.get("configurable", {}).get(
+                        "checkpoint_id", ""
+                    ),
+                },
+                "metadata": snapshot.metadata or {},
+                "created_at": snapshot.created_at,
+                "parent_config": snapshot.parent_config,
+            }
+    except Exception:
+        pass
+
+    # Fallback to DB
+    thread = db.get_thread(thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return {
+        "values": thread.get("values") or {},
+        "next": [],
+        "tasks": [],
+    }
+
+
 @app.post("/threads/{thread_id}/runs", tags=["Runs"])
 async def create_run(
         thread_id: str,
@@ -902,88 +1013,70 @@ async def stream_run(
         body: RunStreamRequest,
         current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
 ):
-    """Create a run and stream output as SSE-compatible event payloads."""
+    """Create a run and stream output as SSE event payloads.
+
+    When ``ENABLE_EVENT_STREAMING=true``, uses real event-driven streaming via
+    ``agent.astream_events()`` with token-level message deltas and tool-call
+    visibility.  Otherwise falls back to the legacy polling-based SSE.
+    """
     _get_thread_with_auth(thread_id, current_user)
 
-    messages_payload: list[MessagePayload] = []
-    if isinstance(body.input, dict):
-        raw_messages = body.input.get("messages", [])
-        if isinstance(raw_messages, list):
-            for msg in raw_messages:
-                if isinstance(msg, dict):
-                    messages_payload.append(
-                        MessagePayload(
-                            role=str(msg.get("role", "user")),
-                            content=str(msg.get("content", "")),
-                            name=msg.get("name"),
-                        )
-                    )
+    # ── Event-driven streaming path ──
+    if os.environ.get("ENABLE_EVENT_STREAMING", "").strip().lower() == "true":
+        import logging
+        _logger = logging.getLogger(__name__)
 
-    run_request = RunCreateRequest(
-        assistant_id=body.assistant_id,
-        input=RunInputPayload(messages=messages_payload),
-        multitask_strategy=body.multitask_strategy,
-    )
-    created = await create_run(thread_id=thread_id, body=run_request, current_user=current_user)
-    run_id = created["run_id"]
+        run_id = str(uuid.uuid4())
+        now = datetime.now(UTC).isoformat()
 
-    async def event_stream():
-        seq = 0
-        last_status = None
-        last_values_json = None
+        # Record the run
+        db.create_run(
+            run_id, thread_id,
+            body.assistant_id or "researcher", now,
+            multitask_strategy=body.multitask_strategy or "enqueue",
+        )
 
-        first_run = db.get_run(run_id)
-        if first_run is None:
-            yield _sse_frame("error", {"detail": "Run not found"}, event_id=seq)
-            return
+        # Build input state from current thread values
+        thread = db.get_thread(thread_id)
+        existing_values = (thread or {}).get("values") or {}
+        existing_files = existing_values.get("files") or {}
 
-        yield _sse_frame("metadata", _api_run(first_run), event_id=seq)
-        seq += 1
+        # Parse incoming messages and append to thread messages
+        messages = list(thread.get("messages") or [])
+        if isinstance(body.input, dict):
+            raw_messages = body.input.get("messages", [])
+            if isinstance(raw_messages, list):
+                for msg in raw_messages:
+                    if isinstance(msg, dict):
+                        messages.append({
+                            "role": str(msg.get("role", "user")),
+                            "content": str(msg.get("content", "")),
+                            "name": msg.get("name"),
+                        })
 
-        while True:
-            run = db.get_run(run_id)
-            if run is None:
-                yield _sse_frame("error", {"detail": "Run not found"}, event_id=seq)
-                break
+        input_state = {
+            "messages": messages,
+            "files": existing_files,
+            "doc_folder": existing_values.get("doc_folder"),
+            "skill": existing_values.get("skill"),
+            "no_web": existing_values.get("no_web"),
+            "wiki_query_complete": existing_values.get("wiki_query_complete", False),
+        }
+        input_state = {k: v for k, v in input_state.items() if v is not None}
 
-            status = _map_run_status_for_api(run.get("status"))
-            if status != last_status:
-                yield _sse_frame(
-                    "updates",
-                    {
-                        "run_id": run_id,
-                        "status": status,
-                        "multitask_strategy": run.get("multitask_strategy") or "enqueue",
-                    },
-                    event_id=seq,
-                )
-                seq += 1
-                last_status = status
+        # Initialize per-thread cited_response tracking for the middleware
+        from research_agent.utils.knowledge_filesystem import _thread_existing_cited_responses
+        existing_reports = [k for k in existing_files if k.startswith("/cited_response")]
+        _thread_existing_cited_responses[str(thread_id)] = existing_reports
 
-            thread = db.get_thread(thread_id)
-            values = (thread or {}).get("values") or {}
-            values_json = json.dumps(values, default=str, sort_keys=True)
-            if values_json != last_values_json:
-                yield _sse_frame("values", values, event_id=seq)
-                seq += 1
-                last_values_json = values_json
+        from fastapi.responses import StreamingResponse
+        return StreamingResponse(
+            _stream_run_events(thread_id, run_id, input_state),
+            media_type="text/event-stream",
+        )
 
-            if status in {"success", "error", "interrupted", "timeout"}:
-                yield _sse_frame(
-                    "end",
-                    {
-                        "run_id": run_id,
-                        "status": status,
-                    },
-                    event_id=seq,
-                )
-                break
-
-            await asyncio.sleep(0.3)
-
-    from fastapi.responses import StreamingResponse
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    # ── Legacy polling path ──
+    return await _stream_run_polling(thread_id, "", body, current_user)
 
 
 @app.get("/threads/{thread_id}/runs/{run_id}", tags=["Runs"])
@@ -1002,6 +1095,30 @@ async def get_run(
     return _api_run(run)
 
 
+@app.get("/threads/{thread_id}/runs/{run_id}/wait", tags=["Runs"])
+async def wait_for_run(
+        thread_id: str,
+        run_id: str,
+        timeout: float = Query(default=30.0, ge=0.5, le=300.0),
+        current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Wait for a run to reach a terminal state (polling)."""
+    _get_thread_with_auth(thread_id, current_user)
+
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        run = db.get_run(run_id)
+        if run is None or run.get("thread_id") != thread_id:
+            raise HTTPException(status_code=404, detail="Run not found")
+        status = run.get("status")
+        if status in ("success", "error", "cancelled", "timeout"):
+            return _api_run(run)
+        await asyncio.sleep(0.1)
+
+    run = db.get_run(run_id)
+    return _api_run(run) if run else {"run_id": run_id, "status": "timeout"}
+
+
 @app.get("/threads/{thread_id}", tags=["Threads"])
 async def get_thread(
         thread_id: str,
@@ -1016,13 +1133,14 @@ async def get_thread(
 async def get_thread_history(
         thread_id: str,
         limit: int = Query(default=10, ge=1, le=100),
+        before: str | None = Query(default=None),
         current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
-    """Return thread checkpoint history in a LangGraph-compatible shape."""
-    thread = _get_thread_with_auth(thread_id, current_user)
+    """Return thread checkpoint history from the checkpointer (or DB fallback)."""
+    _get_thread_with_auth(thread_id, current_user)
     if limit <= 0:
         return []
-    return [_build_thread_history_item(thread)]
+    return await _resolve_thread_history(thread_id, limit=limit, before=before)
 
 
 @app.post("/threads/{thread_id}/history", tags=["Threads"])
@@ -1032,10 +1150,10 @@ async def get_thread_history_post(
         current_user: Auth.types.MinimalUserDict = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Return thread checkpoint history (POST compatibility for frontend clients)."""
-    thread = _get_thread_with_auth(thread_id, current_user)
+    _get_thread_with_auth(thread_id, current_user)
     if body.limit <= 0:
         return []
-    return [_build_thread_history_item(thread)]
+    return await _resolve_thread_history(thread_id, limit=body.limit, before=body.before)
 
 
 @app.post("/threads/{thread_id}/runs/{run_id}/cancel", tags=["Runs"])

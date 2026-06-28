@@ -44,6 +44,8 @@ dependencies = [
     "psycopg[binary]>=3.2.0",
     "langchain-community>=0.2.0",
     "faiss-cpu>=1.7.4",
+    "langgraph-checkpoint-sqlite>=3.1.0",
+    "langgraph-checkpoint-postgres>=3.1.0",
 ]
 
 [tool.uv]
