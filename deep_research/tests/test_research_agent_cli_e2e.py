@@ -16,12 +16,14 @@ class FakeAgent:
         self.invoke_calls = 0
         self.stream_calls = 0
 
-    def invoke(self, messages, verify_ssl=True):  # noqa: ANN001
+    def invoke(self, messages, config=None):  # noqa: ANN001
         self.invoke_calls += 1
+        self.last_config = config
         return self.invoke_result
 
-    def stream(self, messages, stream_mode="values", verify_ssl=True):  # noqa: ANN001
+    def stream(self, messages, config=None, stream_mode="values"):  # noqa: ANN001
         self.stream_calls += 1
+        self.last_config = config
         yield from self.stream_states
 
 

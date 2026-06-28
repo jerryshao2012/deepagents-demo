@@ -7,6 +7,7 @@ from pathlib import Path
 import itertools
 import sys
 import time
+import uuid
 from deepagents.backends.utils import file_data_to_string
 from dotenv import load_dotenv
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
@@ -14,7 +15,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMe
 from agent import agent, model
 from research_agent.utils.cli import build_parser, list_skills
 from research_agent.utils.knowledge_filesystem import normalize_path_for_filesystem_tools
-from utils import str2bool, get_ssl_verify_config, show_prompt, format_messages
+from utils import str2bool, show_prompt, format_messages
 
 # Load environment variables
 load_dotenv()
@@ -315,6 +316,11 @@ def main():
     if args.title:
         title = args.title
 
+    # Generate or use provided thread_id for state tracking (enables wiki context, etc.)
+    thread_id = args.thread_id or str(uuid.uuid4())
+    config = {"configurable": {"thread_id": thread_id}}
+    print(f"Thread ID: {thread_id}")
+
     print(f"Starting research on: {args.subject}")
     show_prompt(instruction, title="Research Instruction")
     print("This may take a few minutes as the agent searches and analyzes...")
@@ -324,10 +330,6 @@ def main():
     start_time = time.time()
     last_time = start_time
     stream_fallback_used = False
-
-    # Create SSL verification setting - CLI flag takes precedence over env var
-    verify_ssl = get_ssl_verify_config()
-    print(f"SSL Verification is set to: {verify_ssl}")
 
     # Determine output folder for output
     output_folder = configure_output_folder(args.doc_folder)
@@ -355,8 +357,8 @@ def main():
             # We attempt to stream updates from LangGraph to provide visibility
             for state in agent.stream(
                     messages,
+                    config=config,
                     stream_mode="values",
-                    verify_ssl=verify_ssl
             ):
                 current_time = time.time()
                 step_time = current_time - last_time
@@ -437,7 +439,7 @@ def main():
             start_invoke = time.time()
             result = agent.invoke(
                 messages,
-                verify_ssl=verify_ssl
+                config=config,
             )
             spinner.stop()
 
@@ -447,7 +449,7 @@ def main():
         # Run the agent directly without showing progress
         result = agent.invoke(
             messages,
-            verify_ssl=verify_ssl
+            config=config,
         )
         total_time = time.time() - start_time
         print(f"\n✨ Research completed in {total_time:.1f}s!\n")

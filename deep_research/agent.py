@@ -821,8 +821,12 @@ class ResearchStateMiddleware(AgentMiddleware):
             thread_id = None
             if isinstance(runtime, dict):
                 thread_id = runtime.get("configurable", {}).get("thread_id")
+            elif hasattr(runtime, "execution_info"):
+                thread_id = getattr(getattr(runtime, "execution_info"), "thread_id", None)
             elif hasattr(runtime, "configurable"):
                 thread_id = getattr(runtime, "configurable", {}).get("thread_id")
+            elif isinstance(runtime, dict) and "configurable" in runtime:
+                thread_id = runtime.get("configurable", {}).get("thread_id")
             if thread_id:
                 wiki_complete = _thread_wiki_query_complete.get(str(thread_id), False)
 

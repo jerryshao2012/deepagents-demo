@@ -76,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional skill. Use '--skill list' to see all options.",
     )
     parser.add_argument("--title", type=str, help="Optional research title for output file")
+    parser.add_argument(
+        "--thread-id",
+        type=str,
+        help="Optional thread ID for state tracking (auto-generated if not provided)",
+    )
     return parser
 
 
