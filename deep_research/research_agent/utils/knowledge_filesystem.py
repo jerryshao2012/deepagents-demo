@@ -659,7 +659,7 @@ def _check_thread_wiki_ready(folder_path: str) -> tuple[bool, str | None]:
     return False, None
 
 
-def read_doc_folder_impl(
+def read_docs_folder_impl(
         folder_path: str,
         specific_files: list[str] | None = None,
         state: Annotated[dict, InjectedState] = None,

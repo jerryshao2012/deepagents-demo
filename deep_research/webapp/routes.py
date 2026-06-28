@@ -685,10 +685,10 @@ def register_skills_routes(app) -> None:
                         except Exception as err:
                             logger.warning(f"Error parsing skill in {skill_dir}: {err}")
 
-                # 3. Uploaded custom skills from ./doc/.deepagents/skills/
-                doc_skills_dir = Path(__file__).resolve().parent.parent / "doc" / ".deepagents" / "skills"
-                if doc_skills_dir.is_dir():
-                    for skill_dir in doc_skills_dir.iterdir():
+                # 3. Uploaded custom skills from ./doc/.deepagents/skills/ and ./docs/.deepagents/skills/
+                docs_skills_dir = Path(__file__).resolve().parent.parent / "docs" / ".deepagents" / "skills"
+                if docs_skills_dir.is_dir():
+                    for skill_dir in docs_skills_dir.iterdir():
                         if not skill_dir.is_dir():
                             continue
                         skill_file = skill_dir / "SKILL.md"
@@ -742,7 +742,7 @@ def register_skills_routes(app) -> None:
                 detail="Invalid or missing API key. Provide X-API-Key header or Authorization header.",
             )
         try:
-            doc_skills_dir = Path(__file__).resolve().parent.parent / "doc" / ".deepagents" / "skills"
+            doc_skills_dir = Path(__file__).resolve().parent.parent / "docs" / ".deepagents" / "skills"
             doc_skills_dir.mkdir(parents=True, exist_ok=True)
 
             installed_name = "custom_skill"
@@ -832,14 +832,14 @@ def register_skills_routes(app) -> None:
                 detail="Invalid or missing API key.",
             )
         try:
-            doc_skills_dir = Path(__file__).resolve().parent.parent / "doc" / ".deepagents" / "skills"
+            doc_skills_dir = Path(__file__).resolve().parent.parent / "docs" / ".deepagents" / "skills"
             skill_dir = doc_skills_dir / skill_id
             if not skill_dir.exists() or not skill_dir.is_dir():
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Uploaded skill '{skill_id}' not found in ./doc/.deepagents/skills/ or cannot be removed.",
+                    detail=f"Uploaded skill '{skill_id}' not found in ./docs/.deepagents/skills/ or cannot be removed.",
                 )
-            await asyncio.to_thread(shutil.rmtree, skill_dir)
+            await asyncio.to_thread(shutil.rmtree, str(skill_dir), ignore_errors=True, onerror=None)
 
             registry = get_skill_registry()
             if registry:

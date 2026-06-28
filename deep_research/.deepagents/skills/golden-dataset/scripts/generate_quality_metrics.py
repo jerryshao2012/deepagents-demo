@@ -7,7 +7,15 @@ import argparse
 import csv
 from pathlib import Path
 
-from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import (
+import sys
+
+# Add project root to path for retry_utils and utils imports
+_sys_path_root = Path(__file__).resolve().parent.parent.parent.parent.parent
+if str(_sys_path_root) not in sys.path:
+    sys.path.insert(0, str(_sys_path_root))
+
+# Local import from same scripts directory
+from golden_dataset_metrics import (
     build_missing_context_report,
     score_dataset_file,
 )

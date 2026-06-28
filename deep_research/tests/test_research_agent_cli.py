@@ -15,6 +15,17 @@ def test_parser_accepts_doc_folder_and_skill() -> None:
     assert args.skill == "study-slides"
 
 
+def test_list_skills(capsys, monkeypatch) -> None:
+    from research_agent.utils.cli import list_skills
+    class DummyRegistry:
+        SKILL_IDS = {"test-skill"}
+    monkeypatch.setattr("research_agent.utils.cli.get_skill_registry", lambda: DummyRegistry())
+    list_skills()
+    captured = capsys.readouterr()
+    assert "Available research skills:" in captured.out
+    assert "test-skill" in captured.out
+
+
 def test_skill_definition_is_loaded_from_skill() -> None:
     definition = get_skill_registry().get_skill_definition("study-slides")
 

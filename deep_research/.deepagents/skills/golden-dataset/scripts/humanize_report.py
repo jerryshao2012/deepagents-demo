@@ -9,15 +9,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import sys
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from research_agent.skills.golden_dataset.scripts.skill_model_factory import (
+# Add project root to path for retry_utils and utils imports
+_sys_path_root = Path(__file__).resolve().parent.parent.parent.parent.parent
+if str(_sys_path_root) not in sys.path:
+    sys.path.insert(0, str(_sys_path_root))
+
+# Local import from same scripts directory
+from skill_model_factory import (
     get_configured_model,
 )
 
 # Resolve the humanizer SKILL.md relative to this file's location.
+# scripts/ -> golden-dataset/ -> skills/ (which is .deepagents/skills/)
 _HUMANIZER_SKILL_PATH = (
-        Path(__file__).resolve().parent.parent.parent  # -> skills/
+        Path(__file__).resolve().parent.parent  # -> skills/ (.deepagents/skills/)
         / "humanizer"
         / "SKILL.md"
 )

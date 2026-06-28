@@ -37,17 +37,17 @@ from research_agent import (
 )
 from research_agent.prompts import RESEARCHER_DESCRIPTION
 from research_agent.tools import (
-    normalize_path_for_filesystem_tools,
     think_tool,
-    render_skill_output,
-    finalize_golden_dataset_output,
     ls,
     glob,
     read_file,
-    read_doc_folder,
+    read_docs_folder,
     write_file,
     tavily_search,
     fetch_webpage_content,
+)
+from research_agent.utils.knowledge_filesystem import (
+    normalize_path_for_filesystem_tools,
 )
 from research_agent.utils.cli import (
     build_instruction,
@@ -1188,8 +1188,6 @@ research_sub_agent: SubAgent = {
     "description": RESEARCHER_DESCRIPTION,
     "system_prompt": RESEARCHER_INSTRUCTIONS.format(
         date=current_date,
-        skill_catalog=get_skill_registry().format_skill_catalog(),
-        skill_quality_guidelines=get_skill_registry().format_skill_quality_guidelines(),
     ),
     "tools": [
         tavily_search,
@@ -1211,10 +1209,10 @@ except Exception as e:
 RECURSION_LIMIT = int(os.environ.get("GRAPH_RECURSION_LIMIT", "200"))
 
 # Create the agent
-# Orchestrator owns document/filesystem tools and structured-output finalization.
+# Orchestrator owns document/filesystem tools.
 # Web discovery can still be delegated to `research-agent` via task().
 # The `skills` parameter auto-creates SkillsMiddleware backed by the agent's
-# internal FilesystemBackend — migrated skills live in .deepagents/skills/.
+# internal FilesystemBackend — all skills live in .deepagents/skills/.
 agent = create_deep_agent(
     model=model,
     tools=[
@@ -1223,14 +1221,12 @@ agent = create_deep_agent(
         write_file,
         ls,
         glob,
-        read_doc_folder,
-        render_skill_output,
-        finalize_golden_dataset_output,
+        read_docs_folder,
     ],
     system_prompt=INSTRUCTIONS,
     subagents=[research_sub_agent],
     middleware=[ResearchStateMiddleware()],
-    skills=[".deepagents/skills/", "./doc/.deepagents/skills/"],
+    skills=[".deepagents/skills/", "./doc/.deepagents/skills/", "./docs/.deepagents/skills/"],
 ).with_config(
     RunnableConfig(recursion_limit=RECURSION_LIMIT)
 )

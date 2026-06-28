@@ -105,11 +105,11 @@ class SkillRegistry:
         deepagents_skills_dir = (
                 Path(__file__).resolve().parent.parent.parent / ".deepagents" / "skills"
         )
-        doc_skills_dir = (
-                Path(__file__).resolve().parent.parent.parent / "doc" / ".deepagents" / "skills"
+        docs_skills_dir = (
+                Path(__file__).resolve().parent.parent.parent / "docs" / ".deepagents" / "skills"
         )
 
-        for s_dir in (deepagents_skills_dir, doc_skills_dir):
+        for s_dir in (deepagents_skills_dir, docs_skills_dir):
             if s_dir.is_dir():
                 for skill_dir in s_dir.iterdir():
                     if not skill_dir.is_dir():

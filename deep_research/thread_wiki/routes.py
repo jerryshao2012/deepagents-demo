@@ -19,6 +19,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from langgraph_sdk.auth.types import MinimalUserDict
 from pydantic import BaseModel, Field
 
 import server as _server
@@ -112,7 +113,7 @@ class WikiLintResponse(BaseModel):
 
 # ── Auth dependency (self-contained to avoid circular import with server.py) ──
 
-async def _wiki_get_current_user(request: Request) -> dict:
+async def _wiki_get_current_user(request: Request) -> MinimalUserDict:
     """Authenticate wiki routes using the same auth pattern as server.py.
 
     Delegates to server.get_current_user at request time (not import time)
@@ -437,12 +438,12 @@ async def delete_thread_wiki(
 
     # 3. Clean up uploaded documents directory if it exists.
     if paths.docs_dir.exists() and paths.docs_dir.is_dir():
-        await asyncio.to_thread(shutil.rmtree, paths.docs_dir, ignore_errors=True, onerror=None)
+        await asyncio.to_thread(shutil.rmtree, str(paths.docs_dir), ignore_errors=True, onerror=None)
         logger.info("Deleted documents folder for thread %s", thread_id)
 
     # 4. Clean up wiki directory if it exists.
     if paths.wiki_dir.exists() and paths.wiki_dir.is_dir():
-        await asyncio.to_thread(shutil.rmtree, paths.wiki_dir, ignore_errors=True, onerror=None)
+        await asyncio.to_thread(shutil.rmtree, str(paths.wiki_dir), ignore_errors=True, onerror=None)
         logger.info("Deleted wiki folder for thread %s", thread_id)
 
     clear_thread_cache(thread_id)

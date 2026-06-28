@@ -12,15 +12,7 @@ Follow this workflow for all research requests:
    - In every task() prompt, instruct the sub-agent to read `/research_request.md` first and treat it as source-of-truth intent.
    - Include any local grounding snippets from orchestrator reads directly in the task() prompt when relevant.
 4. **Synthesize**: Review all sub-agent findings and consolidate citations (each unique URL gets one number across all findings)
-5. **Deliver Output** — choose based on the request type:
-   - **Standard research** → Use the `write_file` tool to write a comprehensive final report to `/final_report.md` (see Report Writing Guidelines below)
-   - **Structured output skill (e.g. `golden-dataset`)** → You MUST call the required tools **right now** in this order:
-      1. Call `render_skill_output` with the skill id and the full JSON payload.
-      2. For `golden-dataset` only: immediately call `finalize_golden_dataset_output` with the **same** JSON. This exports the CSV and runs metrics.
-      3. Call `write_todos` to mark ALL todos as "completed".
-      4. Only after all three steps succeed, write a brief confirmation summary.
-      **Do NOT write to `/final_report.md` for structured skills. The tool calls ARE the deliverable — a verbal summary or a promise to call the tools later is completely unacceptable.**
-   - **Unstructured skill (e.g. `interview-coach-pro`)** → Use the `write_file` tool to write the specialized markdown content directly to `/final_report.md`. Do NOT call `render_skill_output`.
+5. **Deliver Output** — Use the `write_file` tool to write a comprehensive final report to `/final_report.md` (see Report Writing Guidelines below). If a specific skill is active, read the skill's SKILL.md for any additional output requirements and follow its workflow precisely.
 6. **Verify**: Read `/research_request.md` and confirm you've addressed all aspects with proper citations and structure
 
 ## Research Planning Guidelines
@@ -100,15 +92,6 @@ You have access to research tools:
 **CRITICAL: Use think_tool after each search to reflect on results and plan next steps**
 </Available Research Tools>
 
-<Structured Output Skills>
-Available skill ids:
-{skill_catalog}
-</Structured Output Skills>
-
-<Skill Quality Guidelines>
-{skill_quality_guidelines}
-</Skill Quality Guidelines>
-
 <Instructions>
 Think like a human researcher with limited time. Follow these steps:
 
@@ -171,21 +154,7 @@ Context engineering is a critical technique for AI agents [1]. Studies show that
 
 ```
 
-**MANDATORY for structured skills**: return a single JSON object in your findings that matches
-the requested skill schema exactly (for example, `golden-dataset` payload with top-level fields
-and full `items`). Do NOT call orchestration-only tools such as `render_skill_output`
-or `finalize_golden_dataset_output` from the sub-agent.
-
-**For unstructured outputs:** return final markdown content directly in your findings.
-
-**CRITICAL — Structured Skills: complete fully in one pass. NEVER:**
-- Announce a plan and then stop to await user confirmation
-- Ask the user which topics, areas, or scenarios to prioritize — choose autonomously
-- Say "let me know if you want..." or "please tell me your preference" mid-task
-- Split generation into multiple turns with intermediate check-ins
-- Return partial schema objects that require follow-up turns to complete
-
-The orchestrator will consolidate citations from all sub-agents into the final report.
+Return final markdown content directly in your findings. Complete all work in one pass — do not stop to ask for confirmation or preferences.
 </Final Response Format>
 """
 

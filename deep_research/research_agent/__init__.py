@@ -11,24 +11,20 @@ from research_agent.prompts import (
 )
 from research_agent.tools import (
     think_tool,
-    render_skill_output,
-    finalize_golden_dataset_output,
     ls,
     glob,
     read_file,
-    read_doc_folder,
+    read_docs_folder,
     tavily_search,
     fetch_webpage_content,
 )
 
 __all__ = [
     "think_tool",
-    "render_skill_output",
-    "finalize_golden_dataset_output",
     "ls",
     "glob",
     "read_file",
-    "read_doc_folder",
+    "read_docs_folder",
     "tavily_search",
     "fetch_webpage_content",
     "RESEARCHER_INSTRUCTIONS",

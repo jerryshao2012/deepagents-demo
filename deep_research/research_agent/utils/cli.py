@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import os
+from pathlib import Path
 
-from research_agent.utils.skill_registry import get_skill_registry
+import yaml
+
+from research_agent.utils.skill_registry import SkillRegistry, get_skill_registry
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -64,43 +67,36 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable web search (Tavily) during research",
     )
-    # Collect both legacy (SkillRegistry) and migrated (SkillsMiddleware) skill IDs
     _all_skill_ids = get_skill_registry().list_skill_ids() + list(
         get_skill_registry().SKILL_IDS
     )
     parser.add_argument(
         "--skill",
         choices=["list", *_all_skill_ids],
-        help="Optional structured output skill. Use '--skill list' to see all options.",
+        help="Optional skill. Use '--skill list' to see all options.",
     )
     parser.add_argument("--title", type=str, help="Optional research title for output file")
-    parser.add_argument(
-        "--eval-golden-dataset",
-        action="store_true",
-        help="Enable golden-dataset regression tracking and JSONL report output.",
-    )
-    parser.add_argument(
-        "--eval-mode",
-        choices=["baseline", "candidate"],
-        default="candidate",
-        help="Evaluation mode for --eval-golden-dataset (default: candidate).",
-    )
-    parser.add_argument(
-        "--eval-history-file",
-        type=str,
-        help=(
-            "Optional JSONL output file path for evaluation history. "
-            "Default: ./output/eval_history/golden_dataset_runs.jsonl"
-        ),
-    )
     return parser
 
 
 def list_skills() -> None:
     """Print available research skills to console."""
-    catalog = get_skill_registry().format_skill_catalog()
+    registry = get_skill_registry()
     print("\nAvailable research skills:")
-    print(catalog)
+    base_dir = Path(__file__).resolve().parent.parent.parent
+    for sid in sorted(registry.SKILL_IDS):
+        skill_file = base_dir / ".deepagents" / "skills" / sid / "SKILL.md"
+        if not skill_file.is_file():
+            skill_file = base_dir / "docs" / ".deepagents" / "skills" / sid / "SKILL.md"
+        desc = ""
+        if skill_file.is_file():
+            match = SkillRegistry._FRONTMATTER_RE.match(
+                skill_file.read_text(encoding="utf-8")
+            )
+            if match:
+                fm = yaml.safe_load(match.group(1))
+                desc = fm.get("description", "")[:120] if isinstance(fm, dict) else ""
+        print(f"  {sid}" + (f" — {desc}" if desc else ""))
     print("\nUse --skill <id> to select one.")
 
 
@@ -120,7 +116,7 @@ def build_instruction(
 
     if doc_folder:
         instruction += (
-            "\n\nPlease use the 'read_doc_folder' tool to read supported documents "
+            "\n\nPlease use the 'read_docs_folder' tool to read supported documents "
             f"from this folder first: '{doc_folder}'. Ground your answer in those docs "
             "when they are relevant."
         )
@@ -132,46 +128,11 @@ def build_instruction(
         )
 
     if skill:
-        # Check if this skill has been migrated to the deep agents SkillsMiddleware
-        if skill in get_skill_registry().SKILL_IDS:
-            instruction += (
-                f"\n\nThe requested output skill is `{skill}`. "
-                f"This skill is available in the Skills library. "
-                f"Use `read_file` to load the skill's SKILL.md for full instructions "
-                f"and follow its workflow precisely. "
-                f"Save your final output using `write_file` to `/final_report.md`."
-            )
-        else:
-            definition = get_skill_registry().get_skill_definition(skill)
-            instruction += (
-                f"\n\nThe requested output skill is `{skill}`."
-                f"\nDescription: {definition['description']}"
-                f"\nInstructions:\n{definition['instructions']}"
-            )
-            if definition.get("schema"):
-                instruction += (
-                    "\nAfter researching, please call `render_skill_output` with the selected "
-                    "skill id and a JSON payload that matches that skill schema exactly."
-                )
-            else:
-                instruction += (
-                    "\nFollow the skill instructions above precisely. "
-                    "Use the `write_file` tool to save your output to `/final_report.md`. "
-                    "Do NOT use `render_skill_output` since this is an unstructured skill. "
-                    "Do NOT just say you will write it; you must actually call the `write_file` tool with the text."
-                )
-        if skill == "golden-dataset":
-            instruction += (
-                "\n\n**Golden dataset delivery — MANDATORY tool-call sequence (zero exceptions):**\n"
-                "After you have read the documents and drafted all items, you MUST execute these "
-                "tool calls in this exact order — do NOT write any description of your plan, do NOT "
-                "ask for confirmation, and do NOT stop after a verbal summary:\n"
-                "  1. Call `render_skill_output` with skill_id='golden-dataset' and the full JSON payload.\n"
-                "  2. Immediately call `finalize_golden_dataset_output` with the IDENTICAL JSON string. "
-                "This is what writes the CSV to disk — skipping it means no file is saved.\n"
-                "  3. Only after both tool calls succeed, write a short confirmation summary.\n"
-                "WARNING: Any response that says 'I will synthesize', 'Next I will call...', or "
-                "'Please stand by' without those tool calls already having been executed is wrong."
-            )
+        instruction += (
+            f"\n\nThe requested output skill is `{skill}`. "
+            f"Use `read_file` to load the skill's SKILL.md for full instructions "
+            f"and follow its workflow precisely. "
+            f"Save your final output using `write_file` to `/final_report.md`."
+        )
 
     return instruction

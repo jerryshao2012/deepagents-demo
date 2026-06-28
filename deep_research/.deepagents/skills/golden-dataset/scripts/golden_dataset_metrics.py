@@ -14,11 +14,18 @@ from pathlib import Path
 from typing import Iterable
 
 import pandas as pd
+import sys
 import yaml
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 
-from research_agent.skills.golden_dataset.scripts.skill_model_factory import get_configured_model
+# Add project root to path for retry_utils and utils imports
+_sys_path_root = Path(__file__).resolve().parent.parent.parent.parent.parent
+if str(_sys_path_root) not in sys.path:
+    sys.path.insert(0, str(_sys_path_root))
+
+# Local import from same scripts directory
+from skill_model_factory import get_configured_model
 
 load_dotenv()
 

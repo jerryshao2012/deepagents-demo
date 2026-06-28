@@ -1,6 +1,5 @@
 """Tools for the research agent."""
 
-import json
 import os
 import re
 from datetime import datetime
@@ -14,22 +13,14 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import InjectedState
 
 from logger_utils import setup_logger
-from research_agent.skills.golden_dataset.pipeline import (
-    export_golden_dataset_csv,
-    evaluate_and_report_golden_dataset,
-)
-from research_agent.utils.json_utils import robust_json_loads
 from research_agent.utils.knowledge_filesystem import (
-    normalize_path_for_filesystem_tools,
     ls_impl,
     glob_impl,
     read_file_impl,
-    read_doc_folder_impl,
+    read_docs_folder_impl,
     write_file_impl,
-    write_content_to_output_folder,
     send_files_to_state,
 )
-from research_agent.utils.result_rendering import render_skill_output_impl
 from research_agent.utils.skill_registry import get_skill_registry
 from research_agent.utils.web_search import (
     fetch_webpage_content_impl,
@@ -179,7 +170,7 @@ def read_file(
 
 
 @tool(parse_docstring=True)
-def read_doc_folder(
+def read_docs_folder(
         folder_path: str,
         state: Annotated[dict, InjectedState],
         specific_files: list[str] | None = None,
@@ -202,10 +193,10 @@ def read_doc_folder(
     Returns:
         Extracted text from supported documents, a summary for large folders, or an error message.
     """
-    logger.info(f"Reading document folder: {folder_path}, Specific files: {specific_files}")
+    logger.info(f"Reading documents folder: {folder_path}, Specific files: {specific_files}")
 
-    result = read_doc_folder_impl(folder_path, specific_files, state)
-    logger.info(f"Successfully processed document folder: {folder_path}")
+    result = read_docs_folder_impl(folder_path, specific_files, state)
+    logger.info(f"Successfully processed documents folder: {folder_path}")
     return result
 
 
@@ -348,135 +339,3 @@ def read_skill_supporting_file(skill_id: str, filename: str) -> str:
         )
     logger.debug(f"Successfully read supporting file '{filename}' from skill '{skill_id}'")
     return content
-
-
-# --- Result Rendering Tools ---
-
-@tool(parse_docstring=True)
-def render_skill_output(
-        skill_id: str,
-        payload_json: str | dict,
-) -> str:
-    """Render structured skill output for legacy skills (golden-dataset only).
-
-    Use this tool ONLY for the golden-dataset structured output skill.
-    DO NOT use this tool for other skills — use write_file to save output directly.
-    Provide the skill id and a JSON payload that matches the skill schema exactly.
-    The payload may be either a JSON object string or a dict-like JSON object.
-    NEVER put raw markdown into payload_json.
-
-    Args:
-        skill_id: The skill definition id to use for validation and rendering (golden-dataset).
-        payload_json: A JSON object string or dict matching the skill schema.
-
-    Returns:
-        Rendered markdown output or a validation error message.
-    """
-    logger.info(f"Rendering skill output for skill: {skill_id}")
-
-    result = render_skill_output_impl(skill_id, payload_json)
-    logger.info(f"Successfully rendered output for skill: {skill_id}")
-    return result
-
-
-# --- Golden Dataset Tools ---
-
-
-@tool(parse_docstring=True)
-def finalize_golden_dataset_output(
-        payload_json: str | dict,
-        state: Annotated[dict, InjectedState],
-) -> str:
-    """Export a validated golden-dataset JSON payload to CSV and run quality metrics.
-
-    For the ``golden-dataset`` skill, call this after ``render_skill_output`` with the
-    same ``payload_json`` to get the final CSV and quality report.
-    It also generates:
-    - `/golden_dataset_metrics.md`: Markdown table of all items with quality metrics
-    - `/final_report.md`: Comprehensive report of the entire golden dataset generation process
-
-    Args:
-        payload_json: A string containing the validated JSON payload, or a dictionary object.
-        state: LangGraph state (injected automatically).
-
-    Returns:
-        A confirmation message with paths to the generated files.
-    """
-    logger.info("Finalizing golden dataset output")
-
-    # Handle both string and dict inputs for flexibility
-    if isinstance(payload_json, dict):
-        logger.debug("Converting dict payload to JSON string")
-        payload_json_str = json.dumps(payload_json)
-    elif isinstance(payload_json, str):
-        payload_json_str = payload_json
-    else:
-        logger.error(f"Invalid payload_json type: {type(payload_json)}")
-        return f"Error: payload_json must be a string or dict, got {type(payload_json).__name__}"
-
-    try:
-        payload = robust_json_loads(payload_json_str)
-        logger.debug("Successfully parsed golden dataset JSON payload")
-    except (json.JSONDecodeError, TypeError, ValueError) as e:
-        logger.error(f"Invalid JSON in payload_json: {e}")
-        return f"Error: Invalid JSON in payload_json: {e}"
-
-    reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
-    output_folder = Path(reports_output_folder)
-    logger.info(f"Exporting golden dataset CSV to: {output_folder}")
-    csv_path = export_golden_dataset_csv(payload, output_folder)
-    logger.info(f"CSV exported to: {csv_path}")
-
-    chat_elapsed_seconds = None
-    if isinstance(state, dict):
-        # Prefer middleware-computed elapsed time if available.
-        elapsed_from_state = state.get("chat_elapsed_seconds")
-        if isinstance(elapsed_from_state, (int, float)):
-            chat_elapsed_seconds = float(elapsed_from_state)
-        else:
-            # Fallback to start-time calculation when elapsed value is not present.
-            chat_start_time = state.get("chat_start_time")
-            if isinstance(chat_start_time, (int, float)):
-                chat_elapsed_seconds = datetime.now().timestamp() - float(chat_start_time)
-
-    if isinstance(chat_elapsed_seconds, float):
-        logger.debug(f"Chat elapsed time: {chat_elapsed_seconds:.2f} seconds")
-
-    logger.info("Evaluating golden dataset and generating quality metrics")
-    metrics_csv_path, markdown_content, final_report_content = (
-        evaluate_and_report_golden_dataset(
-            csv_path, payload, chat_elapsed_seconds
-        )
-    )
-    logger.info(f"Quality metrics generated - Metrics CSV: {metrics_csv_path}")
-
-    # Write the final humanized report to a file
-    report_filename = f"{csv_path.stem}_report.md"
-    logger.info(f"Writing final report: {report_filename}")
-    report_filepath = write_content_to_output_folder(
-        report_filename, final_report_content
-    )
-    logger.info(f"Final report saved to: {report_filepath}")
-
-    # Persist files to LangGraph state via the channel API so they
-    # survive the node boundary (direct state["files"] mutation doesn't).
-    return_msg = "\n"
-    try:
-        send_files_to_state({
-            "/golden_dataset_metrics.md": create_file_data(markdown_content),
-            "/final_report.md": create_file_data(final_report_content),
-        })
-        return_msg = "- Note: /golden_dataset_metrics.md, /final_report.md are saved in sandbox\n\n"
-        logger.info("Persisted golden dataset files to state")
-    except Exception as e:
-        logger.warning(f"Could not persist files to state: {e}")
-
-    logger.info("Golden dataset finalization completed successfully")
-    return (
-        f"Successfully exported and evaluated the golden dataset.\n"
-        f"- Raw data saved to: {normalize_path_for_filesystem_tools(str(csv_path))}\n"
-        f"- Metrics saved to: {normalize_path_for_filesystem_tools(str(metrics_csv_path))}\n"
-        f"- Final report saved to: {report_filepath}\n"
-        f"{return_msg}"
-        f"## Golden Dataset Quality Metrics\n\n{markdown_content}"
-    )
