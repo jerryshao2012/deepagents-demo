@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 class IngestPhase(str, Enum):
@@ -17,6 +20,7 @@ class IngestPhase(str, Enum):
     ANALYZING = "analyzing"
     APPLYING = "applying"
     REFRESHING_INDEX = "refreshing_index"
+    MERGING = "merging"
     READY = "ready"
     ERROR = "error"
     CANCELLED = "cancelled"
@@ -149,15 +153,6 @@ class SourceCitation:
 
 
 @dataclass(frozen=True)
-class WikiQueryResult:
-    """Result from a wiki query operation."""
-
-    answer: str
-    filed_path: str | None = None
-    sources_cited: list[SourceCitation] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
 class ThreadWikiPaths:
     """Resolved filesystem paths for a thread's wiki workspace."""
 
@@ -179,3 +174,134 @@ class ThreadWikiPaths:
             raw_dir=wiki_dir / "raw",
             wiki_content=wiki_dir / "wiki",
         )
+
+
+# ── Wiki Page Metadata (YAML frontmatter) ──────────────────────────────────────
+
+# Valid page categories matching the structured subdirectory layout.
+WIKI_PAGE_CATEGORIES = frozenset({
+    "entity", "concept", "source", "comparison", "synthesis", "query", "uncategorized",
+})
+
+# Directory name → category mapping.
+CATEGORY_DIRECTORIES: dict[str, str] = {
+    "entities": "entity",
+    "concepts": "concept",
+    "sources": "source",
+    "comparisons": "comparison",
+    "synthesis": "synthesis",
+    "query": "query",
+}
+
+
+@dataclass
+class WikiPageMetadata:
+    """YAML frontmatter fields for a wiki page."""
+
+    title: str
+    category: str = "uncategorized"
+    summary: str = ""
+    tags: list[str] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
+    updated: str = ""  # ISO-8601 date string
+
+    def to_frontmatter(self) -> str:
+        """Serialize metadata as a YAML frontmatter block."""
+        import yaml
+
+        data: dict[str, object] = {
+            "title": self.title,
+            "category": self.category,
+        }
+        if self.summary:
+            data["summary"] = self.summary
+        if self.tags:
+            data["tags"] = self.tags
+        if self.sources:
+            data["sources"] = self.sources
+        if self.updated:
+            data["updated"] = self.updated
+        else:
+            data["updated"] = datetime.now(UTC).strftime("%Y-%m-%d")
+
+        yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False).strip()
+        return f"---\n{yaml_str}\n---\n"
+
+
+def parse_frontmatter(content: str) -> tuple[WikiPageMetadata, str]:
+    """Parse YAML frontmatter from markdown content.
+
+    Returns a ``(metadata, body)`` tuple.  If no valid frontmatter is found,
+    metadata fields are populated with sensible defaults (title from first
+    heading, category ``"uncategorized"``).
+    """
+    import yaml
+
+    metadata = WikiPageMetadata(title="", category="uncategorized")
+    body = content
+
+    if not content.startswith("---"):
+        # No frontmatter — derive title from first heading.
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("# "):
+                metadata.title = stripped.lstrip("# ").strip()
+                break
+        return metadata, body
+
+    # Find closing `---`.
+    end_idx = content.find("\n---", 3)
+    if end_idx == -1:
+        return metadata, body
+
+    yaml_str = content[3:end_idx].strip()
+    body = content[end_idx + 4:].lstrip("\n")
+
+    try:
+        frontmatter = yaml.safe_load(yaml_str)
+    except yaml.YAMLError:
+        logger.debug("Failed to parse YAML frontmatter; falling back to defaults.")
+        return metadata, body
+
+    if not isinstance(frontmatter, dict):
+        return metadata, body
+
+    metadata.title = str(frontmatter.get("title", metadata.title))
+    category = str(frontmatter.get("category", "uncategorized")).lower()
+    metadata.category = category if category in WIKI_PAGE_CATEGORIES else "uncategorized"
+    metadata.summary = str(frontmatter.get("summary", ""))
+    tags = frontmatter.get("tags", [])
+    if isinstance(tags, list):
+        metadata.tags = [str(t) for t in tags]
+    sources = frontmatter.get("sources", [])
+    if isinstance(sources, list):
+        metadata.sources = [str(s) for s in sources]
+    metadata.updated = str(frontmatter.get("updated", ""))
+
+    return metadata, body
+
+
+# ── Contradiction Tracking ─────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Contradiction:
+    """A tracked contradiction between two or more source claims."""
+
+    wiki_page: str  # Relative path of the page documenting the contradiction
+    claim_a: str
+    source_a: str
+    claim_b: str
+    source_b: str
+    resolved: bool = False
+    resolution_note: str = ""
+
+
+@dataclass(frozen=True)
+class WikiQueryResult:
+    """Result from a wiki query operation."""
+
+    answer: str
+    filed_path: str | None = None
+    sources_cited: list[SourceCitation] = field(default_factory=list)
+    contradictions: list[Contradiction] = field(default_factory=list)

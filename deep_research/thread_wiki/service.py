@@ -57,6 +57,49 @@ Reasoning style:
 - Keep uncertainty explicit.
 - Resolve contradictions when possible; otherwise record both claims and state what is unresolved.
 
+Page structure (MANDATORY — every wiki page):
+- Begin every page with YAML frontmatter delimited by `---`:
+  ```yaml
+  ---
+  title: "Page Title"
+  category: entity|concept|source|comparison|synthesis
+  summary: "One-sentence summary of this page's content."
+  tags: [tag1, tag2]
+  sources: [/raw/filename.pdf.md]
+  updated: YYYY-MM-DD
+  ---
+  ```
+- The `category` field determines which subdirectory the page belongs in.
+- The `summary` field powers the index catalog — keep it to one sentence.
+- The `sources` field lists `/raw/` file paths that substantiate this page's claims.
+
+Structured category directories:
+- `/wiki/entities/` — named entities: companies, people, products, organizations
+- `/wiki/concepts/` — abstract concepts, definitions, frameworks, methodologies
+- `/wiki/sources/` — per-document summaries with bibliographic metadata
+- `/wiki/comparisons/` — side-by-side analyses, named `<topic-a>-vs-<topic-b>.md`
+- `/wiki/synthesis/` — cross-source integration, overviews, theses
+- `/wiki/query/` — durable Q&A responses filed for future reference
+
+Contradiction tracking:
+- When two sources disagree on a claim, document the conflict using this callout
+  in the relevant wiki page(s):
+  ```
+  > **Contradiction** (unresolved as of YYYY-MM-DD): Source A claims X
+  > (/raw/source-a.pdf.md, p. N), while Source B claims Y
+  > (/raw/source-b.pdf.md, p. M). Resolution pending.
+  ```
+- Link both contradicting sources. Mark contradictions as unresolved until
+  new evidence resolves them.
+- During lint passes, re-evaluate unresolved contradictions against newer
+  source material and update resolution status.
+
+Re-ingestion (merge mode):
+- When a source document is re-ingested and a `/wiki/sources/<slug>.md` page
+  already exists, append a `## Re-ingest YYYY-MM-DD` section at the bottom
+  rather than overwriting.  Preserve the original analysis and note what
+  changed in the new section.
+
 Writing and organization rules:
 - Maintain canonical pages per concept/entity/theme rather than many overlapping fragments.
 - Keep pages scannable with clear headings.
@@ -119,11 +162,32 @@ def _agents_md(topic: str) -> str:
         "- Treat `/raw/` as read-only source material.\n"
         "- Ingest flow should be supervised: review takeaways first, then apply updates.\n"
         "- Ingest updates should prioritize canonical concept/entity/theme pages.\n"
-        "- Prefer a flat `/wiki/` layout by default; create subdirectories only when they clearly improve organization.\n"
+        "- Every wiki page MUST have YAML frontmatter (title, category, summary, tags, sources, updated).\n"
+        "- Organize pages into category subdirectories: entities/, concepts/, sources/, comparisons/, synthesis/, query/.\n"
+        "- Use `/wiki/index.md` as the authoritative content catalog.\n"
         "- Use `/log.md` as recency context and keep it append-only.\n"
         "- Do not edit `/log.md` directly; the runner appends structured timeline entries.\n"
-        "- Keep `/wiki/index.md` current as a content catalog.\n"
+        "- Document contradictions explicitly using the `> **Contradiction**` callout format.\n"
+        "- In merge mode, append `## Re-ingest` sections rather than overwriting.\n"
+        "- See `/wiki/.templates/` for page structure templates.\n"
     )
+
+
+def _copy_templates(wiki_dir: Path) -> None:
+    """Copy page templates from the package into the wiki workspace (if missing)."""
+    import shutil
+
+    templates_src = Path(__file__).resolve().parent / "templates"
+    if not templates_src.exists():
+        return
+
+    templates_dest = wiki_dir / "wiki" / ".templates"
+    templates_dest.mkdir(parents=True, exist_ok=True)
+
+    for tmpl_file in templates_src.rglob("*.md"):
+        dest = templates_dest / tmpl_file.name
+        if not dest.exists():
+            shutil.copy2(tmpl_file, dest)
 
 
 def _write_if_missing(path: Path, content: str) -> None:
@@ -141,6 +205,7 @@ def _ensure_scaffold(wiki_dir: Path, topic: str) -> None:
     _write_if_missing(wiki_dir / "wiki" / "index.md", _empty_index_text(topic))
     _write_if_missing(wiki_dir / "log.md", "# Change Log\n")
     _write_if_missing(wiki_dir / "AGENTS.md", _agents_md(topic))
+    _copy_templates(wiki_dir)
 
 
 # ── Source staging ────────────────────────────────────────────────────────────
@@ -237,15 +302,16 @@ def _stage_sources(source_paths: list[Path], raw_dir: Path) -> list[Path]:
 # ── Index refresh ─────────────────────────────────────────────────────────────
 
 _INDEX_CATEGORY_ORDER = (
-    "Entities", "Concepts", "Sources", "Timelines", "Queries", "Syntheses", "Other Pages",
+    "Entities", "Concepts", "Sources", "Comparisons", "Syntheses", "Queries",
+    "Contradictions", "Other Pages",
 )
 _INDEX_DIRECTORY_CATEGORIES = {
-    "entity": "Entities", "entities": "Entities",
-    "concept": "Concepts", "concepts": "Concepts",
-    "source": "Sources", "sources": "Sources",
-    "timeline": "Timelines", "timelines": "Timelines",
+    "entities": "Entities", "entity": "Entities",
+    "concepts": "Concepts", "concept": "Concepts",
+    "sources": "Sources", "source": "Sources",
+    "comparisons": "Comparisons", "comparison": "Comparisons",
+    "syntheses": "Syntheses", "synthesis": "Syntheses",
     "query": "Queries", "queries": "Queries",
-    "synthesis": "Syntheses", "syntheses": "Syntheses",
 }
 _INDEX_DATE_PATTERN = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
@@ -259,7 +325,9 @@ def _strip_markdown_inline(text: str) -> str:
 
 
 def _refresh_index(topic: str, wiki_dir: Path) -> None:
-    """Rebuild wiki/index.md from current markdown pages."""
+    """Rebuild wiki/index.md from current markdown pages, using YAML frontmatter when available."""
+    from .models import parse_frontmatter
+
     wiki_content_dir = wiki_dir / "wiki"
     pages = [p for p in sorted(wiki_content_dir.rglob("*.md")) if p.name != "index.md"]
 
@@ -268,45 +336,72 @@ def _refresh_index(topic: str, wiki_dir: Path) -> None:
         return
 
     section_lines: dict[str, list[str]] = {cat: [] for cat in _INDEX_CATEGORY_ORDER}
+    contradiction_pages: list[str] = []
+
     for page in pages:
         relative = page.relative_to(wiki_content_dir).as_posix()
         content = page.read_text(encoding="utf-8")
 
-        # Extract title
-        title = page.stem.replace("-", " ").replace("_", " ").strip().title()
-        for line in content.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                heading = _strip_markdown_inline(stripped.lstrip("#").strip())
-                if heading:
-                    title = heading
+        # Try YAML frontmatter first
+        metadata, _body = parse_frontmatter(content)
+
+        # Title: frontmatter > first heading > filename stem
+        title = metadata.title
+        if not title:
+            title = page.stem.replace("-", " ").replace("_", " ").strip().title()
+            for line in content.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("#"):
+                    heading = _strip_markdown_inline(stripped.lstrip("#").strip())
+                    if heading:
+                        title = heading
+                        break
+
+        # Summary: frontmatter > first paragraph heuristic
+        summary = metadata.summary
+        if not summary:
+            summary = "No summary available."
+            in_code = False
+            for line in content.splitlines():
+                s = line.strip()
+                if s.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code or not s or s.startswith("#") or s.startswith("---"):
+                    continue
+                candidate = _strip_markdown_inline(s.lstrip("-*+ ").strip())
+                if candidate:
+                    summary = candidate[:147] + "..." if len(candidate) > 150 else candidate
                     break
 
-        # Extract summary
-        summary = "No summary available."
-        in_code = False
-        for line in content.splitlines():
-            s = line.strip()
-            if s.startswith("```"):
-                in_code = not in_code
-                continue
-            if in_code or not s or s.startswith("#"):
-                continue
-            candidate = _strip_markdown_inline(s.lstrip("-*+ ").strip())
-            if candidate:
-                summary = candidate[:147] + "..." if len(candidate) > 150 else candidate
-                break
+        # Tags
+        tag_str = f" `#{'` `#'.join(metadata.tags)}`" if metadata.tags else ""
 
-        # Category
-        parts = page.relative_to(wiki_content_dir).parts
-        cat = _INDEX_DIRECTORY_CATEGORIES.get(parts[0].lower(), "Other Pages") if len(parts) > 1 else "Other Pages"
+        # Category: frontmatter > directory name > Other Pages
+        category = metadata.category
+        if category != "uncategorized":
+            cat = _INDEX_DIRECTORY_CATEGORIES.get(category, "Other Pages")
+        else:
+            parts = page.relative_to(wiki_content_dir).parts
+            cat = _INDEX_DIRECTORY_CATEGORIES.get(parts[0].lower(), "Other Pages") if len(parts) > 1 else "Other Pages"
 
-        entry = f"- [{title}]({relative}) - {summary}"
+        entry = f"- [{title}]({relative}){tag_str} - {summary}"
         section_lines[cat].append(entry)
+
+        # Detect contradictions for the contradictions section
+        if "Contradiction" in content:
+            contradiction_pages.append(relative)
 
     lines = [f"# {topic} Wiki", "", "Content catalog for wiki navigation and retrieval.",
              "Read this page first during query workflows.", ""]
     for cat in _INDEX_CATEGORY_ORDER:
+        if cat == "Contradictions":
+            if contradiction_pages:
+                lines.extend([f"## {cat}", "", "_Pages documenting unresolved source conflicts:_", ""])
+                for cp in sorted(contradiction_pages):
+                    lines.append(f"- [{cp}]({cp})")
+                lines.append("")
+            continue
         if section_lines[cat]:
             lines.extend([f"## {cat}", ""])
             lines.extend(section_lines[cat])
@@ -317,8 +412,12 @@ def _refresh_index(topic: str, wiki_dir: Path) -> None:
 
 # ── Log helpers ───────────────────────────────────────────────────────────────
 
-def _append_log_entry(wiki_dir: Path, phase: str, outcome: str, *, summary: str = "") -> None:
-    """Append a structured entry to the wiki's log.md."""
+def _append_log_entry(wiki_dir: Path, phase: str, outcome: str, *, summary: str = "",
+                      sources_count: int = 0, pages_affected: str = "") -> None:
+    """Append a structured entry to the wiki's log.md.
+
+    Format: ``## [YYYY-MM-DD] op | Title`` with metadata list.
+    """
     from datetime import UTC, datetime
     log_path = wiki_dir / "log.md"
     if not log_path.exists():
@@ -329,11 +428,22 @@ def _append_log_entry(wiki_dir: Path, phase: str, outcome: str, *, summary: str 
     timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     summary_text = summary[:320] if summary else "No summary provided."
 
+    # Parse phase into op and title: "ingest.review" → op="ingest", title="review"
+    parts = phase.split(".", 1)
+    op = parts[0] if parts else phase
+    title = parts[1] if len(parts) > 1 else phase
+
     entry = (
-        f"\n## [{date_text}] {phase} | outcome={outcome}\n"
+        f"\n## [{date_text}] {op} | {title}\n"
         f"- timestamp: {timestamp}\n"
+        f"- outcome: {outcome}\n"
         f"- summary: {summary_text}\n"
     )
+    if sources_count:
+        entry += f"- sources: {sources_count}\n"
+    if pages_affected:
+        entry += f"- pages_affected: {pages_affected}\n"
+
     with log_path.open("a", encoding="utf-8") as f:
         f.write(entry)
 
@@ -369,7 +479,7 @@ def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
     wiki_backend = FilesystemBackend(root_dir=wiki_dir / "wiki", virtual_mode=True)
     root_backend = FilesystemBackend(root_dir=wiki_dir, virtual_mode=True)
     backend = CompositeBackend(
-        default=wiki_backend,
+        default=root_backend,
         routes={
             "/raw/": raw_backend,
             "/wiki/": wiki_backend,
@@ -395,40 +505,73 @@ def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
         ]
 
     from langchain_core.tools import tool
-    
+
     @tool
     def retrieve_raw_documents(query: str, k: int = 5) -> str:
-        """Retrieve top-k relevant document snippets from the raw documents vector search index.
+        """Retrieve top-k relevant document snippets from the raw documents text search index.
         Use this tool when you need to search large raw source documents in `/raw/` for specific facts.
+        Returns ranked snippets with source file paths, page numbers, and relevance scores.
         """
         try:
-            from model_factory import create_embedding_model
-            from research_agent.utils.retrieval import load_or_build_index
-            
-            embedding_model = create_embedding_model()
+            from research_agent.utils.text_search import load_or_build_search_index, search_index
+
             index_dir = wiki_dir / "index"
             raw_dir = wiki_dir / "raw"
-            
-            vectorstore = load_or_build_index(raw_dir, index_dir, embedding_model)
-            if not vectorstore:
-                return "Error: No search index is available or could be built. You must read `/raw/` files directly."
-                
-            results = vectorstore.similarity_search_with_score(query, k=k)
+
+            search_idx = load_or_build_search_index(raw_dir, index_dir)
+            if not search_idx:
+                return (
+                    "Error: No search index is available or could be built. "
+                    "You must read `/raw/` files directly using the read_file tool. "
+                    f"Available raw files are under /raw/."
+                )
+
+            # Primary search: full query.
+            results = search_index(query, search_idx, k=k)
+
+            # Fallback: if full query returns < k results, try individual terms
+            # and merge.  This compensates for BM25 being keyword-based (unlike
+            # FAISS which does semantic matching).
+            if len(results) < k:
+                terms = query.split()
+                if len(terms) > 1:
+                    term_results: dict[int, tuple[Document, float]] = {}
+                    for term in terms:
+                        if len(term) < 3:
+                            continue
+                        tr = search_index(term, search_idx, k=k)
+                        for doc, score in tr:
+                            doc_id = id(doc)
+                            if doc_id not in term_results or score > term_results[doc_id][1]:
+                                term_results[doc_id] = (doc, score)
+                    # Merge, keeping the best score per document.
+                    seen_ids = {id(d) for d, _ in results}
+                    for doc_id, (doc, score) in term_results.items():
+                        if doc_id not in seen_ids:
+                            results.append((doc, score))
+                            seen_ids.add(doc_id)
+                    # Re-sort by descending score.
+                    results.sort(key=lambda x: x[1], reverse=True)
+
             if not results:
-                return "No matching document snippets found."
-                
+                return (
+                    "No matching document snippets found for query. "
+                    "Try reading `/raw/` files directly with the read_file tool, "
+                    "or refine your search terms."
+                )
+
             output_lines = []
-            for idx, (doc, score) in enumerate(results, start=1):
+            for idx, (doc, score) in enumerate(results[:k], start=1):
                 meta = doc.metadata
                 src = meta.get("source_path") or "unknown"
                 page = meta.get("page")
                 locator = meta.get("locator")
                 heading = meta.get("heading")
-                
+
                 # Strip leading /raw/ from source path in snippet output
                 if src.startswith("/raw/"):
                     src = src[len("/raw/"):]
-                
+
                 location_parts = []
                 if page:
                     location_parts.append(f"p. {page}")
@@ -436,12 +579,16 @@ def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
                     location_parts.append(locator)
                 if heading:
                     location_parts.append(heading)
-                    
+
                 loc_str = f" ({', '.join(location_parts)})" if location_parts else ""
-                output_lines.append(f"[{idx}] Source: /raw/{src}{loc_str} (Score: {score:.4f})\n{doc.page_content}\n")
-                
+                output_lines.append(
+                    f"[{idx}] Source: /raw/{src}{loc_str} (Score: {score:.4f})\n"
+                    f"{doc.page_content}\n"
+                )
+
             return "\n---\n\n".join(output_lines)
         except Exception as e:
+            logger.exception("retrieve_raw_documents failed")
             return f"Error retrieving raw documents: {e}"
 
     model = _resolve_model()
@@ -488,51 +635,66 @@ def _build_ingest_review_prompt(topic: str, staged_names: list[str], note: str |
     source_block = "\n".join(f"- /raw/{name}" for name in staged_names)
     note_block = note or "(none)"
     return (
-        f"Review the staged sources for topic '{topic}' and prepare a deep ingest plan.\n\n"
-        "Phase constraint: review-only. Do not create, edit, move, or delete files yet.\n\n"
-        "Analysis standards:\n"
-        "- Read every staged source before proposing wiki edits.\n"
-        "- Distinguish direct evidence from inference.\n"
-        "- Prefer canonical page updates over creating fragmented pages.\n"
-        "- Preserve uncertainty; do not invent unsupported claims.\n"
-        "- Use source filename citations for non-trivial claims.\n"
-        + _DOCUMENT_CITATION_RULES
-        + "\nRequired output format (markdown):\n"
-        "## 1) Source-by-source extraction\n"
-        "## 2) Proposed wiki change set\n"
-        "## 3) Cross-source synthesis and structure\n"
-        "## 4) Contradictions and unresolved claims\n"
-        "## 5) Index updates and recency notes\n"
-        "## 6) Gaps and follow-up questions\n\n"
-        f"Staged sources:\n{source_block}\n\n"
-        f"Operator note: {note_block}\n"
+            f"Review the staged sources for topic '{topic}' and prepare a deep ingest plan.\n\n"
+            "Phase constraint: review-only. Do not create, edit, move, or delete files yet.\n\n"
+            "Analysis standards:\n"
+            "- Read every staged source before proposing wiki edits.\n"
+            "- Distinguish direct evidence from inference.\n"
+            "- Prefer canonical page updates over creating fragmented pages.\n"
+            "- Preserve uncertainty; do not invent unsupported claims.\n"
+            "- Use source filename citations for non-trivial claims.\n"
+            + _DOCUMENT_CITATION_RULES
+            + "\nRequired output format (markdown):\n"
+              "## 1) Source-by-source extraction\n"
+              "## 2) Proposed wiki change set\n"
+              "## 3) Cross-source synthesis and structure\n"
+              "## 4) Contradictions and unresolved claims\n"
+              "## 5) Index updates and recency notes\n"
+              "## 6) Gaps and follow-up questions\n\n"
+              f"Staged sources:\n{source_block}\n\n"
+              f"Operator note: {note_block}\n"
     )
 
 
-def _build_ingest_apply_prompt(topic: str, staged_names: list[str], review_summary: str, note: str | None) -> str:
+def _build_ingest_apply_prompt(topic: str, staged_names: list[str], review_summary: str, note: str | None, *,
+                               merge: bool = False) -> str:
     """Build the ingest apply prompt (mutating pass)."""
     source_block = "\n".join(f"- /raw/{name}" for name in staged_names)
     note_block = note or "(none)"
+    merge_instruction = ""
+    if merge:
+        merge_instruction = (
+            "\nMerge mode (ACTIVE):\n"
+            "- For each staged source, check whether a `/wiki/sources/<slug>.md` summary page already exists.\n"
+            "- If a source summary page exists: append a `## Re-ingest YYYY-MM-DD` section at the bottom "
+            "with new findings, rather than overwriting the existing content.\n"
+            "- For entity/concept/synthesis pages: merge new claims into existing sections; "
+            "do not delete or replace existing content unless it is demonstrably wrong.\n"
+            "- If new evidence resolves a previously documented contradiction, update the "
+            "contradiction callout from `(unresolved)` to `(resolved YYYY-MM-DD)` with a resolution note.\n"
+        )
     return (
-        f"Apply an approved ingest update for topic '{topic}'.\n\n"
-        "Required workflow:\n"
-        "1) Read all staged files in `/raw/` before editing wiki content.\n"
-        "2) Update canonical concept/entity/theme pages with high-signal evidence.\n"
-        "3) Integrate cross-source synthesis, not just per-source summaries.\n"
-        "4) Mark contradictions explicitly and preserve unresolved uncertainty.\n"
-        "5) Update `/wiki/index.md`.\n"
-        "6) Do not edit `/log.md`.\n"
-        "7) Never write to `/raw/`.\n\n"
-        "Writing standards:\n"
-        "- Keep pages scannable with clear headings and concise prose.\n"
-        "- Use source filename citations for non-trivial claims.\n"
-        + _DOCUMENT_CITATION_RULES
-        + "- Avoid duplicative pages; merge into canonical pages when possible.\n\n"
-        "Return a concise apply report:\n"
-        "A) Files created  B) Files updated  C) Key synthesis  D) Remaining uncertainties\n\n"
-        f"Approved review plan:\n{review_summary}\n\n"
-        f"Staged sources:\n{source_block}\n\n"
-        f"Operator note: {note_block}\n"
+            f"Apply an approved ingest update for topic '{topic}'.\n\n"
+            "Required workflow:\n"
+            "1) Read all staged files in `/raw/` before editing wiki content.\n"
+            "2) Update canonical concept/entity/theme pages with high-signal evidence.\n"
+            "3) Integrate cross-source synthesis, not just per-source summaries.\n"
+            "4) Mark contradictions explicitly and preserve unresolved uncertainty.\n"
+            "5) Update `/wiki/index.md`.\n"
+            "6) Do not edit `/log.md`.\n"
+            "7) Never write to `/raw/`.\n"
+            + merge_instruction +
+            "\nWriting standards:\n"
+            "- Begin every wiki page with YAML frontmatter (title, category, summary, tags, sources, updated).\n"
+            "- Keep pages scannable with clear headings and concise prose.\n"
+            "- Use source filename citations for non-trivial claims.\n"
+            + _DOCUMENT_CITATION_RULES
+            + "- Avoid duplicative pages; merge into canonical pages when possible.\n\n"
+              "Return a concise apply report:\n"
+              "A) Files created  B) Files updated  C) Key synthesis  D) Remaining uncertainties\n\n"
+              f"Approved review plan:\n{review_summary}\n\n"
+              f"Staged sources:\n{source_block}\n\n"
+              f"Operator note: {note_block}\n"
     )
 
 
@@ -549,26 +711,141 @@ Document citation format rules (MANDATORY):
 def _build_query_prompt(topic: str, question: str) -> str:
     """Build the read-only query prompt."""
     return (
-        f"Answer this question about '{topic}': {question}\n\n"
-        "This is analysis-only. Do not create, edit, move, or delete files.\n\n"
-        "Required workflow:\n"
-        "1) Read `/wiki/index.md` first and use its categorized summaries to choose candidate pages.\n"
-        "2) Read recent `/log.md` entries (latest ~10 `## [` headings) to understand what was ingested recently.\n"
-        "3) Prefer checking relevant prior `/wiki/query/*.md` pages first.\n"
-        "4) Read the canonical wiki pages before final synthesis.\n"
-        "5) CRITICAL: If the wiki pages do not contain the full answer, you MUST search and read the raw source documents in `/raw/` (using the `retrieve_raw_documents` tool if the files are too large to read directly).\n"
-        "6) Provide a grounded answer with wiki or raw file path citations.\n"
-        "7) Decide whether this answer should be filed as a durable wiki page.\n\n"
-        + _DOCUMENT_CITATION_RULES
-        + "\nOutput format (exact keys):\n"
-        "ANSWER:\n<markdown answer with citations>\n\n"
-        "FILING_DECISION: file|skip\n"
-        "FILING_REASON: <one sentence>\n"
+            f"Answer this question about '{topic}': {question}\n\n"
+            "This is analysis-only. Do not create, edit, move, or delete files.\n\n"
+            "Required workflow:\n"
+            "1) Read `/wiki/index.md` first and use its categorized summaries to choose candidate pages.\n"
+            "2) Read recent `/log.md` entries (latest ~10 `## [` headings) to understand what was ingested recently.\n"
+            "3) Prefer checking relevant prior `/wiki/query/*.md` pages first.\n"
+            "4) Read the canonical wiki pages before final synthesis.\n"
+            "5) CRITICAL: If the wiki pages do not contain the full answer, you MUST search and read the raw source documents in `/raw/` (using the `retrieve_raw_documents` tool if the files are too large to read directly).\n"
+            "6) Provide a grounded answer with wiki or raw file path citations.\n"
+            "7) Decide whether this answer should be filed as a durable wiki page.\n\n"
+            "Contradiction disclosure (MANDATORY):\n"
+            "- Check wiki pages for unresolved `> **Contradiction**` callouts relevant to the question.\n"
+            "- If conflicting claims exist, clearly distinguish 'established facts' from 'claims with conflicting evidence'.\n"
+            "- Surface unresolved contradictions explicitly in the answer; do not silently pick one side.\n\n"
+            + _DOCUMENT_CITATION_RULES
+            + "\nOutput format (exact keys):\n"
+              "ANSWER:\n<markdown answer with citations>\n\n"
+              "CONTRADICTIONS:\n<unresolved contradictions relevant to this question, or 'None'>\n\n"
+              "FILING_DECISION: file|skip\n"
+              "FILING_REASON: <one sentence>\n"
     )
 
 
+# ── Graph analysis ──────────────────────────────────────────────────────────────
+
+def _analyze_graph(wiki_dir: Path) -> dict:
+    """Analyze the wiki's internal link graph for structural health.
+
+    Scans all wiki pages for ``[text](page.md)`` links and builds an adjacency
+    list.  Returns a dict with:
+
+    - ``hubs``: pages with many outbound links (top 10)
+    - ``sinks``: pages with inbound but no outbound links
+    - ``orphans``: pages with no inbound links
+    - ``disconnected``: groups of pages with no cross-references to other groups
+    - ``total_pages``, ``total_links``: summary stats
+    """
+    from collections import defaultdict
+
+    wiki_content_dir = wiki_dir / "wiki"
+    if not wiki_content_dir.exists():
+        return {"total_pages": 0, "total_links": 0, "hubs": [], "sinks": [], "orphans": [], "disconnected": []}
+
+    # link_re matches [text](path.md) and [[wikilinks]]
+    link_re = re.compile(r"\[([^\]]*?)]\(([^)]+\.md)\)|\[\[([^\]]+\.md)]]", re.IGNORECASE)
+
+    pages = [p for p in sorted(wiki_content_dir.rglob("*.md")) if p.name != "index.md"]
+    if not pages:
+        return {"total_pages": 0, "total_links": 0, "hubs": [], "sinks": [], "orphans": [], "disconnected": []}
+
+    # Build name → relative path lookup
+    name_to_rel: dict[str, str] = {}
+    for page in pages:
+        rel = page.relative_to(wiki_content_dir).as_posix()
+        name_to_rel[page.name] = rel
+
+    outlinks: dict[str, set[str]] = defaultdict(set)
+    inlinks: dict[str, set[str]] = defaultdict(set)
+
+    for page in pages:
+        rel = page.relative_to(wiki_content_dir).as_posix()
+        try:
+            content = page.read_text(encoding="utf-8")
+        except Exception:
+            continue
+
+        for match in link_re.finditer(content):
+            target = match.group(2) or match.group(3)
+            if not target:
+                continue
+            # Resolve relative paths
+            target_normalized = target
+            if "/" not in target:
+                # Same-directory link — resolve relative to page's directory
+                page_dir = rel.rsplit("/", 1)[0] if "/" in rel else ""
+                target_normalized = f"{page_dir}/{target}" if page_dir else target
+            if target_normalized in name_to_rel.values() or target in name_to_rel:
+                resolved = name_to_rel.get(target, target_normalized)
+                outlinks[rel].add(resolved)
+                inlinks[resolved].add(rel)
+
+    total_links = sum(len(v) for v in outlinks.values())
+
+    # Hubs: pages with top outbound links
+    hub_list = sorted(outlinks.items(), key=lambda x: len(x[1]), reverse=True)[:10]
+    hubs = [{"page": rel, "outlinks": len(links)} for rel, links in hub_list if links]
+
+    # Sinks: inbound links but no outbound
+    sinks = sorted(
+        rel for rel in name_to_rel.values()
+        if rel in inlinks and inlinks[rel] and rel not in outlinks
+    )
+
+    # Orphans: no inbound links (exclude pages with outlinks listed under hubs)
+    orphans = sorted(
+        rel for rel in name_to_rel.values()
+        if rel not in inlinks or not inlinks[rel]
+    )
+
+    # Disconnected components (simple BFS)
+    all_pages = set(name_to_rel.values())
+    visited: set[str] = set()
+    components: list[list[str]] = []
+    for start in sorted(all_pages):
+        if start in visited:
+            continue
+        stack = [start]
+        comp: list[str] = []
+        while stack:
+            node = stack.pop()
+            if node in visited:
+                continue
+            visited.add(node)
+            comp.append(node)
+            for neighbor in outlinks.get(node, set()) | {p for p, ls in outlinks.items() if node in ls}:
+                if neighbor in all_pages and neighbor not in visited:
+                    stack.append(neighbor)
+        components.append(comp)
+
+    disconnected = [c for c in components if len(c) > 1 and len(c) < len(all_pages)]
+
+    return {
+        "total_pages": len(pages),
+        "total_links": total_links,
+        "hubs": hubs,
+        "sinks": sinks,
+        "orphans": orphans,
+        "disconnected": [
+            {"size": len(c), "pages": c} for c in disconnected
+        ],
+    }
+
+
 def _build_lint_prompt(topic: str, note: str | None) -> str:
-    """Build the lint reconciliation prompt."""
+    """Build the lint reconciliation prompt, incorporating graph analysis."""
     note_text = note or "(none)"
     return (
         f"Run a single-pass lint reconciliation for the '{topic}' wiki under `/wiki/`.\n\n"
@@ -579,13 +856,18 @@ def _build_lint_prompt(topic: str, note: str | None) -> str:
         "- Do not edit `/log.md`.\n"
         "- Never write to `/raw/`.\n\n"
         "Required health checks and fixes:\n"
-        "- Reconcile contradictions across wiki pages.\n"
+        "- Reconcile contradictions across wiki pages (update resolution status if resolved).\n"
         "- Identify stale claims superseded by newer evidence.\n"
         "- Detect orphan pages with no inbound links and add/repair cross-references.\n"
+        "- Repair broken wikilinks / cross-references.\n"
         "- When an important concept lacks a dedicated page, create a canonical page.\n"
+        "- Verify YAML frontmatter is present and correct on all pages.\n"
         "- Identify docs gaps and missing evidence.\n\n"
         "After edits, return a concise report:\n"
-        "## Reconciled Changes\n## Remaining Gaps\n## Suggested Next Questions and Sources\n\n"
+        "## Reconciled Changes\n## Remaining Gaps\n"
+        "## Contradiction Status (resolved / still-unresolved count)\n"
+        "## Structural Health (broken links fixed, orphans addressed, new pages created)\n"
+        "## Suggested Next Questions and Sources\n\n"
         f"Operator note: {note_text}\n"
     )
 
@@ -637,6 +919,8 @@ async def run_ingest(
         progress: IngestProgress,
         cancel_event: asyncio.Event,
         note: str | None = None,
+        *,
+        merge: bool = False,
 ) -> str:
     """Run the full ingest workflow with progress tracking and cancellation.
 
@@ -644,9 +928,12 @@ async def run_ingest(
     1. Initialize scaffold
     2. Stage source files from docs_dir → raw/
     3. LLM review/analysis pass (read-only)
-    4. LLM apply pass (mutating)
+    4. LLM apply pass (mutating; merge mode appends instead of overwriting)
     5. Refresh index
 
+    Args:
+        merge: If True, re-ingested sources append ``## Re-ingest <date>``
+               sections to existing source summary pages instead of overwriting.
     Returns the apply summary text.
     """
     try:
@@ -685,8 +972,9 @@ async def run_ingest(
         await check_cancellation(cancel_event, phase_name="analyzing")
 
         # Phase 4: Apply (mutating LLM pass)
-        progress.advance(IngestPhase.APPLYING, "Applying wiki updates...")
-        apply_prompt = _build_ingest_apply_prompt(topic, staged_names, review_summary, note)
+        apply_phase = IngestPhase.MERGING if merge else IngestPhase.APPLYING
+        progress.advance(apply_phase, "Merging wiki updates..." if merge else "Applying wiki updates...")
+        apply_prompt = _build_ingest_apply_prompt(topic, staged_names, review_summary, note, merge=merge)
         apply_result = await asyncio.to_thread(
             _run_agent, paths.wiki_dir, apply_prompt, read_only=False
         )
@@ -863,14 +1151,44 @@ async def run_lint(
 ) -> str:
     """Run lint reconciliation on the thread's wiki.
 
-    Use this after document deletions to reconcile stale references.
+    Runs a graph analysis pass first, then feeds structural health findings
+    into the LLM lint prompt for semantic repair.  Use this after document
+    deletions to reconcile stale references.
     """
+    # Run graph analysis for structural health insights.
+    graph_report = await asyncio.to_thread(_analyze_graph, paths.wiki_dir)
+
+    # Build graph summary to inject into the lint prompt.
+    graph_lines = [
+        f"Graph Analysis (pre-lint structural health):",
+        f"- Total pages: {graph_report['total_pages']}, total links: {graph_report['total_links']}",
+    ]
+    if graph_report["sinks"]:
+        graph_lines.append(f"- Sinks (inbound links, no outbound): {', '.join(graph_report['sinks'][:5])}"
+                           f"{' ...' if len(graph_report['sinks']) > 5 else ''}")
+    if graph_report["orphans"]:
+        graph_lines.append(f"- Orphans (no inbound links): {', '.join(graph_report['orphans'][:5])}"
+                           f"{' ...' if len(graph_report['orphans']) > 5 else ''}")
+    if graph_report["disconnected"]:
+        graph_lines.append(f"- Disconnected components: {len(graph_report['disconnected'])}")
+    graph_summary = "\n".join(graph_lines)
+
     lint_prompt = _build_lint_prompt(topic, note)
+    # Inject graph analysis before the operator note.
+    lint_prompt = lint_prompt.replace(
+        f"Operator note: {note or '(none)'}\n",
+        f"{graph_summary}\n\nOperator note: {note or '(none)'}\n",
+    )
     result = await asyncio.to_thread(
         _run_agent, paths.wiki_dir, lint_prompt, read_only=False
     )
     await asyncio.to_thread(_refresh_index, topic, paths.wiki_dir)
-    _append_log_entry(paths.wiki_dir, "lint.apply", "applied", summary=result[:320])
+    _append_log_entry(
+        paths.wiki_dir, "lint.apply", "applied",
+        summary=result[:320],
+        sources_count=graph_report["total_pages"],
+        pages_affected=f"lint pass on {graph_report['total_pages']} pages",
+    )
     return result
 
 

@@ -815,13 +815,11 @@ def read_docs_folder_impl(
     if len(total_text) > 40000:
         logger.info("\n".join(summary_lines))
         try:
-            from model_factory import create_embedding_model
-            from research_agent.utils.retrieval import load_or_build_index
+            from research_agent.utils.text_search import load_or_build_search_index
 
-            embedding_model = create_embedding_model()
             extracted_dir = output_subfolder / "extracted"
             index_dir = output_subfolder / "index"
-            load_or_build_index(extracted_dir, index_dir, embedding_model)
+            load_or_build_search_index(extracted_dir, index_dir)
 
             return "\n".join(summary_lines + [
                 "",

@@ -29,7 +29,7 @@ from langchain_core.messages import (
 from langchain_core.runnables import RunnableConfig
 
 from logger_utils import setup_logger
-from model_factory import create_embedding_model, create_memory_saver, get_configured_model
+from model_factory import create_memory_saver, get_configured_model
 from research_agent import (
     RESEARCH_WORKFLOW_INSTRUCTIONS,
     RESEARCHER_INSTRUCTIONS,
@@ -63,8 +63,8 @@ from research_agent.utils.knowledge_filesystem import (
 from research_agent.utils.knowledge_filesystem import (
     normalize_path_for_filesystem_tools,
 )
-from research_agent.utils.retrieval import load_or_build_index
 from research_agent.utils.skill_registry import get_skill_registry
+from research_agent.utils.text_search import load_or_build_search_index
 from thread_wiki import progress as progress_tracker
 from thread_wiki.models import (
     IngestPhase,
@@ -107,6 +107,7 @@ class ResearchState(FilesystemState):
     chat_elapsed_seconds: float | None
     _eval_logged: bool
     _wiki_answer_text: str | None
+    _streamed_files: list[str] | None
     existing_cited_responses: list[str] | None
 
 
@@ -180,23 +181,22 @@ class ResearchStateMiddleware(AgentMiddleware):
                         pass
                 _MAX_RAW_CHARS = 80_000
 
-                # Check if we should trigger vector indexing
+                # Check if we should trigger text search indexing
                 if total_chars > _MAX_RAW_CHARS or any(
                         raw_file.lstat().st_size > _MAX_RAW_CHARS for raw_file in raw_files):
                     try:
-                        embedding_model = create_embedding_model()
                         index_dir = paths.wiki_dir / "index"
-                        load_or_build_index(raw_dir, index_dir, embedding_model)
+                        load_or_build_search_index(raw_dir, index_dir)
 
                         parts.append(
                             "--- Raw Source Documents ---\n"
                             "Note: The local raw source documents are too large to display in full inline. "
-                            "A local vector search index has been created for this thread. "
+                            "A local text search index has been created for this thread. "
                             "You MUST use the `retrieve_documents` tool to query the documents and search "
                             "for specific factual evidence/data."
                         )
                     except Exception as e:
-                        logger.error(f"Failed to build vector index: {e}", exc_info=True)
+                        logger.error(f"Failed to build text search index: {e}", exc_info=True)
                         # Fallback to truncation if indexing fails
                         for raw_file in raw_files:
                             try:
@@ -328,23 +328,41 @@ class ResearchStateMiddleware(AgentMiddleware):
             return False
         return True
 
+    # Maximum seconds to wait for an in-progress wiki ingest to complete.
+    # Large documents (200+ page PDFs with OCR) can take 3-5 minutes:
+    #   ~60s PDF extraction + ~120s review pass + ~90s apply pass = ~270s
+    # Configurable via WIKI_INGEST_MAX_WAIT_SECONDS env var.
+    _WIKI_INGEST_MAX_WAIT = int(
+        os.environ.get("WIKI_INGEST_MAX_WAIT_SECONDS", "300")
+    )
+
     @staticmethod
     def _wait_for_wiki_ready(
-            thread_id: str, paths: "ThreadWikiPaths", max_wait: int = 90,
+            thread_id: str, paths: "ThreadWikiPaths", max_wait: int | None = None,
     ) -> bool:
         """Wait for an in-progress wiki ingest to complete.
 
         Polls the thread-wiki progress tracker.  Returns ``True`` if the wiki
         becomes ready within *max_wait* seconds, ``False`` otherwise (ingest
         failed, was cancelled, timed out, or no ingest was running).
+
+        Default max_wait is ``WIKI_INGEST_MAX_WAIT_SECONDS`` (300s).
         """
+        if max_wait is None:
+            max_wait = ResearchStateMiddleware._WIKI_INGEST_MAX_WAIT
         deadline = time.time() + max_wait
         poll_interval = 2  # seconds
         logged_waiting = False
+        last_phase = None
 
         while time.time() < deadline:
             # 1) Check if wiki is now ready (ingest may have just finished)
             if ResearchStateMiddleware._check_wiki_ready(paths):
+                if logged_waiting:
+                    logger.info(
+                        "Wiki ready for thread %s after %.0fs wait",
+                        thread_id, time.time() - (deadline - max_wait),
+                    )
                 return True
 
             # 2) Check if there's an active ingest to wait for
@@ -353,12 +371,22 @@ class ResearchStateMiddleware(AgentMiddleware):
                 if not logged_waiting:
                     logger.info(
                         "Wiki not ready — waiting for ingest to complete "
-                        "(phase: %s, progress: %d%%) for thread %s",
+                        "(phase: %s, progress: %d%%, max_wait: %ds) for thread %s",
+                        entry.progress.phase.value,
+                        entry.progress.progress,
+                        max_wait,
+                        thread_id,
+                    )
+                    logged_waiting = True
+                elif entry.progress.phase != last_phase:
+                    logger.info(
+                        "Wiki ingest phase changed: %s → %s (%d%%) for thread %s",
+                        last_phase.value if last_phase else "start",
                         entry.progress.phase.value,
                         entry.progress.progress,
                         thread_id,
                     )
-                    logged_waiting = True
+                last_phase = entry.progress.phase
                 time.sleep(poll_interval)
                 continue
 
@@ -377,10 +405,10 @@ class ResearchStateMiddleware(AgentMiddleware):
                     )
                 return False
 
+        elapsed = time.time() - (deadline - max_wait)
         logger.warning(
-            "Timed out waiting for wiki ingest after %ds for thread %s",
-            max_wait,
-            thread_id,
+            "Timed out waiting for wiki ingest after %.0fs (max_wait=%ds) for thread %s",
+            elapsed, max_wait, thread_id,
         )
         return False
 
@@ -408,7 +436,7 @@ class ResearchStateMiddleware(AgentMiddleware):
                 # Wiki not ready — try waiting for an in-progress ingest.
                 def _wait():
                     return ResearchStateMiddleware._wait_for_wiki_ready(
-                        thread_id, paths, max_wait=90,
+                        thread_id, paths,
                     )
 
                 try:
@@ -419,15 +447,21 @@ class ResearchStateMiddleware(AgentMiddleware):
                 if current_loop is not None and current_loop.is_running():
                     # Inside a running event loop (e.g. LangGraph Platform).
                     # Run the blocking wait in a separate thread.
+                    pool_timeout = (
+                        ResearchStateMiddleware._WIKI_INGEST_MAX_WAIT + 10
+                    )
                     try:
                         with concurrent.futures.ThreadPoolExecutor(
                                 max_workers=1,
                         ) as pool:
-                            wiki_ready = pool.submit(_wait).result(timeout=100)
+                            wiki_ready = pool.submit(_wait).result(
+                                timeout=pool_timeout,
+                            )
                     except concurrent.futures.TimeoutError:
                         logger.warning(
                             "Timed out waiting for wiki readiness "
-                            "(thread pool) for thread %s",
+                            "(thread pool, timeout=%ds) for thread %s",
+                            pool_timeout,
                             thread_id,
                         )
                         wiki_ready = False
@@ -461,6 +495,9 @@ class ResearchStateMiddleware(AgentMiddleware):
                         "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
                         "search the web to find the missing data. Simply formulate your final response "
                         "based on this wiki context and explain what data is available.\n\n"
+                        "IMPORTANT: The wiki content below is the COMPLETE answer. DO NOT use read_file "
+                        "or any other tool to try to access /raw/ or /wiki/ files — they are NOT accessible "
+                        "from your filesystem. The content you need is already provided here inline.\n\n"
                         f"{sanitized_wiki_answer}\n"
                         "</wiki_context>"
                     )), sanitized_wiki_answer
@@ -498,6 +535,9 @@ class ResearchStateMiddleware(AgentMiddleware):
                     "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
                     "search the web to find the missing data. Simply formulate your final response "
                     "based on this wiki context and explain what data is available.\n\n"
+                    "IMPORTANT: The wiki and raw document content below is ALREADY complete. "
+                    "DO NOT use read_file or any other tool to try to access /raw/ or /wiki/ files — "
+                    "they are NOT accessible from your filesystem. All content you need is inline.\n\n"
                     f"{fallback_content}\n"
                     "</wiki_context>"
                 )), None
@@ -864,6 +904,43 @@ class ResearchStateMiddleware(AgentMiddleware):
         if isinstance(chat_start_time, (int, float)):
             chat_elapsed_seconds = time.time() - chat_start_time
             updates["chat_elapsed_seconds"] = chat_elapsed_seconds
+
+        # ── Stream final report into chat history ─────────────────────────
+        # When /final_report.md appears AND the model is no longer emitting
+        # tool calls (research is winding down), stream its content as a chat
+        # message so the frontend displays the full report inline.
+        #
+        # cited_response*.md is NOT streamed here — during active research
+        # (wiki_query_complete=False) it is an internal reference document.
+        # Injecting it as a chat message mid-research would interrupt the
+        # agent's task loop and prevent final_report.md from being generated.
+        # The wiki-complete guard above already handles the case where wiki
+        # IS the final answer (wiki_query_complete=True).
+        state_files = state.get("files") or {}
+        if isinstance(state_files, dict) and not wiki_complete and not last_tool_calls:
+            streamed = set(state.get("_streamed_files") or [])
+            new_messages: list = []
+            for file_path in sorted(state_files.keys()):
+                if file_path in streamed:
+                    continue
+                if file_path != "/final_report.md":
+                    continue
+                try:
+                    content = file_data_to_string(state_files[file_path])
+                    if content.strip():
+                        new_messages.append(
+                            AIMessage(content=f"**Final Report:**\n\n{content.strip()}")
+                        )
+                        streamed.add(file_path)
+                except Exception:
+                    logger.debug("Failed to stream file %s to chat", file_path, exc_info=True)
+
+            if new_messages:
+                if "messages" in updates:
+                    updates["messages"].extend(new_messages)
+                else:
+                    updates["messages"] = new_messages
+                updates["_streamed_files"] = list(streamed)
 
         # Optional: Log eval metrics on completion (when graph is done)
         # This checks if we're at the end of execution by looking for final artifacts

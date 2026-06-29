@@ -562,7 +562,7 @@ async def get_thread_wiki_file(
 
     size = await asyncio.to_thread(lambda: target_file.stat().st_size)
 
-    if target_file.suffix.lower() in {".faiss", ".pkl"} or (len(rel_path.parts) > 0 and rel_path.parts[0] == "index"):
+    if target_file.suffix.lower() in {".pkl"} or (len(rel_path.parts) > 0 and rel_path.parts[0] == "index"):
         return {
             "thread_id": thread_id,
             "path": str(rel_path),

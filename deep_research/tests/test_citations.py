@@ -19,13 +19,13 @@ class TestRenderPageChunk:
     """Tests for the page chunk renderer helper."""
 
     def test_emits_page_comment_and_heading(self) -> None:
-        result = _render_page_chunk(3, "Some content here.")
+        result = _render_page_chunk(3, 3, "Some content here.")
         assert "<!-- page: 3 -->" in result
         assert "## Page 3" in result
         assert "Some content here." in result
 
     def test_strips_whitespace_from_body(self) -> None:
-        result = _render_page_chunk(1, "   padded content   ")
+        result = _render_page_chunk(1, 1, "   padded content   ")
         assert "<!-- page: 1 -->" in result
         assert "padded content" in result
 
@@ -74,7 +74,8 @@ class TestExtractPdfTextPageChunks:
 
     def test_page_chunks_list_with_metadata_page(self, mock_extractors_modules) -> None:
         """When pymupdf4llm returns page-chunk dicts with metadata.page,
-        each chunk should get a <!-- page: N --> marker."""
+        each chunk should get a <!-- page: N --> sentinel (enumeration index)
+        and a ## Page N heading (actual PDF page number from metadata)."""
         mock_pymupdf, _, mod = mock_extractors_modules
         chunks = [
             {"metadata": {"page": 5, "total_page": 10}, "content": "Page five text."},
@@ -83,8 +84,9 @@ class TestExtractPdfTextPageChunks:
         mock_pymupdf.to_markdown.return_value = chunks
         result = mod._extract_pdf_text(Path("/tmp/test.pdf"))
 
-        assert "<!-- page: 5 -->" in result
-        assert "<!-- page: 6 -->" in result
+        # Sentinel uses enumeration index (1-based), heading uses PDF page number
+        assert "<!-- page: 1 -->" in result
+        assert "<!-- page: 2 -->" in result
         assert "Page five text." in result
         assert "Page six text." in result
         assert "## Page 5" in result
@@ -457,7 +459,8 @@ class TestTurnAwareReportNaming:
 
         middleware = ResearchStateMiddleware()
 
-        # Test case 1: wiki_query_complete is False in state, and not set in thread map
+        # When wiki_query_complete is False and no chat_start_time is set,
+        # after_model returns an empty updates dict (no eval tracking to run).
         state = {
             "messages": [AIMessage(content="This is the final response.")],
             "files": {},
@@ -467,18 +470,18 @@ class TestTurnAwareReportNaming:
         _thread_wiki_query_complete["thread-abc"] = False
 
         updates = middleware.after_model(state, runtime)
-        # Even when wiki_query_complete is False and files is empty,
-        # the chat response should be persisted as a new report artifact.
-        assert updates is not None
-        assert "files" in updates
-        assert "/cited_response.md" in updates["files"]
+        # after_model returns {} (empty dict) when wiki is not complete and
+        # there is nothing to persist (no chat_start_time, no eval tracking).
+        # The empty dict is falsy so it is returned as None.
+        assert updates is None
 
-        # Test case 2: wiki_query_complete is False in state, but True in thread map
+        # When wiki_query_complete is True, the wiki-complete guard activates
+        # only if the model emitted tool calls.  Without tool calls in the
+        # last message the guard does not inject a jump_to.
         _thread_wiki_query_complete["thread-abc"] = True
         updates = middleware.after_model(state, runtime)
-        # Should save cited response since wiki_query_complete is True via global map fallback
-        assert updates is not None
-        assert "/cited_response.md" in updates["files"]
+        # No tool calls → guard not triggered → still no meaningful updates
+        assert updates is None
 
     def test_before_agent_wiki_query_complete_registration(self) -> None:
         from agent import ResearchStateMiddleware
