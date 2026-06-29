@@ -85,14 +85,17 @@ def _get_sqlite_conn():
 
 
 def _init_sqlite() -> None:
-    with _sqlite_lock:
-        conn = _get_sqlite_conn()
-        conn.executescript(f"{db_sql.CREATE_THREADS_TABLE}{db_sql.CREATE_RUNS_TABLE}")
+    try:
+        with _sqlite_lock:
+            conn = _get_sqlite_conn()
+            conn.executescript(f"{db_sql.CREATE_THREADS_TABLE}{db_sql.CREATE_RUNS_TABLE}")
 
-        thread_cols = {row[1] for row in conn.execute("PRAGMA table_info(threads)").fetchall()}
-        if "updated_at" not in thread_cols:
-            conn.execute(db_sql.ALTER_THREADS_ADD_UPDATED_AT)
-            conn.execute(db_sql.UPDATE_THREADS_SET_UPDATED_AT)
+            thread_cols = {row[1] for row in conn.execute("PRAGMA table_info(threads)").fetchall()}
+            if "updated_at" not in thread_cols:
+                conn.execute(db_sql.ALTER_THREADS_ADD_UPDATED_AT)
+                conn.execute(db_sql.UPDATE_THREADS_SET_UPDATED_AT)
+    except Exception as exc:
+        print(f"⚠️ SQLite database initialization warning (locking on CIFS network mount?): {exc}")
         if "state_updated_at" not in thread_cols:
             conn.execute(db_sql.ALTER_THREADS_ADD_STATE_UPDATED_AT)
         if "metadata" not in thread_cols:

@@ -364,7 +364,7 @@ properties:
           - name: MODEL_RETRY_JITTER
             value: "true"
           - name: MEMORY_TYPE
-            value: cosmosdb
+            value: ""
           - name: COSMOSDB_DB_NAME
             value: deep-research-checkpoints
           - name: COSMOSDB_CONTAINER_NAME
@@ -378,7 +378,7 @@ properties:
           - name: INPUT_FOLDER
             value: ${MOUNT_PATH}/input
           - name: SQLITE_DB_PATH
-            value: ${MOUNT_PATH}/deep_research.db
+            value: /deps/deep_research/deep_research.db
           - name: TAVILY_API_KEY
             secretRef: tavily-api-key
           - name: LANGCHAIN_API_KEY

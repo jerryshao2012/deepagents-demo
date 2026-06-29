@@ -84,8 +84,8 @@ async def _lifespan(app: FastAPI):
         import db
         db.init_db()
         print("✅ Database initialized via lifespan")
-    except (ImportError, AttributeError):
-        pass
+    except Exception as exc:
+        print(f"⚠️  Database initialization skipped or failed: {exc}")
 
     # Set up persistent LangGraph checkpointer if MEMORY_TYPE=sqlite|postgres.
     # Module-level import defaults to InMemorySaver; we swap it here once the

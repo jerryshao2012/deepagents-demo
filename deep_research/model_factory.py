@@ -192,9 +192,16 @@ def create_memory_saver():
         return InMemorySaver()
 
     if memory_type == "cosmosdb":
+        endpoint = os.environ.get("COSMOSDB_ENDPOINT")
+        if not endpoint:
+            logger.warning(
+                "MEMORY_TYPE=cosmosdb but COSMOSDB_ENDPOINT is not set; "
+                "falling back to InMemorySaver."
+            )
+            return InMemorySaver()
         return CosmosDBSaver(
-            database_name=os.environ["COSMOSDB_DB_NAME"],
-            container_name=os.environ["COSMOSDB_CONTAINER_NAME"],
+            database_name=os.environ.get("COSMOSDB_DB_NAME", "deep-research-checkpoints"),
+            container_name=os.environ.get("COSMOSDB_CONTAINER_NAME", "checkpoints"),
         )
 
     # For sqlite / postgres: return InMemorySaver at module-load time.
