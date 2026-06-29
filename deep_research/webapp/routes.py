@@ -860,12 +860,75 @@ def register_skills_routes(app) -> None:
             )
 
 
+# ── Chat Thread State (simplified LangGraph protocol, in-memory) ────────────────
+
+# In-memory store for thread state.  Mirrors the LangGraph /threads/{id}/state
+# protocol so the frontend cross-deployment sync can use the same API shape.
+_chat_thread_state: dict[str, dict[str, Any]] = {}
+
+
+def register_chat_thread_routes(app) -> None:
+    @app.get("/chat_threads/{thread_id}/state")
+    async def get_chat_thread_state(
+            thread_id: str,
+            request: Request,
+            x_api_key: str | None = Header(None),
+    ):
+        """Return thread state values.  Simplified LangGraph protocol."""
+        if not is_authenticated(x_api_key, request):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or missing API key.",
+            )
+
+        values = _chat_thread_state.get(thread_id, {})
+        return {"values": values}
+
+    @app.post("/chat_threads/{thread_id}/state")
+    async def update_chat_thread_state(
+            thread_id: str,
+            body: dict[str, Any],
+            request: Request,
+            x_api_key: str | None = Header(None),
+    ):
+        """Update thread state values.  Simplified LangGraph protocol.
+
+        Expects JSON body: ``{"values": {key: value, ...}}``.
+        Merges with existing values so partial updates are safe.
+        """
+        if not is_authenticated(x_api_key, request):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or missing API key.",
+            )
+
+        incoming = body.get("values") if isinstance(body, dict) else None
+        if not isinstance(incoming, dict):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Body must contain a 'values' object.",
+            )
+
+        current = _chat_thread_state.get(thread_id, {})
+        current.update(incoming)
+        _chat_thread_state[thread_id] = current
+
+        logger.debug(
+            "chat_thread_state updated: thread=%s keys=%s",
+            thread_id,
+            list(incoming.keys()),
+        )
+
+        return {"success": True}
+
+
 # ── Convenience: register everything at once ────────────────────────────────────
 
 def register_all_routes(app) -> None:
-    """Register health, storage, document, OAuth, and skills routes on *app*."""
+    """Register health, storage, document, OAuth, skills, and chat-thread routes on *app*."""
     register_health_routes(app)
     register_storage_routes(app)
     register_document_routes(app)
     register_oauth_routes(app)
     register_skills_routes(app)
+    register_chat_thread_routes(app)
