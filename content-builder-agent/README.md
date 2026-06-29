@@ -75,6 +75,10 @@ agent = create_deep_agent(
 
 The `memory` and `skills` parameters are handled natively by deepagents middleware. Tools are defined in the script and passed directly.
 
+You can control virtual filesystem behavior with `VIRTUAL_MODE`:
+- `VIRTUAL_MODE=true` (default): safer dry-run style behavior
+- `VIRTUAL_MODE=false`: write directly to disk
+
 **Note on subagents:** Unlike `memory` and `skills`, subagents must be defined in code. We use a small `load_subagents()` helper to externalize config to YAML. You can also define them inline:
 
 ```python
@@ -150,3 +154,8 @@ This agent has filesystem access and can read, write, and delete files on your m
 - `OLLAMA_API_BASE` - Ollama base URL for the main writing model
 - `GOOGLE_API_KEY` - For image generation (uses Gemini's [Imagen / "nano banana"](https://ai.google.dev/gemini-api/docs/image-generation) via `gemini-2.5-flash-image`)
 - `TAVILY_API_KEY` - For web search (optional, research still works without it)
+
+## Resources
+
+- [LangChain Academy](https://academy.langchain.com/) - Comprehensive, free courses on LangChain libraries and products, made by the LangChain team.
+- [Code of Conduct](https://github.com/langchain-ai/langchain/?tab=coc-ov-file) - Community guidelines and standards.

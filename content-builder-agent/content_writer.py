@@ -18,6 +18,7 @@ Usage:
 """
 
 import asyncio
+import io
 import os
 import sys
 from pathlib import Path
@@ -26,17 +27,15 @@ from typing import Literal
 import yaml
 from dotenv import load_dotenv
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
+import ollama
+from PIL import Image
+from google import genai
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.spinner import Spinner
-import ollama
-from PIL import Image
-import io
-from google import genai
 
 from deepagents import create_deep_agent
 from deepagents.backends import FilesystemBackend
@@ -46,8 +45,6 @@ from langchain_ollama import ChatOllama
 load_dotenv("../.env", override=True)
 
 # Add deep_research to path for retry utilities
-import sys
-from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "deep_research"))
 from retry_utils import retry_on_rate_limit
 
@@ -67,9 +64,9 @@ object.__setattr__(model, 'ainvoke', retry_on_rate_limit(model.ainvoke))
 # Web search tool for the researcher subagent
 @tool
 def web_search(
-        query: str,
-        max_results: int = 5,
-        topic: Literal["general", "news"] = "general",
+    query: str,
+    max_results: int = 5,
+    topic: Literal["general", "news"] = "general",
 ) -> dict:
     """Search the web for current information.
 
@@ -235,12 +232,14 @@ def load_subagents(config_path: Path) -> list:
 
 def create_content_writer():
     """Create a content writer agent configured by filesystem files."""
+    # Keep virtual mode enabled by default for safe local runs.
+    virtual_mode = os.getenv("VIRTUAL_MODE", "true").lower() in {"1", "true", "yes", "on"}
     return create_deep_agent(
         memory=["./AGENTS.md"],  # Loaded by MemoryMiddleware
         skills=["./skills/"],  # Loaded by SkillsMiddleware
         tools=[generate_cover, generate_social_image],  # Image generation
         subagents=load_subagents(EXAMPLE_DIR / "subagents.yaml"),  # Custom helper
-        backend=FilesystemBackend(root_dir=EXAMPLE_DIR, virtual_mode=True),
+        backend=FilesystemBackend(root_dir=EXAMPLE_DIR, virtual_mode=virtual_mode),
         model=model,
     )
 
@@ -326,11 +325,10 @@ async def main():
 
     # Use Live display for spinner during waiting periods
     with Live(display.spinner, console=console, refresh_per_second=10, transient=True) as live:
-        config: RunnableConfig = {"configurable": {"thread_id": "content-writer-demo"}}
         async for chunk in agent.astream(
-                {"messages": [("user", task)]},
-                config=config,
-                stream_mode="values",
+            {"messages": [("user", task)]},
+            config={"configurable": {"thread_id": "content-writer-demo"}},
+            stream_mode="values",
         ):
             if "messages" in chunk:
                 messages = chunk["messages"]
