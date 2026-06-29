@@ -9,7 +9,7 @@ mount).  This module adds:
 - **Background uploads**: push newly-written files to S3 after each write.
 - **Fire-and-forget**: uploads never block the request path.
 
-Usage in webapp.py / server.py:
+Usage in webapp.py / the LangGraph Platform app:
     from s3_storage import startup_sync, fire_and_forget_upload, upload_directory_sync
 
     # On startup (inside lifespan)

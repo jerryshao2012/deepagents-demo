@@ -13,11 +13,11 @@ from research_agent.utils.skill_registry import SkillRegistry
 def test_basic_loading():
     registry = SkillRegistry()
     print(f"\n✓ Registry initialized: {registry}")
-    print(f"✓ Number of legacy skills loaded: {registry.num_skills}")
-    print(f"✓ Legacy Skill IDs: {registry.skill_ids}")
+    print(f"✓ Number of skills loaded: {registry.num_skills}")
+    print(f"✓ Skill IDs: {registry.skill_ids}")
     print(f"✓ Migrated SKILL_IDS: {sorted(registry.SKILL_IDS)}")
 
-    assert registry.num_skills == 0, "No legacy skills should remain"
+    assert registry.num_skills >= 9, "At least 9 skills should be loaded"
     assert len(registry.SKILL_IDS) >= 9, "At least 9 migrated skills"
     print("✅ Basic loading test PASSED\n")
 
@@ -25,14 +25,15 @@ def test_basic_loading():
 def test_skill_summaries():
     registry = SkillRegistry()
     summaries = registry.get_all_summaries()
-    assert len(summaries) == 0, "No legacy skill summaries"
+    assert len(summaries) >= 9, "Skill summaries should be populated"
     print("✅ Skill summaries test PASSED\n")
 
 
-def test_skill_catalog_is_empty():
+def test_skill_catalog_is_populated():
     registry = SkillRegistry()
     catalog = registry.format_skill_catalog()
-    assert catalog == "" or "No" in catalog
+    assert len(catalog) > 0, "Skill catalog should not be empty"
+    assert "autoresearch-universal" in catalog
     print("✅ Skill catalog test PASSED\n")
 
 
@@ -62,7 +63,7 @@ def main():
     try:
         test_basic_loading()
         test_skill_summaries()
-        test_skill_catalog_is_empty()
+        test_skill_catalog_is_populated()
         test_migrated_skill_ids_include_all_skills()
 
         print("=" * 80)

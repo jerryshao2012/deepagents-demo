@@ -68,172 +68,88 @@ class SkillRegistry:
     _QUALITY_GUIDELINES_SECTION_RE = re.compile(r"^## Quality Guidelines\s*$", re.MULTILINE)
     SUPPORTED_RENDER_TEMPLATES = {"markdown_blocks"}
 
-    def __init__(self, skills_dir: str | Path | None = None, config_file: str | Path | None = None):
+    def __init__(self, skills_dir: str | Path | list[str | Path] | None = None):
         """Initialize the skill registry.
 
         Args:
-            skills_dir: Path to the skills directory. Defaults to research_agent/skills/
-            config_file: Path to skill_config.yaml. Defaults to research_agent/utils/skill_config.yaml
+            skills_dir: Path or list of paths to skills directories.
+                Defaults to [.deepagents/skills/, docs/.deepagents/skills/].
         """
+        base_dir = Path(__file__).resolve().parent.parent.parent
         if skills_dir is None:
-            # Default to the skills directory relative to this file
-            self.skills_dir = Path(__file__).parent.parent / "skills"
+            self.skills_dirs: list[Path] = [
+                base_dir / ".deepagents" / "skills",
+                base_dir / "docs" / ".deepagents" / "skills",
+            ]
+        elif isinstance(skills_dir, (str, Path)):
+            self.skills_dirs = [Path(skills_dir)]
         else:
-            self.skills_dir = Path(skills_dir)
-
-        # Load skill configuration
-        self._available_skills = self._load_skill_config(config_file)
+            self.skills_dirs = [Path(p) for p in skills_dir]
 
         self._skills: dict[str, SkillInfo] = {}
         self._load_timestamps: dict[str, float] = {}
         self._skill_definitions: dict[str, dict[str, Any]] = {}
-        self._skills_ids: set[str] | None = None  # cached, populated lazily by SKILL_IDS property
+        self._skills_ids: set[str] | None = None  # cached; populated by _load_all_skills() at import time
         self._load_all_skills()
 
     @property
     def SKILL_IDS(self) -> set[str]:
-        """Skill IDs auto-discovered from .deepagents/skills/ and ./doc/.deepagents/skills/.
+        """Skill IDs auto-discovered from configured skills directories.
 
-        Scans the directories on access and caches the result so that
-        adding a new skill only requires dropping its folder into
-        .deepagents/skills/ or ./doc/.deepagents/skills/ — no code changes needed.
+        Populated eagerly by ``_load_all_skills()`` at import time so that
+        accessing this property during graph execution never triggers
+        synchronous filesystem I/O (which ``langgraph dev``'s ``blockbuster``
+        would flag as a blocking call).
         """
         if self._skills_ids is not None:
             return self._skills_ids
 
-        ids: set[str] = set()
-        deepagents_skills_dir = (
-                Path(__file__).resolve().parent.parent.parent / ".deepagents" / "skills"
-        )
-        docs_skills_dir = (
-                Path(__file__).resolve().parent.parent.parent / "docs" / ".deepagents" / "skills"
-        )
-
-        for s_dir in (deepagents_skills_dir, docs_skills_dir):
-            if s_dir.is_dir():
-                for skill_dir in s_dir.iterdir():
-                    if not skill_dir.is_dir():
-                        continue
-                    skill_file = skill_dir / "SKILL.md"
-                    if not skill_file.is_file():
-                        continue
-                    try:
-                        content = skill_file.read_text(encoding="utf-8")
-                        match = self._FRONTMATTER_RE.match(content)
-                        if match:
-                            frontmatter = yaml.safe_load(match.group(1))
-                            name = frontmatter.get("name", skill_dir.name)
-                            ids.add(name)
-                    except Exception:
-                        continue
-
-        self._skills_ids = ids
-        return ids
-
-    @staticmethod
-    def _load_skill_config(config_file: str | Path | None = None) -> list[str] | None:
-        """Load skill configuration from YAML file.
-
-        Args:
-            config_file: Path to the skill_config.yaml file
-
-        Returns:
-            List of available skill IDs, or None if no config file (load all skills)
-        """
-        if config_file is None:
-            # Default config location
-            config_file = Path(__file__).parent / "skill_config.yaml"
-
-            if config_file:
-                config_path = Path(config_file)
-                if not config_path.exists():
-                    logger.error(f"Warning: Skill config file not found: {config_path}. Loading all skills.")
-                    return None
-
-                try:
-                    with open(config_path, 'r', encoding='utf-8') as f:
-                        config = yaml.safe_load(f)
-
-                    if not config or 'skill' not in config or 'available' not in config['skill']:
-                        logger.error(f"Warning: Invalid skill config format in {config_path}. Loading all skills.")
-                        return None
-
-                    available = config['skill']['available']
-                    if isinstance(available, list):
-                        # Extract skill IDs (first part before ': ' if present)
-                        skill_ids = []
-                        for item in available:
-                            if isinstance(item, str):
-                                # Format: "skill-id/skill-name"
-                                skill_id = item.strip()
-                                skill_ids.append(skill_id)
-                            elif isinstance(item, dict):
-                                # Alternative format with explicit id field
-                                skill_ids.append(item.get('id', ''))
-
-                        logger.info(f"Loaded skill config: {len(skill_ids)} skills configured")
-                        return skill_ids
-                    else:
-                        logger.warning(f"Warning: 'available' should be a list in {config_path}. Loading all skills.")
-                        return None
-
-                except Exception as e:
-                    logger.error(f"Warning: Failed to load skill config {config_path}: {e}. Loading all skills.")
-                    return None
-
-        logger.error(f"Warning: Failed to find skill config file - {config_file}.")
-        return None
+        # Fallback lazy path (should rarely be needed — _load_all_skills()
+        # sets _skills_ids during __init__).  Kept for callers that
+        # construct a SkillRegistry without triggering full skill loading.
+        self._skills_ids = set(self._skills.keys())
+        return self._skills_ids
 
     def _load_all_skills(self) -> None:
-        """Scan and load all skills from the skills directory."""
-        if not self.skills_dir.exists():
-            logger.error(f"Warning: Skills directory not found: {self.skills_dir}")
-            return
-
+        """Scan and load all skills from the skills directories."""
         loaded_count = 0
-        skipped_count = 0
 
-        # Iterate through all subdirectories in the skills folder
-        for skill_path in sorted(self.skills_dir.iterdir()):
-            if not skill_path.is_dir():
+        for s_dir in self.skills_dirs:
+            if not s_dir.exists():
                 continue
 
-            skill_file = skill_path / "SKILL.md"
-            if not skill_file.exists():
-                continue
+            # Iterate through all subdirectories in the skills folder
+            for skill_path in sorted(s_dir.iterdir()):
+                if not skill_path.is_dir():
+                    continue
 
-            try:
-                parsed_skill = self._parse_skill_file(skill_file)
-                if parsed_skill:
-                    # Use the 'name' field from frontmatter as skill_id (not directory name)
-                    skill_id = parsed_skill.get("name", skill_path.name)
+                skill_file = skill_path / "SKILL.md"
+                if not skill_file.exists():
+                    continue
 
-                    # Skip skills that have been migrated to SkillsMiddleware
-                    if skill_id in self.SKILL_IDS:
-                        skipped_count += 1
-                        continue
+                try:
+                    parsed_skill = self._parse_skill_file(skill_file)
+                    if parsed_skill:
+                        # Use the 'name' field from frontmatter as skill_id (not directory name)
+                        skill_id = parsed_skill.get("name", skill_path.name)
 
-                    # Check if skill is in the allowed list (if config exists)
-                    if self._available_skills is not None and skill_id not in self._available_skills:
-                        skipped_count += 1
-                        continue
+                        parsed_skill["skill_id"] = skill_id
+                        parsed_skill["path"] = skill_path
+                        self._skills[skill_id] = SkillInfo(
+                            **{k: v for k, v in parsed_skill.items() if k not in ["skill_definition"]})
+                        if "skill_definition" in parsed_skill:
+                            self._skill_definitions.update(parsed_skill["skill_definition"])
+                        self._load_timestamps[skill_id] = skill_file.stat().st_mtime
+                        loaded_count += 1
+                except Exception as e:
+                    logger.error(f"Warning: Failed to load skill from {skill_file}: {e}")
+                    continue
 
-                    parsed_skill["skill_id"] = skill_id
-                    parsed_skill["path"] = skill_path
-                    self._skills[skill_id] = SkillInfo(
-                        **{k: v for k, v in parsed_skill.items() if k not in ["skill_definition"]})
-                    if "skill_definition" in parsed_skill:
-                        self._skill_definitions.update(parsed_skill["skill_definition"])
-                    self._load_timestamps[skill_id] = skill_file.stat().st_mtime
-                    loaded_count += 1
-            except Exception as e:
-                logger.error(f"Warning: Failed to load skill from {skill_file}: {e}")
-                continue
+        logger.info(f"Loaded {loaded_count} skills across {len(self.skills_dirs)} directories")
 
-        if self._available_skills is not None:
-            logger.info(f"Loaded {loaded_count} skills, skipped {skipped_count} (filtered by config)")
-        else:
-            logger.info(f"Loaded {loaded_count} skills (no config filter)")
+        # Pre-cache skill IDs so that SKILL_IDS never triggers lazy disk I/O
+        # during graph execution (avoids langgraph dev blockbuster errors).
+        self._skills_ids = set(self._skills.keys())
 
     def _parse_skill_file(self, file_path: Path) -> dict[str, Any] | None:
         """Parse a SKILL.md file, extracting frontmatter and body.
@@ -444,12 +360,9 @@ class SkillRegistry:
         self._load_timestamps.clear()
         self._skill_definitions.clear()
 
-        if reload_config:
-            self._available_skills = self._load_skill_config()
-        else:
-            self._load_all_skills()
+        self._load_all_skills()
 
-        logger.info(f"Reloaded {len(self._skills)} skills from {self.skills_dir}")
+        logger.info(f"Reloaded {len(self._skills)} skills from {self.skills_dirs}")
 
     @property
     def skill_ids(self) -> list[str]:
@@ -462,7 +375,7 @@ class SkillRegistry:
         return len(self._skills)
 
     def __repr__(self) -> str:
-        return f"SkillRegistry(num_skills={self.num_skills}, dir={self.skills_dir})"
+        return f"SkillRegistry(num_skills={self.num_skills}, dirs={self.skills_dirs})"
 
     def _extract_schema_block(self, body: str, path: Path) -> tuple[str, dict[str, Any] | None]:
         schema_heading = self._SCHEMA_SECTION_RE.search(body)

@@ -1218,9 +1218,11 @@ RECURSION_LIMIT = int(os.environ.get("GRAPH_RECURSION_LIMIT", "200"))
 # The `skills` parameter auto-creates SkillsMiddleware backed by the agent's
 # internal FilesystemBackend — all skills live in .deepagents/skills/.
 # The checkpointer provides persistent state per thread_id — configurable via
-# MEMORY_TYPE env var (memory=silent|sqlite|postgres|cosmosdb).
+# MEMORY_TYPE env var (memory|sqlite|postgres|cosmosdb).
+# When unset (default for langgraph dev / LangGraph Platform), the graph is
+# created without a checkpointer and the platform injects its own persistence.
 checkpointer = create_memory_saver()
-agent = create_deep_agent(
+_agent_kwargs: dict[str, Any] = dict(
     model=model,
     tools=[
         think_tool,
@@ -1234,7 +1236,10 @@ agent = create_deep_agent(
     subagents=[research_sub_agent],
     middleware=[ResearchStateMiddleware()],
     skills=[".deepagents/skills/", "./doc/.deepagents/skills/", "./docs/.deepagents/skills/"],
-    checkpointer=checkpointer,
-).with_config(
+)
+if checkpointer is not None:
+    _agent_kwargs["checkpointer"] = checkpointer
+
+agent = create_deep_agent(**_agent_kwargs).with_config(
     RunnableConfig(recursion_limit=RECURSION_LIMIT)
 )

@@ -1,29 +1,37 @@
-"""Async Subagent Server — Agent Protocol over FastAPI.
+"""DEPRECATED — Custom LangGraph Platform API server.
 
-Extends the existing FastAPI app in webapp.py to support LangGraph-style
-async subagent endpoints with integrated security authentication,
-pluggable database backends (SQLite, CosmosDB, PostgreSQL), thread-safe /
-concurrency-safe task execution and cancellation, and Pydantic request validation.
+⚠️  This file is deprecated.  Use the official LangGraph Platform server instead::
 
-Examples:
-# Start on the default port (2024)
-$env:UVICORN_RELOAD="false"
-uv run python run.py
+        langgraph dev
 
-# Start explicitly on 2024
-export UPLOAD_PORT=2024
-uv run python run.py
+    The official server provides the full LangGraph Platform API surface
+    (threads, runs, SSE streaming, checkpoint-based persistence, Studio UI)
+    that this custom implementation attempted to replicate.  After extensive
+    testing we found that the official platform is the only reliable way to
+    serve a LangGraph agent to the ``@langchain/langgraph-sdk`` client.
 
-# If you use uvicorn directly, pass the port explicitly because __main__ is not executed
-uvicorn server:app --reload --port 2024
+    This file is kept for reference only and will be removed in a future release.
+
+    For document uploads (port 8000), run::
+
+        uv run python -m webapp
 """
 
 from __future__ import annotations
 
+import os
+
+# ── Before any project imports: ensure MEMORY_TYPE is set ─────────────────
+# When running under langgraph dev / LangGraph Platform the env var is NOT
+# set and the platform provides its own persistence.  When running via our
+# custom server.py we default to InMemorySaver so that state survives within
+# the process lifetime.
+if not os.environ.get("MEMORY_TYPE", "").strip():
+    os.environ["MEMORY_TYPE"] = "memory"
+
 import asyncio
 import json
 import logging
-import os
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -38,7 +46,7 @@ from pydantic import BaseModel, Field
 # Import DB wrapper
 import db
 # Import the actual deep_research agent
-from agent import agent
+from agent import agent, RECURSION_LIMIT
 # Import shared authentication logic
 from auth import authenticate_credential
 from research_agent.prompts import RESEARCHER_DESCRIPTION
@@ -138,6 +146,10 @@ class ThreadHistoryRequest(BaseModel):
 class RunStreamRequest(BaseModel):
     assistant_id: str = "researcher"
     input: dict[str, Any] | list[Any] | str | int | float | bool | None = None
+    config: dict[str, Any] | None = None
+    stream_mode: list[str] | None = None
+    stream_resumable: bool | None = None
+    on_disconnect: str | None = None
     multitask_strategy: str | None = None
 
 
@@ -168,7 +180,8 @@ def _api_thread(thread: dict[str, Any]) -> dict[str, Any]:
         "state_updated_at": thread.get("state_updated_at"),
         "metadata": thread.get("metadata") or {},
         "status": thread.get("status") or "idle",
-        "values": thread.get("values") or {},
+        "config": thread.get("config") or {},
+        "values": thread.get("values") or None,
     }
 
 
@@ -222,6 +235,13 @@ def _build_thread_history_item(thread: dict[str, Any]) -> dict[str, Any]:
     checkpoint_id = str(checkpoint_time or uuid.uuid4())
 
     return {
+        "config": {
+            "configurable": {
+                "thread_id": thread.get("thread_id"),
+                "checkpoint_ns": "",
+                "checkpoint_id": checkpoint_id,
+            },
+        },
         "checkpoint": {
             "thread_id": thread.get("thread_id"),
             "checkpoint_ns": "",
@@ -260,6 +280,13 @@ async def _resolve_thread_history(
                     msgs = values.get("messages", [])
                     values["messages"] = [serialize_message(m) for m in msgs]
                 items.append({
+                    "config": {
+                        "configurable": {
+                            "thread_id": thread_id,
+                            "checkpoint_ns": cpt_config.get("checkpoint_ns", ""),
+                            "checkpoint_id": cpt_config.get("checkpoint_id", ""),
+                        },
+                    },
                     "checkpoint": {
                         "thread_id": thread_id,
                         "checkpoint_ns": cpt_config.get("checkpoint_ns", ""),
@@ -325,18 +352,90 @@ def _get_thread_with_auth(thread_id: str, current_user: Auth.types.MinimalUserDi
 
 
 def serialize_message(m: Any) -> dict[str, Any]:
-    """Convert a LangChain message object or a dictionary to a standard serializable format."""
-    if isinstance(m, dict):
-        return m
-    role = getattr(m, "type", "user")
-    if role == "human":
-        role = "user"
-    elif role == "ai":
-        role = "assistant"
+    """Convert a LangChain message object or a dictionary to the standard
+    LangGraph Platform serializable format understood by @langchain/langgraph-sdk.
 
-    res = {"role": role, "content": getattr(m, "content", "")}
-    if hasattr(m, "name") and m.name:
-        res["name"] = m.name
+    Matches the serialization produced by ``langgraph dev`` so the SDK's
+    ``useStream()`` hook sees identical message shapes whether served from
+    the platform or from our custom ``server.py``.
+
+    Includes all fields the platform emits: ``additional_kwargs``,
+    ``response_metadata``, ``tool_calls``, ``invalid_tool_calls``,
+    ``usage_metadata``, ``tool_call_id``, ``artifact``, ``status``, ``name``.
+    """
+    # ── Dict-based messages (from DB or client) ──────────────────────────
+    if isinstance(m, dict):
+        out = dict(m)
+        # Normalise type field
+        if "role" in out and "type" not in out:
+            out["type"] = out.pop("role")
+        msg_type = out.get("type", "user")
+        if msg_type == "user":
+            out["type"] = "human"
+        elif msg_type == "assistant" or msg_type == "AIMessage":
+            out["type"] = "ai"
+        # Ensure unique id
+        if "id" not in out or not out["id"]:
+            out["id"] = str(uuid.uuid4())
+        # Fill in missing LangChain serialization fields with defaults
+        out.setdefault("name", None)
+        out.setdefault("additional_kwargs", {})
+        out.setdefault("response_metadata", {})
+        if out["type"] == "ai":
+            out.setdefault("tool_calls", [])
+            out.setdefault("invalid_tool_calls", [])
+            out.setdefault("usage_metadata", None)
+        elif out["type"] == "tool":
+            out.setdefault("tool_call_id", out.get("tool_call_id", ""))
+            out.setdefault("artifact", None)
+            out.setdefault("status", "success")
+        return out
+
+    # ── LangChain message objects ───────────────────────────────────────
+    msg_type = getattr(m, "type", "human")
+    if msg_type == "human":
+        wire_type = "human"
+    elif msg_type == "ai":
+        wire_type = "ai"
+    elif msg_type == "tool":
+        wire_type = "tool"
+    elif msg_type == "system":
+        wire_type = "system"
+    else:
+        wire_type = "human"
+
+    content = getattr(m, "content", "")
+    msg_id = getattr(m, "id", "") if hasattr(m, "id") else ""
+    msg_name = getattr(m, "name", None) if hasattr(m, "name") else None
+
+    # Common base for all message types
+    res: dict[str, Any] = {
+        "type": wire_type,
+        "content": content,
+        "id": msg_id or str(uuid.uuid4()),
+        "name": msg_name if msg_name else None,
+        "additional_kwargs": getattr(m, "additional_kwargs", None) or {},
+        "response_metadata": getattr(m, "response_metadata", None) or {},
+    }
+
+    if wire_type == "ai":
+        tool_calls = getattr(m, "tool_calls", None) or []
+        res["tool_calls"] = [
+            {
+                "id": tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", ""),
+                "name": tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", ""),
+                "args": tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {}),
+            }
+            for tc in tool_calls
+        ]
+        res["invalid_tool_calls"] = getattr(m, "invalid_tool_calls", None) or []
+        res["usage_metadata"] = getattr(m, "usage_metadata", None)
+
+    elif wire_type == "tool":
+        res["tool_call_id"] = getattr(m, "tool_call_id", "")
+        res["artifact"] = getattr(m, "artifact", None)
+        res["status"] = getattr(m, "status", "success") or "success"
+
     return res
 
 
@@ -346,24 +445,33 @@ async def _stream_run_events(
         thread_id: str,
         run_id: str,
         input_state: dict[str, Any],
+        *,
+        recursion_limit: int = RECURSION_LIMIT,
 ) -> AsyncGenerator[str, None]:
     """Stream agent execution as SSE events for langgraph-sdk useStream().
 
     Wraps ``agent.astream_events()`` and maps LangGraph v2 events to
-    SDK-compatible SSE frames:
+    SDK-compatible SSE frames.  Uses multiple fallback strategies to
+    ensure AI message content reaches the UI even when the model
+    provider does not emit on_chat_model_stream events.
 
-    * ``on_chat_model_stream`` → ``messages`` (token-level AI content deltas)
-    * ``on_tool_start``       → ``updates``  (tool execution started)
-    * ``on_tool_end``         → ``updates``  (tool execution completed)
-    * ``on_chain_end``        → ``values``   (final state snapshot)
-    * Always emits ``metadata`` first and ``end`` last.
-
-    On cancellation, emits ``end`` with ``status: interrupted``.
-    On error, emits ``error`` with detail + traceback.
+    Strategy (in priority order):
+      1. on_chat_model_stream → token-level AIMessageChunk events
+      2. on_chat_model_end → full AIMessage events
+      3. on_chain_end (agent / model nodes) → full AIMessage events
+      4. Post-stream state diff → any remaining new AI messages
     """
     _logger = logging.getLogger(__name__)
     seq = 0
-    config = {"configurable": {"thread_id": thread_id}}
+    config = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": recursion_limit,
+    }
+    _seen_event_types: set[str] = set()
+    _emitted_message_ids: set[str] = set()  # track which AI msgs we've sent
+
+    # Record initial message count so we can find new messages post-stream
+    _initial_msg_count = len(input_state.get("messages", []))
 
     # Emit initial metadata
     yield _sse_frame("metadata", {
@@ -374,9 +482,17 @@ async def _stream_run_events(
     }, event_id=seq)
     seq += 1
 
-    # Track tool calls to correlate start/end
+    # Emit initial values so the UI shows the user's message immediately
+    initial_values = dict(input_state)
+    initial_values["messages"] = [
+        serialize_message(m) for m in input_state.get("messages", [])
+    ]
+    yield _sse_frame("values", initial_values, event_id=seq)
+    seq += 1
+
     _tool_start_times: dict[str, float] = {}
-    _last_tool_name: str | None = None
+    _chain_end_count = 0  # debug counter
+    _debug_events_logged: set[str] = set()  # track which events we've debug-logged
 
     try:
         async for event in agent.astream_events(
@@ -385,6 +501,22 @@ async def _stream_run_events(
                 version="v2",
         ):
             event_type = event.get("event", "")
+            _seen_event_types.add(event_type)
+
+            # Debug: log the first occurrence of key event types with sample data
+            if event_type not in _debug_events_logged and event_type in (
+                    "on_chat_model_start", "on_chat_model_stream", "on_chat_model_end",
+                    "on_chain_start", "on_chain_end", "on_llm_start", "on_llm_end",
+                    "on_llm_stream",
+            ):
+                _debug_events_logged.add(event_type)
+                # Log a safe subset of the event data
+                event_name = event.get("name", "")
+                event_data_keys = list(event.get("data", {}).keys()) if event.get("data") else []
+                _logger.info(
+                    "[stream %s] Event DEBUG — type=%s name=%s data_keys=%s",
+                    run_id, event_type, event_name, event_data_keys,
+                )
 
             # ── Token-level AI message streaming ──
             if event_type == "on_chat_model_stream":
@@ -392,9 +524,11 @@ async def _stream_run_events(
                 if chunk is None:
                     continue
                 content = getattr(chunk, "content", None)
+                # Also try dict-style access (some providers return dicts)
+                if content is None and isinstance(chunk, dict):
+                    content = chunk.get("content")
                 if content:
                     if isinstance(content, list):
-                        # Multi-modal content blocks
                         text_parts = [
                             p.get("text", "") if isinstance(p, dict) else str(p)
                             for p in content
@@ -404,11 +538,145 @@ async def _stream_run_events(
                         text = "".join(text_parts)
                     else:
                         text = str(content)
-                    if text:
+                    if text and text.strip():
+                        chunk_id = (
+                            getattr(chunk, "id", "")
+                            if not isinstance(chunk, dict)
+                            else chunk.get("id", "")
+                        )
+                        # Use chunk's own id, or generate a unique one — never
+                        # reuse run_id across chunks (causes React key warnings).
+                        msg_id = chunk_id or f"{run_id}-chunk-{seq}"
                         yield _sse_frame("messages", [{
                             "type": "AIMessageChunk",
-                            "id": getattr(chunk, "id", run_id),
+                            "id": msg_id,
                             "content": text,
+                        }], event_id=seq)
+                        seq += 1
+
+            # ── Fallback 1: full message on chat model end ──
+            elif event_type == "on_chat_model_end":
+                output = event.get("data", {}).get("output")
+                if output is None:
+                    continue
+                content = getattr(output, "content", None)
+                if content is None and isinstance(output, dict):
+                    content = output.get("content")
+                # Handle list-form content (Google Gemini multi-part responses)
+                if isinstance(content, list):
+                    content = "".join(
+                        p.get("text", "") if isinstance(p, dict) else str(p)
+                        for p in content
+                    )
+                msg_id = (
+                    getattr(output, "id", "") if not isinstance(output, dict)
+                    else output.get("id", "")
+                )
+                if content and str(content).strip() and msg_id not in _emitted_message_ids:
+                    if msg_id:
+                        _emitted_message_ids.add(msg_id)
+                    else:
+                        # Generate a unique fallback id so React keys don't clash
+                        msg_id = f"{run_id}-msg-{seq}"
+                        _emitted_message_ids.add(msg_id)
+                    # Include tool_calls so the SDK renders tool call indicators
+                    tc_list = (
+                        getattr(output, "tool_calls", None) if not isinstance(output, dict)
+                        else output.get("tool_calls")
+                    )
+                    msg_payload: dict[str, Any] = {
+                        "type": "ai",
+                        "id": msg_id,
+                        "content": str(content),
+                    }
+                    if tc_list:
+                        msg_payload["tool_calls"] = [
+                            {
+                                "id": tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", ""),
+                                "name": tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", ""),
+                                "args": tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {}),
+                            }
+                            for tc in tc_list
+                        ]
+                    yield _sse_frame("messages", [msg_payload], event_id=seq)
+                    seq += 1
+
+            # ── Fallback 2: chain end for agent / model nodes ──
+            elif event_type == "on_chain_end":
+                chain_name = event.get("name", "")
+                output = event.get("data", {}).get("output")
+                if output is None:
+                    continue
+
+                # Extract candidate messages from various output shapes
+                candidates: list[Any] = []
+                if isinstance(output, list):
+                    candidates = output
+                elif isinstance(output, dict):
+                    # LangGraph node output: {"messages": [...], "todos": [...], ...}
+                    candidates = output.get("messages", [])
+                    if not candidates:
+                        candidates = [output]  # maybe a serialized message dict
+                else:
+                    candidates = [output]
+
+                for m in candidates:
+                    msg_type = getattr(m, "type", None) if not isinstance(m, dict) else m.get("type")
+                    if msg_type not in ("ai", "AIMessageChunk"):
+                        continue
+                    c = getattr(m, "content", None) if not isinstance(m, dict) else m.get("content")
+                    if isinstance(c, list):
+                        # Google Gemini sometimes returns content as a list of parts
+                        c = "".join(
+                            p.get("text", "") if isinstance(p, dict) else str(p)
+                            for p in c
+                        )
+                    mid = getattr(m, "id", "") if not isinstance(m, dict) else m.get("id", "")
+                    if c and str(c).strip() and mid not in _emitted_message_ids:
+                        if mid:
+                            _emitted_message_ids.add(mid)
+                        else:
+                            mid = f"{run_id}-msg-{seq}"
+                            _emitted_message_ids.add(mid)
+                        yield _sse_frame("messages", [{
+                            "type": "ai",
+                            "id": mid,
+                            "content": str(c),
+                        }], event_id=seq)
+                        seq += 1
+
+            # ── v1 event names (on_llm_*) — some providers use these ──
+            elif event_type == "on_llm_stream":
+                chunk = event.get("data", {}).get("chunk")
+                if chunk is not None:
+                    content = getattr(chunk, "content", None) if not isinstance(chunk, dict) else chunk.get("content")
+                    text = "".join(
+                        p.get("text", "") if isinstance(p, dict) else str(p)
+                        for p in (content if isinstance(content, list) else [content])
+                    ) if isinstance(content, list) else str(content) if content else ""
+                    if text.strip():
+                        yield _sse_frame("messages", [{
+                            "type": "AIMessageChunk",
+                            "id": f"{run_id}-llm-chunk-{seq}",
+                            "content": text,
+                        }], event_id=seq)
+                        seq += 1
+
+            elif event_type == "on_llm_end":
+                output = event.get("data", {}).get("output")
+                if output is not None:
+                    content = getattr(output, "content", None) if not isinstance(output, dict) else output.get(
+                        "content")
+                    if isinstance(content, list):
+                        content = "".join(
+                            p.get("text", "") if isinstance(p, dict) else str(p)
+                            for p in content
+                        )
+                    if content and str(content).strip():
+                        yield _sse_frame("messages", [{
+                            "type": "ai",
+                            "id": f"{run_id}-llm-msg-{seq}",
+                            "content": str(content),
                         }], event_id=seq)
                         seq += 1
 
@@ -417,16 +685,11 @@ async def _stream_run_events(
                 tool_name = event.get("name", "unknown")
                 run_name = event.get("run_id", "")
                 _tool_start_times[run_name] = time.time()
-                _last_tool_name = tool_name
-                tool_input = event.get("data", {}).get("input", {})
                 _logger.info("[stream %s] Tool started: %s", run_id, tool_name)
-                yield _sse_frame("updates", {
-                    "run_id": run_id,
-                    "status": "running",
-                    "type": "tool_call",
-                    "tool_name": tool_name,
-                }, event_id=seq)
-                seq += 1
+                # Don't emit an updates event here — the SDK would render a
+                # perpetually-spinning tool call.  Instead the AI message's
+                # tool_calls (emitted in on_chat_model_end) already tells the
+                # UI which tools are being invoked.
 
             # ── Tool execution completed ──
             elif event_type == "on_tool_end":
@@ -436,38 +699,86 @@ async def _stream_run_events(
                 if run_name in _tool_start_times:
                     elapsed = f" ({time.time() - _tool_start_times[run_name]:.1f}s)"
                 _logger.info("[stream %s] Tool completed: %s%s", run_id, tool_name, elapsed)
+                # Emit the ToolMessage via an updates event in the standard
+                # LangGraph node-output format so the SDK renders it as a
+                # completed tool result.
+                output = event.get("data", {}).get("output")
+                if output is not None:
+                    tool_msg = serialize_message(output)
+                else:
+                    tool_msg = {
+                        "type": "tool",
+                        "id": run_name,
+                        "name": tool_name,
+                        "content": "",
+                        "tool_call_id": run_name,
+                    }
                 yield _sse_frame("updates", {
-                    "run_id": run_id,
-                    "status": "running",
-                    "type": "tool_result",
-                    "tool_name": tool_name,
+                    "tools": {
+                        "messages": [tool_msg]
+                    }
                 }, event_id=seq)
                 seq += 1
 
-        # ── Agent finished successfully ──
+        _logger.info("[stream %s] astream_events complete. Seen event types: %s",
+                     run_id, sorted(_seen_event_types))
+
+        # ── Agent finished — emit final state ──
         snapshot = await agent.aget_state(config)
+        values_dict: dict[str, Any] = {}
         if snapshot and snapshot.values:
             values_dict = dict(snapshot.values)
-            messages = values_dict.get("messages", [])
-            serialized_messages = [serialize_message(m) for m in messages]
-            values_dict["messages"] = serialized_messages
 
-            # Persist final state to DB for thread listing/search
-            try:
-                db.update_thread(thread_id, serialized_messages, {
-                    "messages": serialized_messages,
-                    "files": values_dict.get("files", {}),
-                    "doc_folder": values_dict.get("doc_folder"),
-                    "skill": values_dict.get("skill"),
-                    "no_web": values_dict.get("no_web"),
-                    "wiki_query_complete": values_dict.get("wiki_query_complete", False),
-                })
-                db.update_run_status(run_id, "success")
-            except Exception as _db_err:
-                _logger.warning("[stream %s] DB sync failed: %s", run_id, _db_err)
+        # Always include messages from the snapshot or input_state
+        messages = list(values_dict.get("messages", []))
+        if not messages:
+            # Fallback: use input_state messages (at least the user will see their own msg)
+            messages = input_state.get("messages", [])
 
-            yield _sse_frame("values", values_dict, event_id=seq)
-            seq += 1
+        # ── Fallback 3: emit any new AI messages that weren't captured during stream ──
+        for m in messages[_initial_msg_count:]:
+            m_type = getattr(m, "type", None) if not isinstance(m, dict) else m.get("type")
+            if m_type not in ("ai", "AIMessageChunk"):
+                continue
+            c = getattr(m, "content", None) if not isinstance(m, dict) else m.get("content")
+            if isinstance(c, list):
+                c = "".join(
+                    p.get("text", "") if isinstance(p, dict) else str(p)
+                    for p in c
+                )
+            mid = getattr(m, "id", "") if not isinstance(m, dict) else m.get("id", "")
+            if c and str(c).strip() and mid not in _emitted_message_ids:
+                if mid:
+                    _emitted_message_ids.add(mid)
+                else:
+                    mid = f"{run_id}-msg-{seq}"
+                    _emitted_message_ids.add(mid)
+                yield _sse_frame("messages", [{
+                    "type": "ai",
+                    "id": mid,
+                    "content": str(c),
+                }], event_id=seq)
+                seq += 1
+
+        serialized_messages = [serialize_message(m) for m in messages]
+        values_dict["messages"] = serialized_messages
+
+        # Persist final state to DB for thread listing/search
+        try:
+            db.update_thread(thread_id, serialized_messages, {
+                "messages": serialized_messages,
+                "files": values_dict.get("files", {}),
+                "doc_folder": values_dict.get("doc_folder"),
+                "skill": values_dict.get("skill"),
+                "no_web": values_dict.get("no_web"),
+                "wiki_query_complete": values_dict.get("wiki_query_complete", False),
+            })
+            db.update_run_status(run_id, "success")
+        except Exception as _db_err:
+            _logger.warning("[stream %s] DB sync failed: %s", run_id, _db_err)
+
+        yield _sse_frame("values", values_dict, event_id=seq)
+        seq += 1
 
         yield _sse_frame("end", {
             "run_id": run_id,
@@ -494,93 +805,6 @@ async def _stream_run_events(
             "detail": str(exc),
             "traceback": tb,
         }, event_id=seq)
-
-
-async def _stream_run_polling(
-        thread_id: str,
-        run_id: str,
-        body: RunStreamRequest,
-        current_user: Auth.types.MinimalUserDict,
-):
-    """Legacy polling-based SSE stream (fallback when ENABLE_EVENT_STREAMING is unset)."""
-    messages_payload: list[MessagePayload] = []
-    if isinstance(body.input, dict):
-        raw_messages = body.input.get("messages", [])
-        if isinstance(raw_messages, list):
-            for msg in raw_messages:
-                if isinstance(msg, dict):
-                    messages_payload.append(
-                        MessagePayload(
-                            role=str(msg.get("role", "user")),
-                            content=str(msg.get("content", "")),
-                            name=msg.get("name"),
-                        )
-                    )
-
-    run_request = RunCreateRequest(
-        assistant_id=body.assistant_id,
-        input=RunInputPayload(messages=messages_payload),
-        multitask_strategy=body.multitask_strategy,
-    )
-    created = await create_run(thread_id=thread_id, body=run_request, current_user=current_user)
-    run_id_poll = created["run_id"]
-
-    async def event_stream():
-        seq = 0
-        last_status = None
-        last_values_json = None
-
-        first_run = db.get_run(run_id_poll)
-        if first_run is None:
-            yield _sse_frame("error", {"detail": "Run not found"}, event_id=seq)
-            return
-
-        yield _sse_frame("metadata", _api_run(first_run), event_id=seq)
-        seq += 1
-
-        while True:
-            run = db.get_run(run_id_poll)
-            if run is None:
-                yield _sse_frame("error", {"detail": "Run not found"}, event_id=seq)
-                break
-
-            status = _map_run_status_for_api(run.get("status"))
-            if status != last_status:
-                yield _sse_frame(
-                    "updates",
-                    {
-                        "run_id": run_id_poll,
-                        "status": status,
-                        "multitask_strategy": run.get("multitask_strategy") or "enqueue",
-                    },
-                    event_id=seq,
-                )
-                seq += 1
-                last_status = status
-
-            thread = db.get_thread(thread_id)
-            values = (thread or {}).get("values") or {}
-            values_json = json.dumps(values, default=str, sort_keys=True)
-            if values_json != last_values_json:
-                yield _sse_frame("values", values, event_id=seq)
-                seq += 1
-                last_values_json = values_json
-
-            if status in {"success", "error", "interrupted", "timeout"}:
-                yield _sse_frame(
-                    "end",
-                    {
-                        "run_id": run_id_poll,
-                        "status": status,
-                    },
-                    event_id=seq,
-                )
-                break
-
-            await asyncio.sleep(0.3)
-
-    from fastapi.responses import StreamingResponse
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 async def _execute_run(run_id: str, thread_id: str) -> None:
@@ -620,7 +844,10 @@ async def _execute_run(run_id: str, thread_id: str) -> None:
 
         # Pass thread_id through config so ResearchStateMiddleware can access it
         # for wiki lookups, cited_response tracking, and eval logging.
-        config = {"configurable": {"thread_id": str(thread_id)}}
+        config = {
+            "configurable": {"thread_id": str(thread_id)},
+            "recursion_limit": RECURSION_LIMIT,
+        }
         result = await agent.ainvoke(input_state, config=config)
 
         # Check if this run has been cancelled while executing
@@ -801,7 +1028,7 @@ async def create_thread(
 
     now = datetime.now(UTC).isoformat()
     user_id = current_user["identity"]
-    db.create_thread(thread_id, user_id, now, metadata=body.metadata or {}, status="idle", values={"messages": []})
+    db.create_thread(thread_id, user_id, now, metadata=body.metadata or {}, status="idle", values=None)
     created = db.get_thread(thread_id)
     if created is None:
         raise HTTPException(status_code=500, detail="Failed to create thread")
@@ -1015,68 +1242,73 @@ async def stream_run(
 ):
     """Create a run and stream output as SSE event payloads.
 
-    When ``ENABLE_EVENT_STREAMING=true``, uses real event-driven streaming via
-    ``agent.astream_events()`` with token-level message deltas and tool-call
-    visibility.  Otherwise falls back to the legacy polling-based SSE.
+    Uses real event-driven streaming via ``agent.astream_events()`` with
+    token-level message deltas and tool-call visibility.
     """
     _get_thread_with_auth(thread_id, current_user)
+    _logger = logging.getLogger(__name__)
 
-    # ── Event-driven streaming path ──
-    if os.environ.get("ENABLE_EVENT_STREAMING", "").strip().lower() == "true":
-        import logging
-        _logger = logging.getLogger(__name__)
+    run_id = str(uuid.uuid4())
+    now = datetime.now(UTC).isoformat()
 
-        run_id = str(uuid.uuid4())
-        now = datetime.now(UTC).isoformat()
+    # Record the run
+    db.create_run(
+        run_id, thread_id,
+        body.assistant_id or "researcher", now,
+        multitask_strategy=body.multitask_strategy or "enqueue",
+    )
 
-        # Record the run
-        db.create_run(
-            run_id, thread_id,
-            body.assistant_id or "researcher", now,
-            multitask_strategy=body.multitask_strategy or "enqueue",
-        )
+    # Build input state from current thread values
+    thread = db.get_thread(thread_id)
+    existing_values = (thread or {}).get("values") or {}
+    existing_files = existing_values.get("files") or {}
 
-        # Build input state from current thread values
-        thread = db.get_thread(thread_id)
-        existing_values = (thread or {}).get("values") or {}
-        existing_files = existing_values.get("files") or {}
+    # Parse incoming messages and append to thread messages
+    messages = list(thread.get("messages") or [])
+    if isinstance(body.input, dict):
+        raw_messages = body.input.get("messages", [])
+        if isinstance(raw_messages, list):
+            for msg in raw_messages:
+                if isinstance(msg, dict):
+                    messages.append({
+                        "role": str(msg.get("role", "user")),
+                        "content": str(msg.get("content", "")),
+                        "name": msg.get("name"),
+                    })
 
-        # Parse incoming messages and append to thread messages
-        messages = list(thread.get("messages") or [])
-        if isinstance(body.input, dict):
-            raw_messages = body.input.get("messages", [])
-            if isinstance(raw_messages, list):
-                for msg in raw_messages:
-                    if isinstance(msg, dict):
-                        messages.append({
-                            "role": str(msg.get("role", "user")),
-                            "content": str(msg.get("content", "")),
-                            "name": msg.get("name"),
-                        })
+    # Persist the user message to DB immediately so GET /threads/{id} shows it
+    db.update_thread(thread_id, messages, existing_values)
 
-        input_state = {
-            "messages": messages,
-            "files": existing_files,
-            "doc_folder": existing_values.get("doc_folder"),
-            "skill": existing_values.get("skill"),
-            "no_web": existing_values.get("no_web"),
-            "wiki_query_complete": existing_values.get("wiki_query_complete", False),
-        }
-        input_state = {k: v for k, v in input_state.items() if v is not None}
+    # Initialize per-thread cited_response tracking for the middleware
+    from research_agent.utils.knowledge_filesystem import _thread_existing_cited_responses
+    existing_reports = [k for k in existing_files if k.startswith("/cited_response")]
+    _thread_existing_cited_responses[str(thread_id)] = existing_reports
 
-        # Initialize per-thread cited_response tracking for the middleware
-        from research_agent.utils.knowledge_filesystem import _thread_existing_cited_responses
-        existing_reports = [k for k in existing_files if k.startswith("/cited_response")]
-        _thread_existing_cited_responses[str(thread_id)] = existing_reports
+    input_state = {
+        "messages": messages,
+        "files": existing_files,
+        "doc_folder": existing_values.get("doc_folder"),
+        "skill": existing_values.get("skill"),
+        "no_web": existing_values.get("no_web"),
+        "wiki_query_complete": existing_values.get("wiki_query_complete", False),
+        "existing_reports": existing_reports,
+    }
+    input_state = {k: v for k, v in input_state.items() if v is not None}
 
-        from fastapi.responses import StreamingResponse
-        return StreamingResponse(
-            _stream_run_events(thread_id, run_id, input_state),
-            media_type="text/event-stream",
-        )
+    _logger.info("[stream %s] Starting event-driven stream for thread %s (%d messages)",
+                 run_id, thread_id, len(messages))
 
-    # ── Legacy polling path ──
-    return await _stream_run_polling(thread_id, "", body, current_user)
+    # Use client-provided recursion_limit if present, else fall back to env var
+    client_recursion_limit = RECURSION_LIMIT
+    if body.config and isinstance(body.config, dict):
+        client_recursion_limit = body.config.get("recursion_limit", RECURSION_LIMIT)
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        _stream_run_events(thread_id, run_id, input_state,
+                           recursion_limit=client_recursion_limit),
+        media_type="text/event-stream",
+    )
 
 
 @app.get("/threads/{thread_id}/runs/{run_id}", tags=["Runs"])
@@ -1187,7 +1419,8 @@ async def cancel_run(
 
 
 if __name__ == "__main__":
-    # For direct execution: python server.py
     # For development with uvicorn: python run.py
     # For production: uvicorn server:app --port 2024
-    pass
+    from run import main
+
+    main()

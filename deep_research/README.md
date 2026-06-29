@@ -359,10 +359,20 @@ The custom document upload service in `webapp.py` is also secured.
 
 #### Starting the API Server
 
-You have two options to run the API server:
+##### Development Server (LangGraph Platform on port 2024)
 
-##### Option 1: Standalone Upload API Server
-To start only the document upload API server:
+Use the official LangGraph Platform server:
+
+```bash
+langgraph dev
+```
+
+This starts the full LangGraph Platform with all endpoints, SSE streaming,
+checkpoint-based state persistence, and the Studio UI at http://127.0.0.1:2024.
+
+##### Standalone Upload API Server (port 8000)
+
+To start only the document upload API:
 ```bash
 # Set environment variables (or add to .env file)
 export UPLOAD_API_KEY=your_secure_api_key_here
@@ -372,51 +382,6 @@ export UPLOAD_PORT=8000
 # Start the upload server
 uv run python webapp.py
 ```
-
-##### Option 2: Independent Async Subagent Server (With Upload API)
-To start an independent Agent Protocol-compliant server that hosts the `deep_research` agent in the background and also reuses the upload API:
-```bash
-# Start the async subagent server
-uv run python run.py
-```
-
-Examples:
-```bash
-# Start on the default port (2024)
-uv run python run.py
-
-# Start explicitly on 2024
-export UPLOAD_PORT=2024
-uv run python run.py
-
-# If you use uvicorn directly, pass the port explicitly because __main__ is not executed
-uvicorn server:app --reload --port 2024
-```
-
-Startup output includes:
-- 🚀 API: http://127.0.0.1:2024
-- 📚 API Docs: http://127.0.0.1:2024/docs
-
-This in-memory database is designed for development and testing.
-For production use, please use CosmosDB or PostgreSQL deployment.
-
-##### 🗄️ Pluggable Database Configuration for Async Server
-The async subagent server (`server.py`) supports multiple pluggable database backends configured via environment variables in your `.env` file:
-
-* **SQLite** (Default):
-  - `DB_TYPE=sqlite` (Optional, defaults to `sqlite`)
-  - `SQLITE_DB_PATH`: Path to the SQLite DB file (e.g. `deep_research.db`). Defaults to `:memory:` if not set.
-
-* **Azure Cosmos DB**:
-  - `DB_TYPE=cosmosdb`
-  - `COSMOSDB_ENDPOINT`: Your Cosmos DB Endpoint URL
-  - `COSMOSDB_KEY`: Your Cosmos DB Key
-  - `COSMOSDB_DB_NAME`: Database name (defaults to `deep_research`)
-  - `COSMOS_CONNECTION_STRING`: Connection string (alternative to endpoint + key)
-
-* **PostgreSQL**:
-  - `DB_TYPE=postgres`
-  - `DATABASE_URL` (or `POSTGRES_URL`): Database connection string (e.g. `postgresql://user:pass@host:5432/dbname`)
   - Alternatively, configure separate connection variables: `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`.
   - *Note*: Requires the `psycopg` package (run `pip install "psycopg[binary]"` or `uv add "psycopg[binary]"`).
 
@@ -1068,18 +1033,18 @@ FRONTEND_URL="http://localhost:3000"
 #### 1. Start the FastAPI Server
 Ensure all packages are synced, and start the application server.
 
-**Option A: Upload API Only**
+**Option A: LangGraph Dev Server (Recommended)**
+```bash
+cd deep_research
+uv sync
+langgraph dev
+```
+
+**Option B: Upload API Only**
 ```bash
 cd deep_research
 uv sync
 python webapp.py
-```
-
-**Option B: Independent Async Subagent Server (With Upload API)**
-```bash
-cd deep_research
-uv sync
-python server.py
 ```
 
 #### 2. Test the Authentication Flow

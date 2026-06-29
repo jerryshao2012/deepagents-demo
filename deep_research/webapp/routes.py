@@ -23,7 +23,6 @@ from fastapi import File, Form, Header, HTTPException, Request, UploadFile, stat
 from fastapi.responses import FileResponse, RedirectResponse
 
 import webapp.config as _cfg
-from auth import _logged_oauth_users
 from research_agent.utils.content_extractors import extract_supported_document
 from research_agent.utils.skill_registry import get_skill_registry
 from webapp.auth_helpers import is_authenticated
@@ -611,6 +610,7 @@ def register_oauth_routes(app) -> None:
             )
 
         # Clean up the logged users tracking in auth module
+        from auth import _logged_oauth_users
         if identity in _logged_oauth_users:
             _logged_oauth_users.discard(identity)
             print(f"✅ Cleaned up logged user tracking for: {identity}")

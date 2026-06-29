@@ -22,7 +22,6 @@ from fastapi.responses import StreamingResponse
 from langgraph_sdk.auth.types import MinimalUserDict
 from pydantic import BaseModel, Field
 
-import server as _server
 from research_agent.utils.knowledge_filesystem import clear_thread_cache
 from . import progress as progress_tracker
 from .models import ThreadWikiPaths, WikiQueryResult
@@ -111,14 +110,15 @@ class WikiLintResponse(BaseModel):
     topic: str
 
 
-# ── Auth dependency (self-contained to avoid circular import with server.py) ──
+# ── Auth dependency (self-contained to avoid circular import) ──
 
 async def _wiki_get_current_user(request: Request) -> MinimalUserDict:
-    """Authenticate wiki routes using the same auth pattern as server.py.
+    """Authenticate wiki routes using the same auth pattern as auth.py.
 
-    Delegates to server.get_current_user at request time (not import time)
+    Delegates to the auth module at request time (not import time)
     to avoid circular imports.
     """
+    import server as _server
     return await _server.get_current_user(request)
 
 

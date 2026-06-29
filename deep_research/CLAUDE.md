@@ -16,10 +16,8 @@ uv sync
 uv run python research_agent_cli.py "Your research topic"
 uv run python research_agent_cli.py "Topic" --doc-folder ./docs --skill golden-dataset
 
-# Development server (Agent Protocol API on port 2024)
-uv run python run.py
-# or directly:
-uvicorn server:app --reload --port 2024
+# Development server (LangGraph Platform on port 2024)
+langgraph dev
 
 # Document upload server (FastAPI on port 8000)
 uv run python -m webapp
@@ -49,10 +47,10 @@ bash deploy.sh
 | File | Role |
 |------|------|
 | `agent.py` | **Core agent graph.** Defines `ResearchState`, `ResearchStateMiddleware`, and the `agent` graph. The middleware injects state (doc folder, skill, wiki context, cited responses) before each turn. This is the entry point referenced by `langgraph.json`. |
-| `server.py` | **Agent Protocol API server** (port 2024). Implements LangGraph-style async subagent endpoints: threads CRUD, runs (create/stream/cancel), assistants, and SSE streaming. Imports and uses the `agent` graph from `agent.py`. |
 | `research_agent_cli.py` | **Standalone CLI** for running research without the server. Supports `--doc-folder`, `--skill`, evaluation tracking, and SSL customization. |
-| `run.py` | Thin uvicorn launcher for `server:app` — the recommended dev entry point. |
 | `webapp/__init__.py` | **FastAPI app factory** for the Document Upload API (port 8000). Configures CORS, OAuth sessions, wiki routes, and document endpoints. |
+| `server.py` | ⚠️ **DEPRECATED.** Custom LangGraph Platform server — replaced by `langgraph dev`. Kept for reference only. |
+| `run.py` | ⚠️ **DEPRECATED.** Thin launcher for `server:app` — replaced by `langgraph dev`. Kept for reference only. |
 
 ### Core Packages
 
@@ -104,7 +102,7 @@ Local dev: `source ./env.sh` loads all vars; `source ./secrets.sh` loads sensiti
 
 ### Data Flow
 
-1. User query arrives via CLI (`research_agent_cli.py`) or API (`server.py` POST /runs)
+1. User query arrives via CLI (`research_agent_cli.py`) or the LangGraph Platform API (`langgraph dev` running the agent graph from `langgraph.json`)
 2. `ResearchStateMiddleware` injects state: doc folder path, skill choice, wiki context (if docs were uploaded and ingested), existing cited responses from prior turns
 3. The agent graph executes: researcher agent → sub-agent delegation (`create_deep_agent` + `SubAgent`) → tool calls (web search, file I/O, thinking) → synthesis
 4. If a skill is selected, `render_skill_output` passes the synthesized result to the skill's pipeline

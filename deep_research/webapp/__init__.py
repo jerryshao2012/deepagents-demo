@@ -3,8 +3,9 @@
 This module replaces the former monolithic ``webapp.py``.  It:
 
 1. Creates and configures the FastAPI application instance.
-2. Re-exports every public symbol that external code (``server.py``, tests)
-   used to import from ``webapp.py`` so that no import path changes are needed.
+2. Re-exports every public symbol that external code (tests, and the
+   deprecated ``server.py``) used to import so that no import path
+   changes are needed.
 """
 
 from __future__ import annotations

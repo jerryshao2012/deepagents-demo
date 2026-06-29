@@ -168,16 +168,25 @@ def create_memory_saver():
     """Create a LangGraph checkpointer based on the MEMORY_TYPE env var.
 
     Supported types:
-      - ``"memory"`` (default): ephemeral InMemorySaver — no persistence across restarts
+      - ``None`` (default / unset): no checkpointer — the platform handles persistence
+      - ``"memory"``: ephemeral InMemorySaver — no persistence across restarts
       - ``"sqlite"``: AsyncSqliteSaver — persistent, local file-based checkpoints
       - ``"postgres"``: AsyncPostgresSaver — persistent, production-grade
       - ``"cosmosdb"``: CosmosDBSaver — Azure CosmosDB-backed (sync, use with care in async)
 
+    When MEMORY_TYPE is not set, returns ``None`` so the graph is created
+    checkpoint-free.  This is the expected default for ``langgraph dev`` /
+    LangGraph Platform deployments (the platform injects its own persistence).
+    Set ``MEMORY_TYPE=memory`` (or sqlite / postgres) when running via the
+    ``langgraph dev`` / LangGraph Platform.
+
     Note: sqlite and postgres AsyncSavers require an active event loop and are
     typically created via ``setup_checkpointer()`` from the server lifespan.
-    This function returns InMemorySaver when MEMORY_TYPE is unset or set to "memory".
     """
-    memory_type = os.environ.get("MEMORY_TYPE", "memory").strip().lower()
+    memory_type = os.environ.get("MEMORY_TYPE", "").strip().lower()
+
+    if not memory_type:
+        return None
 
     if memory_type == "memory":
         return InMemorySaver()

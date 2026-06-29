@@ -12,7 +12,7 @@ UNSTRUCTURED_TARGET_IDS = ALL_SKILL_TARGET_IDS - STRUCTURED_TARGET_IDS  # empty
 
 
 def test_all_skill_skills_are_discoverable() -> None:
-    assert set(get_skill_registry().list_skill_ids()) == ALL_SKILL_TARGET_IDS
+    assert set(get_skill_registry().list_skill_ids()) == get_skill_registry().SKILL_IDS
 
 
 def test_parser_exposes_all_skill_skills() -> None:

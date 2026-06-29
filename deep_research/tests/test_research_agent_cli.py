@@ -19,6 +19,7 @@ def test_list_skills(capsys, monkeypatch) -> None:
     from research_agent.utils.cli import list_skills
     class DummyRegistry:
         SKILL_IDS = {"test-skill"}
+
     monkeypatch.setattr("research_agent.utils.cli.get_skill_registry", lambda: DummyRegistry())
     list_skills()
     captured = capsys.readouterr()
