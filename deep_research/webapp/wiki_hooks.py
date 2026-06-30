@@ -15,14 +15,14 @@ logger = logging.getLogger(__name__)
 
 # ── Auto-ingest after upload ──────────────────────────────────────────────────
 
+
 async def trigger_wiki_auto_ingest(thread_id: str) -> None:
     """Register progress and launch a background wiki-ingest task."""
     try:
         from thread_wiki import progress as wiki_progress
-        from thread_wiki.models import ThreadWikiPaths
-        from thread_wiki.service import run_ingest
+        from thread_wiki.models import ThreadWikiPaths, _resolve_wiki_base_dir
 
-        base_dir = Path(__file__).resolve().parent.parent
+        base_dir = _resolve_wiki_base_dir(Path(__file__).resolve().parent.parent)
         paths = ThreadWikiPaths.resolve(thread_id, base_dir)
         topic = f"Thread {thread_id[:8]}"
 
@@ -37,7 +37,9 @@ async def trigger_wiki_auto_ingest(thread_id: str) -> None:
             name=f"wiki-auto-ingest-{thread_id}",
         )
         wiki_progress._active_ingests[thread_id] = wiki_progress._IngestEntry(
-            progress=prog, task=task, cancel_event=cancel_event,
+            progress=prog,
+            task=task,
+            cancel_event=cancel_event,
         )
         prog.advance(prog.phase, "Auto-ingest queued after upload.")
         logger.info("Auto-ingest triggered for thread %s", thread_id)
@@ -45,7 +47,9 @@ async def trigger_wiki_auto_ingest(thread_id: str) -> None:
         logger.exception("Failed to trigger wiki auto-ingest for thread %s", thread_id)
 
 
-async def _wiki_ingest_background(paths, topic: str, progress_obj, cancel_event) -> None:
+async def _wiki_ingest_background(
+    paths, topic: str, progress_obj, cancel_event
+) -> None:
     """Run wiki ingest in the background; swallows all exceptions."""
     from thread_wiki import progress as wiki_progress
     from thread_wiki.service import run_ingest
@@ -62,15 +66,16 @@ async def _wiki_ingest_background(paths, topic: str, progress_obj, cancel_event)
 
 # ── Delete hooks (cancel ingest + lint) ───────────────────────────────────────
 
+
 async def trigger_wiki_delete_hooks(
-        thread_id: str,
-        deleted_filename: str | None = None,
+    thread_id: str,
+    deleted_filename: str | None = None,
 ) -> None:
-    """Cancel any active ingest and launch a background lint reconciliation."""
+    """Cancel any active ingest, cascade-delete source references, and launch lint."""
     try:
         from thread_wiki import progress as wiki_progress
         from thread_wiki.models import ThreadWikiPaths
-        from thread_wiki.service import run_lint
+        from thread_wiki.service import _cascade_delete_source_references
 
         # Step 1 — cancel running ingest to prevent stale writes.
         cancelled = await wiki_progress.cancel_ingest(
@@ -78,16 +83,40 @@ async def trigger_wiki_delete_hooks(
             reason=f"Document deleted: {deleted_filename or 'multiple'}",
         )
         if cancelled:
-            logger.info("Cancelled active ingest for thread %s due to deletion", thread_id)
+            logger.info(
+                "Cancelled active ingest for thread %s due to deletion", thread_id
+            )
 
-        # Step 2 — launch lint reconciliation if the wiki directory exists.
-        base_dir = Path(__file__).resolve().parent.parent
+        # Step 2 — cascade-delete references to the deleted source.
+        from thread_wiki.models import _resolve_wiki_base_dir
+
+        base_dir = _resolve_wiki_base_dir(Path(__file__).resolve().parent.parent)
         paths = ThreadWikiPaths.resolve(thread_id, base_dir)
+        if paths.wiki_dir.exists() and deleted_filename:
+            try:
+                report = _cascade_delete_source_references(
+                    paths.wiki_dir, deleted_filename
+                )
+                logger.info(
+                    "Cascade deletion for %r: updated %d frontmatter entries, "
+                    "%d pages have body references, source summary: %s",
+                    deleted_filename,
+                    len(report["pages_updated"]),
+                    len(report["pages_with_body_refs"]),
+                    report["source_summary_page"] or "none",
+                )
+            except Exception:
+                logger.exception(
+                    "Cascade deletion failed for %r; will rely on lint pass.",
+                    deleted_filename,
+                )
+
+        # Step 3 — launch lint reconciliation if the wiki directory exists.
         if paths.wiki_dir.exists():
             topic = f"Thread {thread_id[:8]}"
             note = (
                 f"Source file '{deleted_filename}' was deleted. "
-                "Reconcile wiki pages that reference it."
+                "Cascade deletion ran first; reconcile remaining references."
                 if deleted_filename
                 else "Multiple source files were deleted. Reconcile wiki pages."
             )

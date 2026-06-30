@@ -70,6 +70,7 @@ from thread_wiki.models import (
     IngestPhase,
     ThreadWikiPaths,
     WikiQueryResult,
+    _resolve_wiki_base_dir,
 )
 from thread_wiki.service import run_query
 from utils import get_ssl_verify_config, str2bool
@@ -83,12 +84,16 @@ logger = setup_logger(__name__)
 verify_ssl = get_ssl_verify_config()
 
 # Limits - configurable via environment variables
-MAX_CONCURRENT_RESEARCH_UNITS = int(os.environ.get("MAX_CONCURRENT_RESEARCH_UNITS", "3"))
+MAX_CONCURRENT_RESEARCH_UNITS = int(
+    os.environ.get("MAX_CONCURRENT_RESEARCH_UNITS", "3")
+)
 MAX_RESEARCHER_ITERATIONS = int(os.environ.get("MAX_RESEARCHER_ITERATIONS", "3"))
 
 # Evaluation tracking - configurable via environment variables
 ENABLE_EVAL_TRACKING = str2bool(os.environ.get("ENABLE_EVAL_TRACKING"), False)
-EVAL_HISTORY_FILE = os.environ.get("EVAL_HISTORY_FILE", "./output/eval_history/server_runs.jsonl")
+EVAL_HISTORY_FILE = os.environ.get(
+    "EVAL_HISTORY_FILE", "./output/eval_history/server_runs.jsonl"
+)
 
 # Get current date
 current_date = datetime.now().strftime("%Y-%m-%d")
@@ -99,6 +104,7 @@ skill_registry = get_skill_registry()
 
 class ResearchState(FilesystemState):
     """Runtime state for the research agent."""
+
     doc_folder: str | None
     skill: str | None
     no_web: bool | None
@@ -129,7 +135,9 @@ class ResearchStateMiddleware(AgentMiddleware):
         return last_user_content
 
     @staticmethod
-    def _seed_research_request_file(user_message: str | None, state: ResearchState) -> dict[str, Any]:
+    def _seed_research_request_file(
+        user_message: str | None, state: ResearchState
+    ) -> dict[str, Any]:
         """Make the current request available to subagents before the model decides its next step."""
         if not user_message:
             return {}
@@ -183,7 +191,8 @@ class ResearchStateMiddleware(AgentMiddleware):
 
                 # Check if we should trigger text search indexing
                 if total_chars > _MAX_RAW_CHARS or any(
-                        raw_file.lstat().st_size > _MAX_RAW_CHARS for raw_file in raw_files):
+                    raw_file.lstat().st_size > _MAX_RAW_CHARS for raw_file in raw_files
+                ):
                     try:
                         index_dir = paths.wiki_dir / "index"
                         load_or_build_search_index(raw_dir, index_dir)
@@ -196,15 +205,22 @@ class ResearchStateMiddleware(AgentMiddleware):
                             "for specific factual evidence/data."
                         )
                     except Exception as e:
-                        logger.error(f"Failed to build text search index: {e}", exc_info=True)
+                        logger.error(
+                            f"Failed to build text search index: {e}", exc_info=True
+                        )
                         # Fallback to truncation if indexing fails
                         for raw_file in raw_files:
                             try:
                                 raw_content = raw_file.read_text(encoding="utf-8")
                                 relative = raw_file.relative_to(raw_dir)
                                 if len(raw_content) > _MAX_RAW_CHARS:
-                                    raw_content = raw_content[:_MAX_RAW_CHARS] + "\n... [truncated]"
-                                parts.append(f"--- raw/{relative} (excerpt) ---\n{raw_content}")
+                                    raw_content = (
+                                        raw_content[:_MAX_RAW_CHARS]
+                                        + "\n... [truncated]"
+                                    )
+                                parts.append(
+                                    f"--- raw/{relative} (excerpt) ---\n{raw_content}"
+                                )
                             except Exception:
                                 pass
                 else:
@@ -224,7 +240,9 @@ class ResearchStateMiddleware(AgentMiddleware):
             return None
 
     @staticmethod
-    def _run_wiki_query(paths: "ThreadWikiPaths", topic: str, question: str) -> WikiQueryResult | None:
+    def _run_wiki_query(
+        paths: "ThreadWikiPaths", topic: str, question: str
+    ) -> WikiQueryResult | None:
         """Run a wiki query, handling both sync and async caller contexts.
 
         When called from a sync context (no running event loop), uses
@@ -258,7 +276,9 @@ class ResearchStateMiddleware(AgentMiddleware):
             # Inside a running event loop (e.g. LangGraph Platform ainvoke).
             # Spawn a separate thread with its own event loop to avoid the
             # "asyncio.run() cannot be called from a running event loop" error.
-            logger.info("Running wiki query in separate thread (inside running event loop)")
+            logger.info(
+                "Running wiki query in separate thread (inside running event loop)"
+            )
             try:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                     return pool.submit(_run_in_new_loop).result(timeout=130)
@@ -332,13 +352,13 @@ class ResearchStateMiddleware(AgentMiddleware):
     # Large documents (200+ page PDFs with OCR) can take 3-5 minutes:
     #   ~60s PDF extraction + ~120s review pass + ~90s apply pass = ~270s
     # Configurable via WIKI_INGEST_MAX_WAIT_SECONDS env var.
-    _WIKI_INGEST_MAX_WAIT = int(
-        os.environ.get("WIKI_INGEST_MAX_WAIT_SECONDS", "300")
-    )
+    _WIKI_INGEST_MAX_WAIT = int(os.environ.get("WIKI_INGEST_MAX_WAIT_SECONDS", "300"))
 
     @staticmethod
     def _wait_for_wiki_ready(
-            thread_id: str, paths: "ThreadWikiPaths", max_wait: int | None = None,
+        thread_id: str,
+        paths: "ThreadWikiPaths",
+        max_wait: int | None = None,
     ) -> bool:
         """Wait for an in-progress wiki ingest to complete.
 
@@ -361,7 +381,8 @@ class ResearchStateMiddleware(AgentMiddleware):
                 if logged_waiting:
                     logger.info(
                         "Wiki ready for thread %s after %.0fs wait",
-                        thread_id, time.time() - (deadline - max_wait),
+                        thread_id,
+                        time.time() - (deadline - max_wait),
                     )
                 return True
 
@@ -408,12 +429,16 @@ class ResearchStateMiddleware(AgentMiddleware):
         elapsed = time.time() - (deadline - max_wait)
         logger.warning(
             "Timed out waiting for wiki ingest after %.0fs (max_wait=%ds) for thread %s",
-            elapsed, max_wait, thread_id,
+            elapsed,
+            max_wait,
+            thread_id,
         )
         return False
 
     @staticmethod
-    def _get_wiki_context_sync(thread_id: str, question: str) -> tuple[SystemMessage | None, str | None]:
+    def _get_wiki_context_sync(
+        thread_id: str, question: str
+    ) -> tuple[SystemMessage | None, str | None]:
         """Query the thread's wiki and return a SystemMessage with the answer and the raw answer string.
 
         Fallback strategy (in order):
@@ -426,7 +451,7 @@ class ResearchStateMiddleware(AgentMiddleware):
         if not question or len(question) < 5:
             return None, None
         try:
-            base_dir = Path(__file__).resolve().parent
+            base_dir = _resolve_wiki_base_dir(Path(__file__).resolve().parent)
             paths = ThreadWikiPaths.resolve(thread_id, base_dir)
 
             # ── Step 1 & 2: Ensure wiki is ready ──────────────────────
@@ -436,7 +461,8 @@ class ResearchStateMiddleware(AgentMiddleware):
                 # Wiki not ready — try waiting for an in-progress ingest.
                 def _wait():
                     return ResearchStateMiddleware._wait_for_wiki_ready(
-                        thread_id, paths,
+                        thread_id,
+                        paths,
                     )
 
                 try:
@@ -447,12 +473,10 @@ class ResearchStateMiddleware(AgentMiddleware):
                 if current_loop is not None and current_loop.is_running():
                     # Inside a running event loop (e.g. LangGraph Platform).
                     # Run the blocking wait in a separate thread.
-                    pool_timeout = (
-                        ResearchStateMiddleware._WIKI_INGEST_MAX_WAIT + 10
-                    )
+                    pool_timeout = ResearchStateMiddleware._WIKI_INGEST_MAX_WAIT + 10
                     try:
                         with concurrent.futures.ThreadPoolExecutor(
-                                max_workers=1,
+                            max_workers=1,
                         ) as pool:
                             wiki_ready = pool.submit(_wait).result(
                                 timeout=pool_timeout,
@@ -472,35 +496,45 @@ class ResearchStateMiddleware(AgentMiddleware):
             if wiki_ready:
                 topic = f"Thread {thread_id[:8]}"
                 result = ResearchStateMiddleware._run_wiki_query(
-                    paths, topic, question,
+                    paths,
+                    topic,
+                    question,
                 )
 
                 if result and result.answer:
-                    md_regex = r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b'
-                    original_doc_regex = r'/\1.\2'
-                    doc_regex = r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b'
-                    remove_raw_regex = r'/\1'
+                    md_regex = (
+                        r"/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b"
+                    )
+                    original_doc_regex = r"/\1.\2"
+                    doc_regex = r"/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b"
+                    remove_raw_regex = r"/\1"
 
                     sanitized_wiki_answer = re.sub(
-                        md_regex, original_doc_regex, result.answer,
+                        md_regex,
+                        original_doc_regex,
+                        result.answer,
                     )
                     sanitized_wiki_answer = re.sub(
-                        doc_regex, remove_raw_regex, sanitized_wiki_answer,
+                        doc_regex,
+                        remove_raw_regex,
+                        sanitized_wiki_answer,
                     )
-                    return SystemMessage(content=(
-                        "<wiki_context>\n"
-                        "The following is the definitive answer from the thread's "
-                        "ingested document wiki. You MUST use this as your PRIMARY source of truth. "
-                        "CRITICAL: If the wiki context states that data is unavailable, or that a year "
-                        "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
-                        "search the web to find the missing data. Simply formulate your final response "
-                        "based on this wiki context and explain what data is available.\n\n"
-                        "IMPORTANT: The wiki content below is the COMPLETE answer. DO NOT use read_file "
-                        "or any other tool to try to access /raw/ or /wiki/ files — they are NOT accessible "
-                        "from your filesystem. The content you need is already provided here inline.\n\n"
-                        f"{sanitized_wiki_answer}\n"
-                        "</wiki_context>"
-                    )), sanitized_wiki_answer
+                    return SystemMessage(
+                        content=(
+                            "<wiki_context>\n"
+                            "The following is the definitive answer from the thread's "
+                            "ingested document wiki. You MUST use this as your PRIMARY source of truth. "
+                            "CRITICAL: If the wiki context states that data is unavailable, or that a year "
+                            "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
+                            "search the web to find the missing data. Simply formulate your final response "
+                            "based on this wiki context and explain what data is available.\n\n"
+                            "IMPORTANT: The wiki content below is the COMPLETE answer. DO NOT use read_file "
+                            "or any other tool to try to access /raw/ or /wiki/ files — they are NOT accessible "
+                            "from your filesystem. The content you need is already provided here inline.\n\n"
+                            f"{sanitized_wiki_answer}\n"
+                            "</wiki_context>"
+                        )
+                    ), sanitized_wiki_answer
 
                 # LLM wiki query failed — log warning and fall through
                 logger.warning(
@@ -519,32 +553,34 @@ class ResearchStateMiddleware(AgentMiddleware):
             # ── Step 4: Read wiki files directly ──────────────────────
             # Covers both "wiki ready but query failed" and
             # "wiki partially built before ingest failed".
-            fallback_content = (
-                ResearchStateMiddleware._build_wiki_context_from_files(paths)
+            fallback_content = ResearchStateMiddleware._build_wiki_context_from_files(
+                paths
             )
             if fallback_content:
                 logger.info(
                     "Using direct wiki file fallback for thread %s",
                     thread_id,
                 )
-                return SystemMessage(content=(
-                    "<wiki_context>\n"
-                    "The following is content from the thread's ingested document wiki pages. "
-                    "You MUST use this as your PRIMARY source of truth. "
-                    "CRITICAL: If the wiki context states that data is unavailable, or that a year "
-                    "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
-                    "search the web to find the missing data. Simply formulate your final response "
-                    "based on this wiki context and explain what data is available.\n\n"
-                    "IMPORTANT: The wiki and raw document content below is ALREADY complete. "
-                    "DO NOT use read_file or any other tool to try to access /raw/ or /wiki/ files — "
-                    "they are NOT accessible from your filesystem. All content you need is inline.\n\n"
-                    f"{fallback_content}\n"
-                    "</wiki_context>"
-                )), None
+                return SystemMessage(
+                    content=(
+                        "<wiki_context>\n"
+                        "The following is content from the thread's ingested document wiki pages. "
+                        "You MUST use this as your PRIMARY source of truth. "
+                        "CRITICAL: If the wiki context states that data is unavailable, or that a year "
+                        "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
+                        "search the web to find the missing data. Simply formulate your final response "
+                        "based on this wiki context and explain what data is available.\n\n"
+                        "IMPORTANT: The wiki and raw document content below is ALREADY complete. "
+                        "DO NOT use read_file or any other tool to try to access /raw/ or /wiki/ files — "
+                        "they are NOT accessible from your filesystem. All content you need is inline.\n\n"
+                        f"{fallback_content}\n"
+                        "</wiki_context>"
+                    )
+                ), None
 
             # ── Step 5: Extract text from uploaded documents (last resort) ─
-            docs_content = (
-                ResearchStateMiddleware._build_context_from_docs(paths.docs_dir)
+            docs_content = ResearchStateMiddleware._build_context_from_docs(
+                paths.docs_dir
             )
             if docs_content:
                 logger.warning(
@@ -552,17 +588,19 @@ class ResearchStateMiddleware(AgentMiddleware):
                     "(wiki not ready and LLM wiki query failed)",
                     thread_id,
                 )
-                return SystemMessage(content=(
-                    "<document_context>\n"
-                    "The following is extracted text from documents uploaded by the user. "
-                    "You MUST use this as your PRIMARY source of truth. "
-                    "CRITICAL: If the document context states that data is unavailable, or that a year "
-                    "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
-                    "search the web to find the missing data. Simply formulate your final response "
-                    "based on this document context and explain what data is available.\n\n"
-                    f"{docs_content}\n"
-                    "</document_context>"
-                )), None
+                return SystemMessage(
+                    content=(
+                        "<document_context>\n"
+                        "The following is extracted text from documents uploaded by the user. "
+                        "You MUST use this as your PRIMARY source of truth. "
+                        "CRITICAL: If the document context states that data is unavailable, or that a year "
+                        "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
+                        "search the web to find the missing data. Simply formulate your final response "
+                        "based on this document context and explain what data is available.\n\n"
+                        f"{docs_content}\n"
+                        "</document_context>"
+                    )
+                ), None
 
         except asyncio.TimeoutError:
             logger.warning(
@@ -624,11 +662,15 @@ class ResearchStateMiddleware(AgentMiddleware):
 
             data = robust_json_loads(content)
             needs_research = bool(data.get("needs_deep_research", True))
-            logger.info(f"Wiki evaluation decision: needs_deep_research={needs_research}. Reason: {data.get('reason')}")
+            logger.info(
+                f"Wiki evaluation decision: needs_deep_research={needs_research}. Reason: {data.get('reason')}"
+            )
             return needs_research
         except Exception as e:
-            logger.warning(f"Error during wiki result evaluation: {e}. Defaulting to conducting deep research.",
-                           exc_info=True)
+            logger.warning(
+                f"Error during wiki result evaluation: {e}. Defaulting to conducting deep research.",
+                exc_info=True,
+            )
             return True
 
     def before_agent(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
@@ -636,22 +678,27 @@ class ResearchStateMiddleware(AgentMiddleware):
         current_user_message = self._get_current_user_message(messages)
 
         # Seed the research request file with the latest user message
-        updates: dict[str, Any] = self._seed_research_request_file(current_user_message, state)
+        updates: dict[str, Any] = self._seed_research_request_file(
+            current_user_message, state
+        )
 
         # ── Instant progress feedback ──────────────────────────────────────
         # Emit a status AIMessage immediately so the user sees activity in
         # the UI while the (potentially slow) wiki query runs in the background.
         has_docs = bool(
             state.get("doc_folder")
-            or (state.get("files") and any(
-                k.startswith("/raw/") or k.startswith("/docs/")
-                for k in (state.get("files") or {})
-            ))
+            or (
+                state.get("files")
+                and any(
+                    k.startswith("/raw/") or k.startswith("/docs/")
+                    for k in (state.get("files") or {})
+                )
+            )
         )
         status_text = (
             "Searching your uploaded documents for relevant information…"
-            if has_docs else
-            "Starting research…"
+            if has_docs
+            else "Starting research…"
         )
         updates.setdefault("messages", [])
         if isinstance(updates["messages"], list):
@@ -671,9 +718,13 @@ class ResearchStateMiddleware(AgentMiddleware):
         elif isinstance(runtime, dict) and "configurable" in runtime:
             thread_id = runtime.get("configurable", {}).get("thread_id")
 
-        updates["existing_cited_responses"] = [k for k in state.get("files", {}) if k.startswith("/cited_response")]
+        updates["existing_cited_responses"] = [
+            k for k in state.get("files", {}) if k.startswith("/cited_response")
+        ]
         if thread_id:
-            _thread_existing_cited_responses[str(thread_id)] = updates["existing_cited_responses"]
+            _thread_existing_cited_responses[str(thread_id)] = updates[
+                "existing_cited_responses"
+            ]
 
         # ── Wiki query deduplication ───────────────────────────────────────
         # before_agent is called on EVERY model iteration (i.e. each tool-call
@@ -686,7 +737,11 @@ class ResearchStateMiddleware(AgentMiddleware):
         # Fix: track the hash of the last user message that was already
         # wiki-queried for this thread.  If it matches the current message,
         # skip re-querying and preserve the state values from the first call.
-        msg_hash = hashlib.md5((current_user_message or "").encode()).hexdigest() if current_user_message else ""
+        msg_hash = (
+            hashlib.md5((current_user_message or "").encode()).hexdigest()
+            if current_user_message
+            else ""
+        )
         tid_key = str(thread_id) if thread_id else ""
         already_queried = bool(
             tid_key
@@ -704,7 +759,9 @@ class ResearchStateMiddleware(AgentMiddleware):
             else:
                 updates["wiki_query_complete"] = False
             if thread_id:
-                _thread_wiki_query_complete[str(thread_id)] = updates["wiki_query_complete"]
+                _thread_wiki_query_complete[str(thread_id)] = updates[
+                    "wiki_query_complete"
+                ]
             logger.debug(
                 "before_agent: skipping wiki re-query (already queried for this message, "
                 "preserving wiki_query_complete=%s) for thread %s",
@@ -716,24 +773,32 @@ class ResearchStateMiddleware(AgentMiddleware):
             updates["wiki_query_complete"] = False
 
             if thread_id and current_user_message:
-                wiki_sys_msg, wiki_answer = self._get_wiki_context_sync(str(thread_id), current_user_message)
+                wiki_sys_msg, wiki_answer = self._get_wiki_context_sync(
+                    str(thread_id), current_user_message
+                )
                 if wiki_answer:
                     # Evaluate if we need continuous deep research to enhance it
-                    needs_deep_research = self._check_if_needs_deep_research(current_user_message, wiki_answer)
+                    needs_deep_research = self._check_if_needs_deep_research(
+                        current_user_message, wiki_answer
+                    )
                     if not needs_deep_research:
                         logger.info(
-                            "Wiki answer is complete and sufficient. Saving report and disabling web search.")
+                            "Wiki answer is complete and sufficient. Saving report and disabling web search."
+                        )
                         updates["no_web"] = True
                         updates["wiki_query_complete"] = True
                     else:
                         logger.info(
-                            "Wiki answer is incomplete/insufficient. Conducting continuous deep research to enhance it.")
+                            "Wiki answer is incomplete/insufficient. Conducting continuous deep research to enhance it."
+                        )
                         updates["wiki_query_complete"] = False
                     if "files" not in updates:
                         updates["files"] = {}
                     state_files = state.get("files") or {}
                     existing_cited_responses = updates["existing_cited_responses"]
-                    resolved_path = get_target_cited_response_path(wiki_answer, state_files, existing_cited_responses)
+                    resolved_path = get_target_cited_response_path(
+                        wiki_answer, state_files, existing_cited_responses
+                    )
                     updates["files"][resolved_path] = create_file_data(wiki_answer)
 
                     # When wiki is complete, also seed the final AIMessage so the
@@ -742,7 +807,9 @@ class ResearchStateMiddleware(AgentMiddleware):
                         updates["_wiki_answer_text"] = wiki_answer
 
             if thread_id:
-                _thread_wiki_query_complete[str(thread_id)] = updates.get("wiki_query_complete", False)
+                _thread_wiki_query_complete[str(thread_id)] = updates.get(
+                    "wiki_query_complete", False
+                )
                 # Mark this message as queried so subsequent iterations within
                 # this turn skip the expensive wiki query + eval.
                 if msg_hash:
@@ -756,7 +823,9 @@ class ResearchStateMiddleware(AgentMiddleware):
         updates.update(extracted_updates)
 
         # Configure OUTPUT_FOLDER based on extracted doc_folder
-        if updates.get("doc_folder") or (state.get("doc_folder") and not extracted_updates):
+        if updates.get("doc_folder") or (
+            state.get("doc_folder") and not extracted_updates
+        ):
             doc_folder = updates.get("doc_folder") or state.get("doc_folder")
             self._configure_output_folder(doc_folder)
         else:
@@ -771,7 +840,9 @@ class ResearchStateMiddleware(AgentMiddleware):
         if wiki_sys_msg:
             sys_msgs.append(wiki_sys_msg)
         if instruction:
-            sys_msgs.append(SystemMessage(content=f"Task configurations: \n{instruction}"))
+            sys_msgs.append(
+                SystemMessage(content=f"Task configurations: \n{instruction}")
+            )
 
         if sys_msgs:
             # Prepend system messages while keeping the status AIMessage
@@ -797,7 +868,9 @@ class ResearchStateMiddleware(AgentMiddleware):
             wiki_answer_text = state.get("_wiki_answer_text") or ""
             if not wiki_answer_text:
                 files = state.get("files") or {}
-                cited_paths = sorted(p for p in files if p.startswith("/cited_response"))
+                cited_paths = sorted(
+                    p for p in files if p.startswith("/cited_response")
+                )
                 cited_path = cited_paths[-1] if cited_paths else None
                 if cited_path and cited_path in files:
                     wiki_answer_text = file_data_to_string(files[cited_path])
@@ -862,7 +935,9 @@ class ResearchStateMiddleware(AgentMiddleware):
             if isinstance(runtime, dict):
                 thread_id = runtime.get("configurable", {}).get("thread_id")
             elif hasattr(runtime, "execution_info"):
-                thread_id = getattr(getattr(runtime, "execution_info"), "thread_id", None)
+                thread_id = getattr(
+                    getattr(runtime, "execution_info"), "thread_id", None
+                )
             elif hasattr(runtime, "configurable"):
                 thread_id = getattr(runtime, "configurable", {}).get("thread_id")
             elif isinstance(runtime, dict) and "configurable" in runtime:
@@ -886,7 +961,9 @@ class ResearchStateMiddleware(AgentMiddleware):
             if not wiki_answer_text:
                 # Fallback: read from cited_response file in state
                 files = state.get("files") or {}
-                cited_paths = sorted(p for p in files if p.startswith("/cited_response"))
+                cited_paths = sorted(
+                    p for p in files if p.startswith("/cited_response")
+                )
                 cited_path = cited_paths[-1] if cited_paths else None
                 if cited_path and cited_path in files:
                     wiki_answer_text = file_data_to_string(files[cited_path])
@@ -933,7 +1010,9 @@ class ResearchStateMiddleware(AgentMiddleware):
                         )
                         streamed.add(file_path)
                 except Exception:
-                    logger.debug("Failed to stream file %s to chat", file_path, exc_info=True)
+                    logger.debug(
+                        "Failed to stream file %s to chat", file_path, exc_info=True
+                    )
 
             if new_messages:
                 if "messages" in updates:
@@ -963,10 +1042,14 @@ class ResearchStateMiddleware(AgentMiddleware):
 
                 # Extract data from state
                 messages = state.get("messages", [])
-                doc_folder = state.get("doc_folder") or os.environ.get("DOC_FOLDER", "N/A")
+                doc_folder = state.get("doc_folder") or os.environ.get(
+                    "DOC_FOLDER", "N/A"
+                )
                 skill = state.get("skill", "research")
                 no_web = state.get("no_web", False)
-                model_name = os.environ.get("MODEL_NAME", os.environ.get("AZURE_OPENAI_DEPLOYMENT", "N/A"))
+                model_name = os.environ.get(
+                    "MODEL_NAME", os.environ.get("AZURE_OPENAI_DEPLOYMENT", "N/A")
+                )
 
                 # Get user message as subject (for reference only, not for comparison)
                 user_message = None
@@ -1006,7 +1089,9 @@ class ResearchStateMiddleware(AgentMiddleware):
 
         return updates if updates else None
 
-    def _extract_parameters_from_user_input(self, state: ResearchState, messages: list) -> dict[str, Any]:
+    def _extract_parameters_from_user_input(
+        self, state: ResearchState, messages: list
+    ) -> dict[str, Any]:
         """Extract doc_folder, skill, and no_web from the **latest** user message.
 
         Parameters are always re-extracted from the most recent user message so
@@ -1087,23 +1172,28 @@ class ResearchStateMiddleware(AgentMiddleware):
         doc_match = re.search(r"--doc-folder\s+['\"]?([^\s'\"]+)['\"]?", user_message)
         if doc_match:
             # Normalize Windows backslashes to forward slashes
-            potential_path = doc_match.group(1).replace('\\', '/')
+            potential_path = doc_match.group(1).replace("\\", "/")
 
         if not potential_path:
             # Look for path patterns like ./docs/policy/ or .\docs\policy\ or quoted paths
             path_match = re.search(r"['\"](\.[/\\][^'\"]+)['\"]", user_message)
             if path_match:
-                p = path_match.group(1).replace('\\', '/')
+                p = path_match.group(1).replace("\\", "/")
                 if "doc" in p.lower() or "policy" in p.lower() or "folder" in p.lower():
                     potential_path = p
 
         if not potential_path:
             # Look for unquoted paths that contain common document folder names
             # Matches ./path/to/dir, /path/to/dir, or path/to/dir
-            unquoted_match = re.search(r"((?:\.?/)?[\\w/.-]+(?:[/\\][\\w/.-]+)+)", user_message)
+            unquoted_match = re.search(
+                r"((?:\.?/)?[\\w/.-]+(?:[/\\][\\w/.-]+)+)", user_message
+            )
             if unquoted_match:
-                p = unquoted_match.group(1).replace('\\', '/')
-                if any(keyword in p.lower() for keyword in ["doc", "policy", "data", "input", "file"]):
+                p = unquoted_match.group(1).replace("\\", "/")
+                if any(
+                    keyword in p.lower()
+                    for keyword in ["doc", "policy", "data", "input", "file"]
+                ):
                     potential_path = p
 
         if not potential_path:
@@ -1113,7 +1203,9 @@ class ResearchStateMiddleware(AgentMiddleware):
         path = Path(potential_path)
         if not path.exists():
             # Try to prefix with deep_research if not already
-            if not potential_path.startswith("./deep_research/") and not potential_path.startswith("deep_research/"):
+            if not potential_path.startswith(
+                "./deep_research/"
+            ) and not potential_path.startswith("deep_research/"):
                 deep_path = Path("deep_research") / potential_path.lstrip("./")
                 if deep_path.exists():
                     return str(deep_path)
@@ -1131,10 +1223,7 @@ class ResearchStateMiddleware(AgentMiddleware):
         message_lower = user_message.lower()
 
         # Combine legacy and migrated skill IDs for direct matching
-        all_skill_ids = (
-                list(skill_registry.skill_ids)
-                + list(skill_registry.SKILL_IDS)
-        )
+        all_skill_ids = list(skill_registry.skill_ids) + list(skill_registry.SKILL_IDS)
         # Direct skill-id match: check if any skill ID appears in the user
         # message (e.g. "use humanizer skill" contains "humanizer").
         # Prefer longer IDs first to avoid partial matches.
@@ -1202,7 +1291,9 @@ class ResearchStateMiddleware(AgentMiddleware):
             skill=state.get("skill"),
             no_web=str2bool(state.get("no_web"), False),
         )
-        instruction = instruction.replace("Research the following subject: ", "").strip()
+        instruction = instruction.replace(
+            "Research the following subject: ", ""
+        ).strip()
 
         # --- Wiki-complete fast-path ---
         # When the wiki already produced a complete and sufficient answer (saved
@@ -1215,7 +1306,11 @@ class ResearchStateMiddleware(AgentMiddleware):
             cited_response_paths = sorted(
                 p for p in files if p.startswith("/cited_response")
             )
-            cited_response_path = cited_response_paths[-1] if cited_response_paths else "/cited_response.md"
+            cited_response_path = (
+                cited_response_paths[-1]
+                if cited_response_paths
+                else "/cited_response.md"
+            )
             instruction += (
                 "\n\n<WikiCompleteAnswer>"
                 "\nIMPORTANT: The user's question has ALREADY been fully answered by the "
@@ -1252,13 +1347,14 @@ class ResearchStateMiddleware(AgentMiddleware):
 
 # Combine orchestrator instructions (RESEARCHER_INSTRUCTIONS only for sub-agents)
 INSTRUCTIONS = (
-        RESEARCH_WORKFLOW_INSTRUCTIONS
-        + "\n\n"
-        + "=" * 80
-        + "\n\n"
-        + SUBAGENT_DELEGATION_INSTRUCTIONS.format(
-    max_concurrent_research_units=MAX_CONCURRENT_RESEARCH_UNITS,
-    max_researcher_iterations=MAX_RESEARCHER_ITERATIONS)
+    RESEARCH_WORKFLOW_INSTRUCTIONS
+    + "\n\n"
+    + "=" * 80
+    + "\n\n"
+    + SUBAGENT_DELEGATION_INSTRUCTIONS.format(
+        max_concurrent_research_units=MAX_CONCURRENT_RESEARCH_UNITS,
+        max_researcher_iterations=MAX_RESEARCHER_ITERATIONS,
+    )
 )
 
 # Create research subagent
@@ -1282,9 +1378,11 @@ except Exception as e:
     print(f"CRITICAL ERROR INITIALIZING MODEL: {e}", file=sys.stderr)
     traceback.print_exc()
     with open("/deps/deep_research/FATAL_ERROR.log", "w") as f:
-        f.write(f"CRITICAL ERROR: get_configured_model() failed!\n")
+        f.write("CRITICAL ERROR: get_configured_model() failed!\n")
         f.write(traceback.format_exc())
-    time.sleep(15)  # Give App Runner 15 seconds to flush the logs to CloudWatch before exiting
+    time.sleep(
+        15
+    )  # Give App Runner 15 seconds to flush the logs to CloudWatch before exiting
     raise
 # Recursion limit - configurable via environment variable (applied at graph compile time)
 RECURSION_LIMIT = int(os.environ.get("GRAPH_RECURSION_LIMIT", "200"))
@@ -1312,7 +1410,11 @@ _agent_kwargs: dict[str, Any] = dict(
     system_prompt=INSTRUCTIONS,
     subagents=[research_sub_agent],
     middleware=[ResearchStateMiddleware()],
-    skills=[".deepagents/skills/", "./doc/.deepagents/skills/", "./docs/.deepagents/skills/"],
+    skills=[
+        ".deepagents/skills/",
+        "./doc/.deepagents/skills/",
+        "./docs/.deepagents/skills/",
+    ],
 )
 if checkpointer is not None:
     _agent_kwargs["checkpointer"] = checkpointer

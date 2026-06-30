@@ -375,6 +375,8 @@ properties:
             value: ${MOUNT_PATH}/output/eval_history/server_runs.jsonl
           - name: DOC_FOLDER
             value: ${MOUNT_PATH}/docs
+          - name: WIKI_BASE_DIR
+            value: ${MOUNT_PATH}
           - name: INPUT_FOLDER
             value: ${MOUNT_PATH}/input
           - name: SQLITE_DB_PATH

@@ -5,13 +5,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-class IngestPhase(str, Enum):
+class IngestPhase(StrEnum):
     """Phases of the wiki ingest lifecycle."""
 
     IDLE = "idle"
@@ -19,6 +19,7 @@ class IngestPhase(str, Enum):
     STAGING_SOURCES = "staging_sources"
     ANALYZING = "analyzing"
     APPLYING = "applying"
+    REVIEWING = "reviewing"
     REFRESHING_INDEX = "refreshing_index"
     MERGING = "merging"
     READY = "ready"
@@ -27,21 +28,26 @@ class IngestPhase(str, Enum):
 
 
 # Phases considered "in progress" (not terminal).
-ACTIVE_PHASES = frozenset({
-    IngestPhase.INITIALIZING,
-    IngestPhase.STAGING_SOURCES,
-    IngestPhase.ANALYZING,
-    IngestPhase.APPLYING,
-    IngestPhase.REFRESHING_INDEX,
-})
+ACTIVE_PHASES = frozenset(
+    {
+        IngestPhase.INITIALIZING,
+        IngestPhase.STAGING_SOURCES,
+        IngestPhase.ANALYZING,
+        IngestPhase.APPLYING,
+        IngestPhase.REVIEWING,
+        IngestPhase.REFRESHING_INDEX,
+    }
+)
 
 # Terminal phases indicating the ingest is no longer running.
-TERMINAL_PHASES = frozenset({
-    IngestPhase.READY,
-    IngestPhase.ERROR,
-    IngestPhase.CANCELLED,
-    IngestPhase.IDLE,
-})
+TERMINAL_PHASES = frozenset(
+    {
+        IngestPhase.READY,
+        IngestPhase.ERROR,
+        IngestPhase.CANCELLED,
+        IngestPhase.IDLE,
+    }
+)
 
 # Phase → approximate progress percentage mapping.
 PHASE_PROGRESS = {
@@ -50,6 +56,7 @@ PHASE_PROGRESS = {
     IngestPhase.STAGING_SOURCES: 15,
     IngestPhase.ANALYZING: 40,
     IngestPhase.APPLYING: 70,
+    IngestPhase.REVIEWING: 80,
     IngestPhase.REFRESHING_INDEX: 90,
     IngestPhase.READY: 100,
     IngestPhase.ERROR: -1,
@@ -68,10 +75,14 @@ class IngestProgress:
     source_count: int = 0
     sources_processed: int = 0
     error: str | None = None
+    review_report: ReviewReport | None = None
+    retry_count: int = 0
     started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     completed_at: str | None = None
 
-    def advance(self, phase: IngestPhase, detail: str = "", *, extra_progress: int = 0) -> None:
+    def advance(
+        self, phase: IngestPhase, detail: str = "", *, extra_progress: int = 0
+    ) -> None:
         """Advance to a new phase, updating progress percentage."""
         self.phase = phase
         self.detail = detail
@@ -152,6 +163,28 @@ class SourceCitation:
     url: str | None = None
 
 
+def _resolve_wiki_base_dir(fallback_dir: Path) -> Path:
+    """Return the effective base directory for wiki/docs path resolution.
+
+    Checks (in order):
+    1. ``WIKI_BASE_DIR`` env var — explicit override for the wiki base directory.
+    2. ``DOC_FOLDER`` env var — the docs folder used by the research agent;
+       its parent directory becomes the base (e.g. ``/mnt/docs`` → ``/mnt``).
+    3. *fallback_dir* — the caller's default (usually ``Path(__file__).resolve().parent``).
+    """
+    import os as _os
+
+    wiki_base = _os.environ.get("WIKI_BASE_DIR")
+    if wiki_base:
+        return Path(wiki_base)
+
+    doc_folder = _os.environ.get("DOC_FOLDER")
+    if doc_folder:
+        return Path(doc_folder).parent
+
+    return fallback_dir
+
+
 @dataclass(frozen=True)
 class ThreadWikiPaths:
     """Resolved filesystem paths for a thread's wiki workspace."""
@@ -163,10 +196,17 @@ class ThreadWikiPaths:
     wiki_content: Path  # ./docs/threads-wiki/<thread-id>/wiki/
 
     @classmethod
-    def resolve(cls, thread_id: str, base_dir: Path) -> ThreadWikiPaths:
-        """Resolve paths for a given thread ID relative to a base directory."""
-        docs_dir = base_dir / "docs" / "threads" / thread_id
-        wiki_dir = base_dir / "docs" / "threads-wiki" / thread_id
+    def resolve(
+        cls, thread_id: str, base_dir: Path, *, docs_base: Path | None = None
+    ) -> ThreadWikiPaths:
+        """Resolve paths for a given thread ID relative to a base directory.
+
+        If *docs_base* is provided, it is used as the parent of the ``docs/``
+        and ``docs/threads-wiki/`` directories instead of *base_dir*.
+        """
+        effective = docs_base if docs_base is not None else base_dir
+        docs_dir = effective / "docs" / "threads" / thread_id
+        wiki_dir = effective / "docs" / "threads-wiki" / thread_id
         return cls(
             thread_id=thread_id,
             docs_dir=docs_dir,
@@ -179,9 +219,17 @@ class ThreadWikiPaths:
 # ── Wiki Page Metadata (YAML frontmatter) ──────────────────────────────────────
 
 # Valid page categories matching the structured subdirectory layout.
-WIKI_PAGE_CATEGORIES = frozenset({
-    "entity", "concept", "source", "comparison", "synthesis", "query", "uncategorized",
-})
+WIKI_PAGE_CATEGORIES = frozenset(
+    {
+        "entity",
+        "concept",
+        "source",
+        "comparison",
+        "synthesis",
+        "query",
+        "uncategorized",
+    }
+)
 
 # Directory name → category mapping.
 CATEGORY_DIRECTORIES: dict[str, str] = {
@@ -224,7 +272,9 @@ class WikiPageMetadata:
         else:
             data["updated"] = datetime.now(UTC).strftime("%Y-%m-%d")
 
-        yaml_str = yaml.dump(data, default_flow_style=False, allow_unicode=True, sort_keys=False).strip()
+        yaml_str = yaml.dump(
+            data, default_flow_style=False, allow_unicode=True, sort_keys=False
+        ).strip()
         return f"---\n{yaml_str}\n---\n"
 
 
@@ -255,7 +305,7 @@ def parse_frontmatter(content: str) -> tuple[WikiPageMetadata, str]:
         return metadata, body
 
     yaml_str = content[3:end_idx].strip()
-    body = content[end_idx + 4:].lstrip("\n")
+    body = content[end_idx + 4 :].lstrip("\n")
 
     try:
         frontmatter = yaml.safe_load(yaml_str)
@@ -268,7 +318,9 @@ def parse_frontmatter(content: str) -> tuple[WikiPageMetadata, str]:
 
     metadata.title = str(frontmatter.get("title", metadata.title))
     category = str(frontmatter.get("category", "uncategorized")).lower()
-    metadata.category = category if category in WIKI_PAGE_CATEGORIES else "uncategorized"
+    metadata.category = (
+        category if category in WIKI_PAGE_CATEGORIES else "uncategorized"
+    )
     metadata.summary = str(frontmatter.get("summary", ""))
     tags = frontmatter.get("tags", [])
     if isinstance(tags, list):
@@ -297,6 +349,65 @@ class Contradiction:
     resolution_note: str = ""
 
 
+@dataclass
+class ReviewItem:
+    """A single curation signal flagged for human review after ingest."""
+
+    item_type: str  # "missing_page", "duplicate", "suggestion", "research_question"
+    title: str
+    description: str
+    suggested_action: str = ""
+    search_query: str = ""  # Pre-generated search query for investigation
+
+
+@dataclass
+class ReviewReport:
+    """Post-ingest review report with human-in-the-loop curation signals.
+
+    Produced by a read-only LLM pass after the apply phase.  Flags items
+    the LLM could not resolve automatically: missing canonical pages,
+    potential duplicates, research directions, and knowledge gaps.
+    """
+
+    missing_pages: list[ReviewItem] = field(default_factory=list)
+    duplicate_suggestions: list[ReviewItem] = field(default_factory=list)
+    research_questions: list[ReviewItem] = field(default_factory=list)
+    gaps: list[ReviewItem] = field(default_factory=list)
+
+    @property
+    def total_items(self) -> int:
+        """Total number of curation items across all categories."""
+        return (
+            len(self.missing_pages)
+            + len(self.duplicate_suggestions)
+            + len(self.research_questions)
+            + len(self.gaps)
+        )
+
+    @property
+    def is_empty(self) -> bool:
+        """True if the review report contains no curation items."""
+        return self.total_items == 0
+
+
+@dataclass
+class SemanticLintFinding:
+    """A finding from the read-only semantic contradiction detection pass.
+
+    These are produced by a dedicated LLM scan that systematically compares
+    wiki pages for factual conflicts, stale claims, and inconsistencies.
+    The findings feed into the mutating lint pass for repair.
+    """
+
+    page_a: str  # Relative wiki path of first page
+    page_b: str  # Relative wiki path of second page (or "self" for internal)
+    claim_a: str
+    claim_b: str
+    severity: str = "medium"  # "high", "medium", "low"
+    finding_type: str = "contradiction"  # contradiction, stale_claim, inconsistency
+    resolution_hint: str = ""
+
+
 @dataclass(frozen=True)
 class WikiQueryResult:
     """Result from a wiki query operation."""
@@ -305,3 +416,73 @@ class WikiQueryResult:
     filed_path: str | None = None
     sources_cited: list[SourceCitation] = field(default_factory=list)
     contradictions: list[Contradiction] = field(default_factory=list)
+
+
+# ── Graph Analysis (Phase 3) ──────────────────────────────────────────────────
+
+
+@dataclass
+class CommunityInfo:
+    """A knowledge cluster discovered via Louvain community detection."""
+
+    id: int
+    pages: list[str]  # Relative wiki paths of pages in this community
+    cohesion: float  # Internal edge density (0.0–1.0), higher = tighter
+    size: int = 0
+
+    def __post_init__(self):
+        """Set size from pages list if not explicitly provided."""
+        if self.size == 0:
+            self.size = len(self.pages)
+
+    @property
+    def is_sparse(self) -> bool:
+        """Communities with cohesion < 0.15 are flagged as sparse/gaps."""
+        return self.cohesion < 0.15
+
+
+@dataclass
+class RelevanceEdge:
+    """A weighted relationship between two wiki pages."""
+
+    source_page: str
+    target_page: str
+    direct_links: float = 0.0  # Weight 3.0x
+    source_overlap: float = 0.0  # Weight 4.0x
+    common_neighbors: float = 0.0  # Weight 1.5x (Adamic-Adar)
+    type_affinity: float = 0.0  # Weight 1.0x
+    total_score: float = 0.0
+
+    # Signal weights from LLM Wiki's 4-signal relevance model.
+    WEIGHTS: dict[str, float] = field(
+        default_factory=lambda: {
+            "direct_links": 3.0,
+            "source_overlap": 4.0,
+            "common_neighbors": 1.5,
+            "type_affinity": 1.0,
+        },
+        init=False,
+        repr=False,
+    )
+
+    def __post_init__(self):
+        """Compute total_score from individual signal weights if not provided."""
+        if self.total_score == 0.0:
+            w = self.WEIGHTS
+            self.total_score = (
+                self.direct_links * w["direct_links"]
+                + self.source_overlap * w["source_overlap"]
+                + self.common_neighbors * w["common_neighbors"]
+                + self.type_affinity * w["type_affinity"]
+            )
+
+
+@dataclass
+class GraphInsight:
+    """A structured discovery signal from the knowledge graph."""
+
+    insight_type: str  # surprising_connection, gap, bridge, peripheral_to_hub
+    pages: list[str]
+    description: str
+    suggested_action: str = ""
+    score: float = 0.0  # Relevance or severity score

@@ -19,17 +19,31 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-# Absolute path to the docs directory (sibling of this package inside deep_research/)
-DOCS_ROOT: Path = Path(__file__).resolve().parent.parent / "docs"
+# Absolute path to the docs directory (sibling of this package inside deep_research/).
+# On mounted deployments (Azure), the base is auto-detected from DOC_FOLDER or
+# WIKI_BASE_DIR env vars set by deploy.sh.
+_BASE = Path(
+    os.environ.get(
+        "WIKI_BASE_DIR",
+        os.environ.get(
+            "DOC_FOLDER",
+            str(Path(__file__).resolve().parent.parent / "docs"),
+        ),
+    )
+)
+# If _BASE points to a "docs" directory, use it directly; otherwise append "docs".
+if _BASE.name == "docs":
+    DOCS_ROOT: Path = _BASE
+else:
+    DOCS_ROOT: Path = _BASE / "docs"
 
 # Semantic API version — bump on every public-facing change
-API_VERSION: str = "1.8.86"
+API_VERSION: str = "1.8.88"
 
 # ── Authentication ────────────────────────────────────────────────────────────
 
-API_KEY: str = (
-        os.environ.get("UPLOAD_API_KEY")
-        or os.environ.get("LANGCHAIN_API_KEY", "")
+API_KEY: str = os.environ.get("UPLOAD_API_KEY") or os.environ.get(
+    "LANGCHAIN_API_KEY", ""
 )
 
 if not API_KEY:

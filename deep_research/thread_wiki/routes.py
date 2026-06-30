@@ -23,6 +23,7 @@ from langgraph_sdk.auth.types import MinimalUserDict
 from pydantic import BaseModel, Field
 
 from research_agent.utils.knowledge_filesystem import clear_thread_cache
+
 from . import progress as progress_tracker
 from .models import ThreadWikiPaths, WikiQueryResult
 from .service import run_ingest, run_lint, run_query
@@ -47,33 +48,60 @@ def _sse_frame(event: str, data: Any, event_id: int | None = None) -> str:
 
 # ── Pydantic models ───────────────────────────────────────────────────────────
 
+
 class WikiIngestRequest(BaseModel):
     """Request body for triggering wiki ingest."""
+
     note: str | None = None
     topic: str | None = None
 
 
 class WikiQueryRequestModel(BaseModel):
     """Request body for querying the wiki."""
+
     question: str
     file_results: bool = True
 
 
 class WikiLintRequest(BaseModel):
     """Request body for running wiki lint."""
+
     note: str | None = None
     topic: str | None = None
 
 
 class WikiIngestResponse(BaseModel):
     """Response from triggering wiki ingest."""
+
     thread_id: str
     status: str
     message: str
 
 
+class ReviewItemOut(BaseModel):
+    """A single curation signal from the post-ingest review."""
+
+    item_type: str
+    title: str
+    description: str
+    suggested_action: str = ""
+    search_query: str = ""
+
+
+class ReviewReportOut(BaseModel):
+    """Post-ingest review report with human-in-the-loop curation signals."""
+
+    missing_pages: list[ReviewItemOut] = []
+    duplicate_suggestions: list[ReviewItemOut] = []
+    research_questions: list[ReviewItemOut] = []
+    gaps: list[ReviewItemOut] = []
+    total_items: int = 0
+    is_empty: bool = True
+
+
 class WikiStatusResponse(BaseModel):
     """Response for wiki ingest status."""
+
     thread_id: str
     phase: str
     progress: int
@@ -85,6 +113,7 @@ class WikiStatusResponse(BaseModel):
     completed_at: str | None
     is_active: bool
     wiki_ready: bool
+    review_report: ReviewReportOut | None = None
 
 
 class SourceCitationOut(BaseModel):
@@ -99,6 +128,7 @@ class SourceCitationOut(BaseModel):
 
 class WikiQueryResponse(BaseModel):
     """Response from a wiki query."""
+
     answer: str
     filed_path: str | None = None
     sources_cited: list[SourceCitationOut] = Field(default_factory=list)
@@ -106,11 +136,47 @@ class WikiQueryResponse(BaseModel):
 
 class WikiLintResponse(BaseModel):
     """Response from a wiki lint operation."""
+
     result: str
     topic: str
 
 
+class GraphInsightOut(BaseModel):
+    """A single knowledge graph insight."""
+
+    insight_type: str
+    pages: list[str]
+    description: str
+    suggested_action: str = ""
+    score: float = 0.0
+
+
+class GraphInsightsResponse(BaseModel):
+    """Response from the graph insights endpoint."""
+
+    thread_id: str
+    total_pages: int
+    total_links: int
+    communities: list[dict] = []
+    insights: list[GraphInsightOut] = []
+    hubs: list[dict] = []
+    sinks: list[str] = []
+    orphans: list[str] = []
+
+
 # ── Auth dependency (self-contained to avoid circular import) ──
+
+
+def _to_review_item_out(item) -> ReviewItemOut:
+    """Convert a ReviewItem domain model to a ReviewItemOut response model."""
+    return ReviewItemOut(
+        item_type=item.item_type,
+        title=item.title,
+        description=item.description,
+        suggested_action=item.suggested_action,
+        search_query=item.search_query,
+    )
+
 
 async def _wiki_get_current_user(request: Request) -> MinimalUserDict:
     """Authenticate wiki routes using the same auth pattern as auth.py.
@@ -119,10 +185,12 @@ async def _wiki_get_current_user(request: Request) -> MinimalUserDict:
     to avoid circular imports.
     """
     import server as _server
+
     return await _server.get_current_user(request)
 
 
 # ── Helper ────────────────────────────────────────────────────────────────────
+
 
 def _resolve_paths(thread_id: str) -> ThreadWikiPaths:
     """Resolve wiki paths for a thread, validating the docs directory exists."""
@@ -155,14 +223,15 @@ def _wiki_is_ready(paths: ThreadWikiPaths) -> bool:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+
 @router.post(
     "/threads/{thread_id}/wiki/ingest",
     response_model=WikiIngestResponse,
 )
 async def trigger_wiki_ingest(
-        thread_id: str,
-        body: WikiIngestRequest = WikiIngestRequest(),
-        current_user=Depends(_wiki_get_current_user),
+    thread_id: str,
+    body: WikiIngestRequest = WikiIngestRequest(),
+    current_user=Depends(_wiki_get_current_user),
 ) -> WikiIngestResponse:
     """Trigger wiki ingest for a thread's uploaded documents.
 
@@ -174,13 +243,17 @@ async def trigger_wiki_ingest(
     topic = _topic_from_thread(thread_id, body.topic)
 
     # Cancel any existing ingest for this thread.
-    await progress_tracker.cancel_ingest(thread_id, reason="Replaced by new ingest request.")
+    await progress_tracker.cancel_ingest(
+        thread_id, reason="Replaced by new ingest request."
+    )
 
     # Pre-create a placeholder task to register progress first, then replace
     # it with the real task. This avoids a race where the background function
     # looks up the registry before registration completes.
     placeholder_task: asyncio.Task = asyncio.create_task(asyncio.sleep(0))
-    prog = await progress_tracker.register_ingest(thread_id, placeholder_task)
+    prog = await progress_tracker.register_ingest(
+        thread_id, placeholder_task, wiki_dir=paths.wiki_dir
+    )
 
     # Now create the real background task with the registered progress/cancel.
     cancel_event = progress_tracker._active_ingests[thread_id].cancel_event
@@ -191,7 +264,9 @@ async def trigger_wiki_ingest(
 
     # Update the registry entry with the real task.
     progress_tracker._active_ingests[thread_id] = progress_tracker._IngestEntry(
-        progress=prog, task=task, cancel_event=cancel_event,
+        progress=prog,
+        task=task,
+        cancel_event=cancel_event,
     )
     prog.advance(prog.phase, "Ingest queued.")
 
@@ -203,11 +278,11 @@ async def trigger_wiki_ingest(
 
 
 async def _run_ingest_background(
-        paths: ThreadWikiPaths,
-        topic: str,
-        note: str | None,
-        progress_obj,
-        cancel_event: asyncio.Event,
+    paths: ThreadWikiPaths,
+    topic: str,
+    note: str | None,
+    progress_obj,
+    cancel_event: asyncio.Event,
 ) -> None:
     """Background ingest worker with directly injected progress and cancel objects."""
     try:
@@ -225,8 +300,8 @@ async def _run_ingest_background(
     response_model=WikiStatusResponse,
 )
 async def get_wiki_status(
-        thread_id: str,
-        current_user=Depends(_wiki_get_current_user),
+    thread_id: str,
+    current_user=Depends(_wiki_get_current_user),
 ) -> WikiStatusResponse:
     """Get current wiki ingest status and progress for a thread."""
     paths = ThreadWikiPaths.resolve(thread_id, _BASE_DIR)
@@ -249,6 +324,23 @@ async def get_wiki_status(
             wiki_ready=ready,
         )
 
+    review_out = None
+    if prog.review_report is not None:
+        review_out = ReviewReportOut(
+            missing_pages=[
+                _to_review_item_out(ri) for ri in prog.review_report.missing_pages
+            ],
+            duplicate_suggestions=[
+                _to_review_item_out(ri)
+                for ri in prog.review_report.duplicate_suggestions
+            ],
+            research_questions=[
+                _to_review_item_out(ri) for ri in prog.review_report.research_questions
+            ],
+            gaps=[_to_review_item_out(ri) for ri in prog.review_report.gaps],
+            total_items=prog.review_report.total_items,
+            is_empty=prog.review_report.is_empty,
+        )
     return WikiStatusResponse(
         thread_id=thread_id,
         phase=prog.phase.value,
@@ -261,13 +353,14 @@ async def get_wiki_status(
         completed_at=prog.completed_at,
         is_active=prog.is_active(),
         wiki_ready=_wiki_is_ready(paths),
+        review_report=review_out,
     )
 
 
 @router.get("/threads/{thread_id}/wiki/progress")
 async def stream_wiki_progress(
-        thread_id: str,
-        current_user=Depends(_wiki_get_current_user),
+    thread_id: str,
+    current_user=Depends(_wiki_get_current_user),
 ):
     """SSE stream for real-time ingest progress updates.
 
@@ -288,12 +381,16 @@ async def stream_wiki_progress(
                 # No active ingest.
                 paths = ThreadWikiPaths.resolve(thread_id, _BASE_DIR)
                 ready = _wiki_is_ready(paths)
-                yield _sse_frame("end", {
-                    "thread_id": thread_id,
-                    "phase": "ready" if ready else "idle",
-                    "progress": 100 if ready else 0,
-                    "wiki_ready": ready,
-                }, event_id=seq)
+                yield _sse_frame(
+                    "end",
+                    {
+                        "thread_id": thread_id,
+                        "phase": "ready" if ready else "idle",
+                        "progress": 100 if ready else 0,
+                        "wiki_ready": ready,
+                    },
+                    event_id=seq,
+                )
                 return
 
             # Emit on phase change.
@@ -311,10 +408,14 @@ async def stream_wiki_progress(
             # Terminal state → emit end and close stream.
             if prog.is_terminal():
                 paths = ThreadWikiPaths.resolve(thread_id, _BASE_DIR)
-                yield _sse_frame("end", {
-                    **prog.to_dict(),
-                    "wiki_ready": _wiki_is_ready(paths),
-                }, event_id=seq)
+                yield _sse_frame(
+                    "end",
+                    {
+                        **prog.to_dict(),
+                        "wiki_ready": _wiki_is_ready(paths),
+                    },
+                    event_id=seq,
+                )
                 return
 
             await asyncio.sleep(0.5)
@@ -326,8 +427,8 @@ async def stream_wiki_progress(
     "/threads/{thread_id}/wiki/ingest/cancel",
 )
 async def cancel_wiki_ingest(
-        thread_id: str,
-        current_user=Depends(_wiki_get_current_user),
+    thread_id: str,
+    current_user=Depends(_wiki_get_current_user),
 ) -> dict[str, Any]:
     """Cancel an in-progress wiki ingest for a thread.
 
@@ -349,9 +450,9 @@ async def cancel_wiki_ingest(
     response_model=WikiQueryResponse,
 )
 async def query_wiki(
-        thread_id: str,
-        body: WikiQueryRequestModel,
-        current_user=Depends(_wiki_get_current_user),
+    thread_id: str,
+    body: WikiQueryRequestModel,
+    current_user=Depends(_wiki_get_current_user),
 ) -> WikiQueryResponse:
     """Query the thread's wiki knowledge base.
 
@@ -397,9 +498,9 @@ async def query_wiki(
     response_model=WikiLintResponse,
 )
 async def lint_wiki(
-        thread_id: str,
-        body: WikiLintRequest = WikiLintRequest(),
-        current_user=Depends(_wiki_get_current_user),
+    thread_id: str,
+    body: WikiLintRequest = WikiLintRequest(),
+    current_user=Depends(_wiki_get_current_user),
 ) -> WikiLintResponse:
     """Run lint reconciliation on the thread's wiki.
 
@@ -420,12 +521,76 @@ async def lint_wiki(
     return WikiLintResponse(result=result, topic=topic)
 
 
+@router.get(
+    "/threads/{thread_id}/wiki/insights",
+    response_model=GraphInsightsResponse,
+)
+async def get_wiki_insights(
+    thread_id: str,
+    current_user=Depends(_wiki_get_current_user),
+) -> GraphInsightsResponse:
+    """Get knowledge graph insights for a thread's wiki.
+
+    Runs community detection, relevance scoring, and graph analysis to
+    surface surprising connections, knowledge gaps, bridge nodes, and
+    missing cross-references.
+    """
+    from thread_wiki.service import _analyze_graph
+
+    paths = _resolve_paths(thread_id)
+
+    if not paths.wiki_dir.exists():
+        raise HTTPException(
+            status_code=409,
+            detail="Wiki has not been initialized. Run ingest first.",
+        )
+
+    graph_report = await asyncio.to_thread(_analyze_graph, paths.wiki_dir)
+
+    # Convert CommunityInfo objects to dicts for the response.
+    communities_out: list[dict] = []
+    for c in graph_report.get("communities", []):
+        communities_out.append(
+            {
+                "id": c.id,
+                "pages": c.pages[:10],  # Cap at 10 pages per community
+                "cohesion": c.cohesion,
+                "size": c.size,
+                "is_sparse": c.is_sparse,
+            }
+        )
+
+    # Convert GraphInsight objects.
+    insights_out: list[GraphInsightOut] = []
+    for ins in graph_report.get("graph_insights", []):
+        insights_out.append(
+            GraphInsightOut(
+                insight_type=ins.insight_type,
+                pages=ins.pages,
+                description=ins.description,
+                suggested_action=ins.suggested_action,
+                score=ins.score,
+            )
+        )
+
+    return GraphInsightsResponse(
+        thread_id=thread_id,
+        total_pages=graph_report["total_pages"],
+        total_links=graph_report["total_links"],
+        communities=communities_out,
+        insights=insights_out,
+        hubs=graph_report.get("hubs", []),
+        sinks=graph_report.get("sinks", []),
+        orphans=graph_report.get("orphans", []),
+    )
+
+
 @router.delete(
     "/threads/{thread_id}/wiki",
 )
 async def delete_thread_wiki(
-        thread_id: str,
-        current_user=Depends(_wiki_get_current_user),
+    thread_id: str,
+    current_user=Depends(_wiki_get_current_user),
 ) -> dict[str, Any]:
     """Delete a thread's LLM wiki workspace and uploaded documents."""
     # 1. Cancel any active ingest for this thread.
@@ -438,12 +603,16 @@ async def delete_thread_wiki(
 
     # 3. Clean up uploaded documents directory if it exists.
     if paths.docs_dir.exists() and paths.docs_dir.is_dir():
-        await asyncio.to_thread(shutil.rmtree, str(paths.docs_dir), ignore_errors=True, onerror=None)
+        await asyncio.to_thread(
+            shutil.rmtree, str(paths.docs_dir), ignore_errors=True, onerror=None
+        )
         logger.info("Deleted documents folder for thread %s", thread_id)
 
     # 4. Clean up wiki directory if it exists.
     if paths.wiki_dir.exists() and paths.wiki_dir.is_dir():
-        await asyncio.to_thread(shutil.rmtree, str(paths.wiki_dir), ignore_errors=True, onerror=None)
+        await asyncio.to_thread(
+            shutil.rmtree, str(paths.wiki_dir), ignore_errors=True, onerror=None
+        )
         logger.info("Deleted wiki folder for thread %s", thread_id)
 
     clear_thread_cache(thread_id)
@@ -465,7 +634,9 @@ def _build_directory_tree(root_dir: Path, current_dir: Path) -> dict[str, Any]:
 
     children = []
     if current_dir.exists() and current_dir.is_dir():
-        items = sorted(list(current_dir.iterdir()), key=lambda p: (not p.is_dir(), p.name.lower()))
+        items = sorted(
+            list(current_dir.iterdir()), key=lambda p: (not p.is_dir(), p.name.lower())
+        )
         for item in items:
             if item.name.startswith("."):
                 continue
@@ -473,12 +644,14 @@ def _build_directory_tree(root_dir: Path, current_dir: Path) -> dict[str, Any]:
             if item.is_dir():
                 children.append(_build_directory_tree(root_dir, item))
             else:
-                children.append({
-                    "name": item.name,
-                    "path": item_rel,
-                    "type": "file",
-                    "size": item.stat().st_size if item.exists() else 0,
-                })
+                children.append(
+                    {
+                        "name": item.name,
+                        "path": item_rel,
+                        "type": "file",
+                        "size": item.stat().st_size if item.exists() else 0,
+                    }
+                )
 
     return {
         "name": current_dir.name if relative_path != "" else "threads-wiki",
@@ -501,8 +674,8 @@ def _count_files(node: dict[str, Any]) -> int:
     "/threads/{thread_id}/wiki/tree",
 )
 async def get_thread_wiki_tree(
-        thread_id: str,
-        current_user=Depends(_wiki_get_current_user),
+    thread_id: str,
+    current_user=Depends(_wiki_get_current_user),
 ) -> dict[str, Any]:
     """Get the full directory tree structure for a thread's wiki workspace."""
     paths = ThreadWikiPaths.resolve(thread_id, _BASE_DIR)
@@ -512,7 +685,9 @@ async def get_thread_wiki_tree(
             detail=f"Wiki directory does not exist for thread '{thread_id}'. Run ingest first.",
         )
 
-    tree = await asyncio.to_thread(_build_directory_tree, paths.wiki_dir, paths.wiki_dir)
+    tree = await asyncio.to_thread(
+        _build_directory_tree, paths.wiki_dir, paths.wiki_dir
+    )
     file_count = _count_files(tree)
     return {
         "thread_id": thread_id,
@@ -525,9 +700,11 @@ async def get_thread_wiki_tree(
     "/threads/{thread_id}/wiki/file",
 )
 async def get_thread_wiki_file(
-        thread_id: str,
-        path: str = Query(..., description="Relative file path inside threads-wiki/<thread_id>"),
-        current_user=Depends(_wiki_get_current_user),
+    thread_id: str,
+    path: str = Query(
+        ..., description="Relative file path inside threads-wiki/<thread_id>"
+    ),
+    current_user=Depends(_wiki_get_current_user),
 ) -> dict[str, Any]:
     """Read and return the text content of a specific file in the thread's wiki workspace."""
     paths = ThreadWikiPaths.resolve(thread_id, _BASE_DIR)
@@ -554,7 +731,9 @@ async def get_thread_wiki_file(
             detail="Path outside wiki directory.",
         )
 
-    if not (await asyncio.to_thread(target_file.exists)) or not (await asyncio.to_thread(target_file.is_file)):
+    if not (await asyncio.to_thread(target_file.exists)) or not (
+        await asyncio.to_thread(target_file.is_file)
+    ):
         raise HTTPException(
             status_code=404,
             detail=f"File '{path}' not found in thread wiki workspace.",
@@ -562,7 +741,9 @@ async def get_thread_wiki_file(
 
     size = await asyncio.to_thread(lambda: target_file.stat().st_size)
 
-    if target_file.suffix.lower() in {".pkl"} or (len(rel_path.parts) > 0 and rel_path.parts[0] == "index"):
+    if target_file.suffix.lower() in {".pkl"} or (
+        len(rel_path.parts) > 0 and rel_path.parts[0] == "index"
+    ):
         return {
             "thread_id": thread_id,
             "path": str(rel_path),
