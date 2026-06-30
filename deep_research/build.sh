@@ -99,16 +99,26 @@ echo "✅ New API version: $NEW_VERSION"
 end_step
 
 # 6. Build and push image
-start_step "Docker Image Build & Push"
+start_step "Container Image Build & Push"
 BUILD_VERSION=$(date +%Y%m%d%H%M%S)
 echo $BUILD_VERSION > .build_version
-echo "🔨 Building Docker image with tags: latest, $BUILD_VERSION"
+echo "🔨 Building Container image with tags: latest, $BUILD_VERSION"
 # Ensure we're in the correct directory (where Dockerfile is located)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
-docker build --platform linux/amd64 -t $DOCKER_HUB_USERNAME/deep-research-agent:latest -t $DOCKER_HUB_USERNAME/deep-research-agent:$BUILD_VERSION .
-docker push $DOCKER_HUB_USERNAME/deep-research-agent:latest
-docker push $DOCKER_HUB_USERNAME/deep-research-agent:$BUILD_VERSION
+# The container tool requires the full registry host in the image name for pushing.
+FULL_IMAGE_NAME="docker.io/$DOCKER_HUB_USERNAME/deep-research-agent:latest"
+# Use Container for build and push image
+# brew install container
+# container registry login docker.io
+container build --platform linux/amd64 -t $FULL_IMAGE_NAME .
+container image push $FULL_IMAGE_NAME
+if [ $? -ne 0 ]; then
+  echo "❌ Container push failed for '$FULL_IMAGE_NAME'."
+  exit 1
+fi
+#container build --platform linux/amd64 -t docker.io/$DOCKER_HUB_USERNAME/deep-research-agent:latest -t docker.io/$DOCKER_HUB_USERNAME/deep-research-agent:$BUILD_VERSION .
+#container image push docker.io/$DOCKER_HUB_USERNAME/deep-research-agent:$BUILD_VERSION
 echo "✅ Image built and pushed successfully"
 end_step
 
