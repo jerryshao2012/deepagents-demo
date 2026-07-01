@@ -7,8 +7,8 @@ __pycache__/
 # Virtual environments
 .venv/
 venv/
-ENV/
 env/
+sync/
 
 # Package management (uv)
 .venv
@@ -33,17 +33,20 @@ deep_research_example.egg-info/
 # Environment and secrets
 .env
 .env.example
-secrets.sh
+secrets*.sh
 
 # Deployment scripts
-deploy.sh
-env.sh
-sync-files.sh
+.build_version
+build*.sh
+deploy*.sh
+env*.sh
+sync-files*.sh
 
 # Documentation
 document/
 README.md
 AGENTS.md
+CLAUDE.md
 
 # Azure deployment configs
 
@@ -56,4 +59,4 @@ resources/
 
 # Docker
 .dockerignore
-Dockerfile
+Dockerfile*
