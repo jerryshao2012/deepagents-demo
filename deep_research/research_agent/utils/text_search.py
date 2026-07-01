@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 # ── Chunking ───────────────────────────────────────────────────────────────────
 
+
 def chunk_markdown_by_boundaries(content: str) -> list[dict]:
     """Split markdown content into chunks based on page, slide, sheet, or heading sentinels."""
     chunks: list[dict] = []
@@ -52,12 +53,14 @@ def chunk_markdown_by_boundaries(content: str) -> list[dict]:
             if current_lines:
                 chunk_text = "\n".join(current_lines).strip()
                 if chunk_text:
-                    chunks.append({
-                        "text": chunk_text,
-                        "page": current_page,
-                        "locator": current_locator,
-                        "heading": current_heading,
-                    })
+                    chunks.append(
+                        {
+                            "text": chunk_text,
+                            "page": current_page,
+                            "locator": current_locator,
+                            "heading": current_heading,
+                        }
+                    )
                 current_lines = []
 
             if page_match:
@@ -71,7 +74,9 @@ def chunk_markdown_by_boundaries(content: str) -> list[dict]:
             elif sheet_match:
                 sheet_name = sheet_match.group(1).strip()
                 row = sheet_match.group(2)
-                current_locator = f"Sheet: {sheet_name}, row {row}" if row else f"Sheet: {sheet_name}"
+                current_locator = (
+                    f"Sheet: {sheet_name}, row {row}" if row else f"Sheet: {sheet_name}"
+                )
                 current_page = None
                 current_heading = None
             elif heading_match:
@@ -82,12 +87,14 @@ def chunk_markdown_by_boundaries(content: str) -> list[dict]:
     if current_lines:
         chunk_text = "\n".join(current_lines).strip()
         if chunk_text:
-            chunks.append({
-                "text": chunk_text,
-                "page": current_page,
-                "locator": current_locator,
-                "heading": current_heading,
-            })
+            chunks.append(
+                {
+                    "text": chunk_text,
+                    "page": current_page,
+                    "locator": current_locator,
+                    "heading": current_heading,
+                }
+            )
 
     return chunks
 
@@ -104,12 +111,14 @@ def get_document_chunks(content: str) -> list[dict]:
             final_chunks.append(chunk)
         else:
             for sub_text in splitter.split_text(text):
-                final_chunks.append({
-                    "text": sub_text,
-                    "page": chunk["page"],
-                    "locator": chunk["locator"],
-                    "heading": chunk["heading"],
-                })
+                final_chunks.append(
+                    {
+                        "text": sub_text,
+                        "page": chunk["page"],
+                        "locator": chunk["locator"],
+                        "heading": chunk["heading"],
+                    }
+                )
 
     return final_chunks
 
@@ -117,17 +126,49 @@ def get_document_chunks(content: str) -> list[dict]:
 # ── Stemming ───────────────────────────────────────────────────────────────────
 
 _STEM_RULES: list[tuple[str, str | None]] = [
-    ("ational", "ate"), ("tional", "tion"), ("enci", "ence"), ("anci", "ance"),
-    ("izer", "ize"), ("abli", "able"), ("alli", "al"), ("entli", "ent"),
-    ("eli", "e"), ("ousli", "ous"), ("ization", "ize"), ("ation", "ate"),
-    ("ator", "ate"), ("alism", "al"), ("iveness", "ive"), ("fulness", "ful"),
-    ("ousness", "ous"), ("aliti", "al"), ("iviti", "ive"), ("biliti", "ble"),
-    ("logi", "log"), ("icate", "ic"),
+    ("ational", "ate"),
+    ("tional", "tion"),
+    ("enci", "ence"),
+    ("anci", "ance"),
+    ("izer", "ize"),
+    ("abli", "able"),
+    ("alli", "al"),
+    ("entli", "ent"),
+    ("eli", "e"),
+    ("ousli", "ous"),
+    ("ization", "ize"),
+    ("ation", "ate"),
+    ("ator", "ate"),
+    ("alism", "al"),
+    ("iveness", "ive"),
+    ("fulness", "ful"),
+    ("ousness", "ous"),
+    ("aliti", "al"),
+    ("iviti", "ive"),
+    ("biliti", "ble"),
+    ("logi", "log"),
+    ("icate", "ic"),
     ("ies", "y"),  # Plurals: companies → company
-    ("ful", None), ("ness", None), ("ive", None), ("able", None), ("ible", None),
-    ("ment", None), ("ant", None), ("ent", None), ("ism", None), ("ate", None),
-    ("iti", None), ("ous", None), ("al", None), ("er", None), ("ic", None),
-    ("ing", None), ("ed", None), ("es", None), ("s", None), ("ly", None),
+    ("ful", None),
+    ("ness", None),
+    ("ive", None),
+    ("able", None),
+    ("ible", None),
+    ("ment", None),
+    ("ant", None),
+    ("ent", None),
+    ("ism", None),
+    ("ate", None),
+    ("iti", None),
+    ("ous", None),
+    ("al", None),
+    ("er", None),
+    ("ic", None),
+    ("ing", None),
+    ("ed", None),
+    ("es", None),
+    ("s", None),
+    ("ly", None),
 ]
 
 _MIN_STEM_LEN = 3
@@ -222,7 +263,9 @@ class BM25SearchIndex:
             for term, freq in df.items()
         }
 
-    def search(self, query: str, k: int = 5, *, use_prf: bool | None = None) -> list[tuple[Document, float]]:
+    def search(
+        self, query: str, k: int = 5, *, use_prf: bool | None = None
+    ) -> list[tuple[Document, float]]:
         if use_prf is None:
             use_prf = self._prf_enabled
         query_terms = _tokenize(query)
@@ -265,7 +308,9 @@ class BM25SearchIndex:
         merged.sort(key=lambda x: x[1], reverse=True)
         return merged[:k]
 
-    def _bm25_score_all(self, query_terms: list[str], k: int) -> list[tuple[Document, float]]:
+    def _bm25_score_all(
+        self, query_terms: list[str], k: int
+    ) -> list[tuple[Document, float]]:
         qtf: dict[str, float] = {}
         for term in query_terms:
             qtf[term] = qtf.get(term, 0.0) + self._idf.get(term, 0.0)
@@ -273,18 +318,26 @@ class BM25SearchIndex:
         for doc_idx, tf_map in enumerate(self._doc_tfs):
             score = 0.0
             doc_len = self._doc_lens[doc_idx]
-            doc_len_norm = (1.0 - _BM25_B + _BM25_B * (doc_len / self._avgdl)) if self._avgdl > 0 else 1.0
+            doc_len_norm = (
+                (1.0 - _BM25_B + _BM25_B * (doc_len / self._avgdl))
+                if self._avgdl > 0
+                else 1.0
+            )
             for term, q_weight in qtf.items():
                 tf = tf_map.get(term, 0)
                 if tf == 0:
                     continue
-                score += q_weight * (tf * (_BM25_K1 + 1.0) / (tf + _BM25_K1 * doc_len_norm))
+                score += q_weight * (
+                    tf * (_BM25_K1 + 1.0) / (tf + _BM25_K1 * doc_len_norm)
+                )
             if score > 0.0:
                 scores.append((doc_idx, score))
         scores.sort(key=lambda x: x[1], reverse=True)
         return [(self._documents[idx], s) for idx, s in scores[:k]]
 
-    def _extract_prf_terms(self, top_docs: list[Document], exclude_terms: set[str], top_n: int) -> list[str]:
+    def _extract_prf_terms(
+        self, top_docs: list[Document], exclude_terms: set[str], top_n: int
+    ) -> list[str]:
         total_docs = len(self._documents)
         prf_tf: dict[str, float] = defaultdict(float)
         for doc in top_docs:
@@ -379,7 +432,9 @@ class HybridSearchIndex:
 
         return reranked
 
-    def _faiss_re_rank(self, query: str, candidates: list[Document], k: int) -> list[tuple[Document, float]]:
+    def _faiss_re_rank(
+        self, query: str, candidates: list[Document], k: int
+    ) -> list[tuple[Document, float]]:
         """Re-rank candidates using FAISS semantic similarity."""
         from langchain_community.vectorstores import FAISS
 
@@ -413,7 +468,10 @@ class HybridSearchIndex:
             try:
                 self._faiss.save_local(str(directory / "faiss"))
             except Exception:
-                logger.warning("Failed to save FAISS index; BM25 will be used on load", exc_info=True)
+                logger.warning(
+                    "Failed to save FAISS index; BM25 will be used on load",
+                    exc_info=True,
+                )
 
     @classmethod
     def load(cls, directory: Path) -> HybridSearchIndex | None:
@@ -437,12 +495,16 @@ class HybridSearchIndex:
                 embedding = _resolve_embedding_model()
                 if embedding is not None:
                     from langchain_community.vectorstores import FAISS
+
                     faiss_store = FAISS.load_local(
-                        str(faiss_dir), embedding,
+                        str(faiss_dir),
+                        embedding,
                         allow_dangerous_deserialization=True,
                     )
             except Exception:
-                logger.warning("Failed to load FAISS index; using BM25-only", exc_info=True)
+                logger.warning(
+                    "Failed to load FAISS index; using BM25-only", exc_info=True
+                )
 
         return cls(bm25, faiss_store)
 
@@ -472,9 +534,11 @@ def _resolve_embedding_model():
     try:
         import sys as _sys
         from pathlib import Path as _Path
+
         _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent.parent))
         try:
             from model_factory import create_embedding_model
+
             model = create_embedding_model()
             _embedding_model_cache = model
             return model
@@ -482,13 +546,18 @@ def _resolve_embedding_model():
             _sys.path.pop(0)
     except Exception:
         _embedding_failed = True
-        logger.debug("No embedding model available; search will use BM25-only", exc_info=True)
+        logger.debug(
+            "No embedding model available; search will use BM25-only", exc_info=True
+        )
         return None
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def build_search_index(raw_dir: Path, output_index_dir: Path) -> HybridSearchIndex | None:
+
+def build_search_index(
+    raw_dir: Path, output_index_dir: Path
+) -> HybridSearchIndex | None:
     """Build a hybrid BM25 + FAISS search index from raw markdown documents.
 
     FAISS is built only if an embedding model is available.  The BM25 index
@@ -531,8 +600,11 @@ def build_search_index(raw_dir: Path, output_index_dir: Path) -> HybridSearchInd
         embedding = _resolve_embedding_model()
         if embedding is not None:
             from langchain_community.vectorstores import FAISS
+
             faiss_store = FAISS.from_documents(documents, embedding)
-            logger.info("Built FAISS index for %d documents alongside BM25", len(documents))
+            logger.info(
+                "Built FAISS index for %d documents alongside BM25", len(documents)
+            )
     except Exception:
         logger.warning("FAISS index build failed; using BM25-only", exc_info=True)
 
@@ -541,7 +613,9 @@ def build_search_index(raw_dir: Path, output_index_dir: Path) -> HybridSearchInd
     return index
 
 
-def load_or_build_search_index(raw_dir: Path, output_index_dir: Path) -> HybridSearchIndex | None:
+def load_or_build_search_index(
+    raw_dir: Path, output_index_dir: Path
+) -> HybridSearchIndex | None:
     """Load an existing hybrid search index or build a new one."""
     existing = HybridSearchIndex.load(output_index_dir)
     if existing is not None:
@@ -549,6 +623,8 @@ def load_or_build_search_index(raw_dir: Path, output_index_dir: Path) -> HybridS
     return build_search_index(raw_dir, output_index_dir)
 
 
-def search_index(query: str, index: HybridSearchIndex, k: int = 5) -> list[tuple[Document, float]]:
+def search_index(
+    query: str, index: HybridSearchIndex, k: int = 5
+) -> list[tuple[Document, float]]:
     """Search a hybrid index; returns top-k (document, relevance-score) results."""
     return index.search(query, k=k)

@@ -13,11 +13,11 @@ import logging
 import os
 import re
 import shutil
+import sys
 import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-import sys
 import yaml
 from fastapi import File, Form, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, RedirectResponse
@@ -47,8 +47,10 @@ def _webapp_module():
 
 # ── Health ────────────────────────────────────────────────────────────────────
 
+
 def register_health_routes(app) -> None:
     """Register the ``/health`` endpoint on the FastAPI app."""
+
     @app.get("/health")
     async def health_check():
         """Health check endpoint."""
@@ -65,8 +67,10 @@ def register_health_routes(app) -> None:
 
 # ── Storage ───────────────────────────────────────────────────────────────────
 
+
 def register_storage_routes(app) -> None:
     """Register the ``/storage/info`` endpoint on the FastAPI app."""
+
     @app.get("/storage/info")
     async def storage_info(request: Request, x_api_key: str | None = Header(None)):
         """Get server storage details and model factory diagnostics."""
@@ -77,7 +81,9 @@ def register_storage_routes(app) -> None:
             )
 
         m = _webapp_module()
-        total, used, free = await asyncio.to_thread(shutil.disk_usage, str(m.DOCS_ROOT.parent))
+        total, used, free = await asyncio.to_thread(
+            shutil.disk_usage, str(m.DOCS_ROOT.parent)
+        )
 
         model_diagnostics = await run_model_diagnostics()
 
@@ -98,14 +104,16 @@ def register_storage_routes(app) -> None:
 
 # ── Document CRUD ─────────────────────────────────────────────────────────────
 
+
 def register_document_routes(app) -> None:
     """Register document CRUD endpoints (view, extract, upload, list, download, delete)."""
+
     @app.get("/documents/view/{filename}")
     async def view_document(
-            request: Request,
-            filename: str,
-            folder: str = "policy",
-            x_api_key: str | None = Header(None),
+        request: Request,
+        filename: str,
+        folder: str = "policy",
+        x_api_key: str | None = Header(None),
     ):
         """Serve a document for inline viewing (browser renders instead of downloading)."""
         if not is_authenticated(x_api_key, request):
@@ -140,10 +148,10 @@ def register_document_routes(app) -> None:
 
     @app.get("/documents/extract/{filename}")
     async def extract_document(
-            request: Request,
-            filename: str,
-            folder: str = "policy",
-            x_api_key: str | None = Header(None),
+        request: Request,
+        filename: str,
+        folder: str = "policy",
+        x_api_key: str | None = Header(None),
     ) -> dict:
         """Extract text/markdown content from a document for preview."""
         if not is_authenticated(x_api_key, request):
@@ -196,10 +204,10 @@ def register_document_routes(app) -> None:
 
     @app.post("/documents/upload", status_code=status.HTTP_201_CREATED)
     async def upload_documents(
-            request: Request,
-            folder: str = Form("policy"),
-            files: list[UploadFile] = File(...),
-            x_api_key: str | None = Header(None),
+        request: Request,
+        folder: str = Form("policy"),
+        files: list[UploadFile] = File(...),
+        x_api_key: str | None = Header(None),
     ) -> dict:
         """Upload documents to a specified folder within docs directory."""
         if not is_authenticated(x_api_key, request):
@@ -222,11 +230,15 @@ def register_document_routes(app) -> None:
             await asyncio.to_thread(destination.write_bytes, content)
             file_size = len(content)
             total_uploaded_size += file_size
-            saved.append({
-                "filename": filename,
-                "path": str(PurePosixPath("docs", *relative_folder.parts, filename)),
-                "size": file_size,
-            })
+            saved.append(
+                {
+                    "filename": filename,
+                    "path": str(
+                        PurePosixPath("docs", *relative_folder.parts, filename)
+                    ),
+                    "size": file_size,
+                }
+            )
 
         free_space = await asyncio.to_thread(get_free_space, m.DOCS_ROOT.parent)
 
@@ -249,9 +261,9 @@ def register_document_routes(app) -> None:
 
     @app.get("/documents/list")
     async def list_documents(
-            request: Request,
-            folder: str = "policy",
-            x_api_key: str | None = Header(None),
+        request: Request,
+        folder: str = "policy",
+        x_api_key: str | None = Header(None),
     ) -> dict:
         """List all files in a specified folder within docs directory."""
         if not is_authenticated(x_api_key, request):
@@ -280,7 +292,9 @@ def register_document_routes(app) -> None:
             res = []
             for item in target_dir.iterdir():
                 if item.is_file():
-                    res.append({"name": item.name, "type": "file", "size": item.stat().st_size})
+                    res.append(
+                        {"name": item.name, "type": "file", "size": item.stat().st_size}
+                    )
                 elif item.is_dir():
                     res.append({"name": item.name, "type": "folder", "size": None})
             return res
@@ -296,10 +310,10 @@ def register_document_routes(app) -> None:
 
     @app.get("/documents/download/{filename}")
     async def download_document(
-            request: Request,
-            filename: str,
-            folder: str = "policy",
-            x_api_key: str | None = Header(None),
+        request: Request,
+        filename: str,
+        folder: str = "policy",
+        x_api_key: str | None = Header(None),
     ):
         """Download a specific file from a folder."""
         if not is_authenticated(x_api_key, request):
@@ -333,10 +347,10 @@ def register_document_routes(app) -> None:
 
     @app.delete("/documents/{filename}", status_code=status.HTTP_200_OK)
     async def delete_document(
-            request: Request,
-            filename: str,
-            folder: str = "policy",
-            x_api_key: str | None = Header(None),
+        request: Request,
+        filename: str,
+        folder: str = "policy",
+        x_api_key: str | None = Header(None),
     ) -> dict:
         """Delete a specific file from a folder."""
         if not is_authenticated(x_api_key, request):
@@ -380,9 +394,9 @@ def register_document_routes(app) -> None:
 
     @app.delete("/documents/folder/{folder}", status_code=status.HTTP_200_OK)
     async def delete_folder_contents(
-            request: Request,
-            folder: str,
-            x_api_key: str | None = Header(None),
+        request: Request,
+        folder: str,
+        x_api_key: str | None = Header(None),
     ) -> dict:
         """Delete all files in a specified folder."""
         if not is_authenticated(x_api_key, request):
@@ -434,8 +448,10 @@ def register_document_routes(app) -> None:
 
 # ── OAuth Authentication ──────────────────────────────────────────────────────
 
+
 def register_oauth_routes(app) -> None:
     """Register OAuth authentication endpoints (login, callback, validate, refresh, logout)."""
+
     @app.get("/auth/login/{provider}")
     async def oauth_login(provider: str, request: Request):
         """Initiate OAuth login with Google or GitHub."""
@@ -452,7 +468,9 @@ def register_oauth_routes(app) -> None:
             )
 
         forwarded_proto = request.headers.get("x-forwarded-proto", "http")
-        forwarded_host = request.headers.get("x-forwarded-host", request.headers.get("host", ""))
+        forwarded_host = request.headers.get(
+            "x-forwarded-host", request.headers.get("host", "")
+        )
         base_url = (
             f"{forwarded_proto}://{forwarded_host}"
             if forwarded_host
@@ -490,9 +508,13 @@ def register_oauth_routes(app) -> None:
             else:
                 user_data = await _cfg.handle_github_callback(request)
 
-            frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+            frontend_url = os.environ.get(
+                "FRONTEND_URL", "http://localhost:3000"
+            ).rstrip("/")
             session_token = user_data["session_token"]
-            return RedirectResponse(url=f"{frontend_url}/login/success?token={session_token}")
+            return RedirectResponse(
+                url=f"{frontend_url}/login/success?token={session_token}"
+            )
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -539,9 +561,16 @@ def register_oauth_routes(app) -> None:
             "metadata": {
                 k: v
                 for k, v in user_data.items()
-                if k not in {
-                    "identity", "email", "name", "provider",
-                    "picture", "avatar_url", "raw_token", "session_token",
+                if k
+                not in {
+                    "identity",
+                    "email",
+                    "name",
+                    "provider",
+                    "picture",
+                    "avatar_url",
+                    "raw_token",
+                    "session_token",
                 }
             },
         }
@@ -615,6 +644,7 @@ def register_oauth_routes(app) -> None:
 
         # Clean up the logged users tracking in auth module
         from auth import _logged_oauth_users
+
         if identity in _logged_oauth_users:
             _logged_oauth_users.discard(identity)
             print(f"✅ Cleaned up logged user tracking for: {identity}")
@@ -628,8 +658,10 @@ def register_oauth_routes(app) -> None:
 
 # ── Skills ────────────────────────────────────────────────────────────────────
 
+
 def register_skills_routes(app) -> None:
     """Register skill management endpoints (list, upload, delete)."""
+
     @app.get("/skills")
     async def list_skills(request: Request, x_api_key: str | None = Header(None)):
         """List all available skills from deep_research."""
@@ -639,6 +671,7 @@ def register_skills_routes(app) -> None:
                 detail="Invalid or missing API key. Provide X-API-Key header or Authorization header.",
             )
         try:
+
             def _load_skills():
                 registry = get_skill_registry()
                 skills_list = []
@@ -650,19 +683,23 @@ def register_skills_routes(app) -> None:
                     for s_id in registry.list_skill_ids():
                         info = registry.get_skill_info(s_id)
                         if info:
-                            skills_list.append({
-                                "id": info.skill_id,
-                                "name": info.name,
-                                "description": info.description,
-                                "source": "system",
-                                "is_removable": False,
-                                "keywords": info.keywords,
-                            })
+                            skills_list.append(
+                                {
+                                    "id": info.skill_id,
+                                    "name": info.name,
+                                    "description": info.description,
+                                    "source": "system",
+                                    "is_removable": False,
+                                    "keywords": info.keywords,
+                                }
+                            )
                             seen_ids.add(info.skill_id)
                             seen_ids.add(info.name)
 
                 # 2. System / Migrated skills from .deepagents/skills/
-                deepagents_skills_dir = Path(__file__).resolve().parent.parent / ".deepagents" / "skills"
+                deepagents_skills_dir = (
+                    Path(__file__).resolve().parent.parent / ".deepagents" / "skills"
+                )
                 if deepagents_skills_dir.is_dir():
                     for skill_dir in deepagents_skills_dir.iterdir():
                         if not skill_dir.is_dir():
@@ -676,22 +713,34 @@ def register_skills_routes(app) -> None:
                             if match:
                                 fm = yaml.safe_load(match.group(1)) or {}
                                 name = fm.get("name", skill_dir.name)
-                                if name not in seen_ids and skill_dir.name not in seen_ids:
-                                    skills_list.append({
-                                        "id": skill_dir.name,
-                                        "name": name,
-                                        "description": (fm.get("description") or "").strip(),
-                                        "source": "system",
-                                        "is_removable": False,
-                                        "keywords": fm.get("keywords", []),
-                                    })
+                                if (
+                                    name not in seen_ids
+                                    and skill_dir.name not in seen_ids
+                                ):
+                                    skills_list.append(
+                                        {
+                                            "id": skill_dir.name,
+                                            "name": name,
+                                            "description": (
+                                                fm.get("description") or ""
+                                            ).strip(),
+                                            "source": "system",
+                                            "is_removable": False,
+                                            "keywords": fm.get("keywords", []),
+                                        }
+                                    )
                                     seen_ids.add(name)
                                     seen_ids.add(skill_dir.name)
                         except Exception as err:
                             logger.warning(f"Error parsing skill in {skill_dir}: {err}")
 
                 # 3. Uploaded custom skills from ./doc/.deepagents/skills/ and ./docs/.deepagents/skills/
-                docs_skills_dir = Path(__file__).resolve().parent.parent / "docs" / ".deepagents" / "skills"
+                docs_skills_dir = (
+                    Path(__file__).resolve().parent.parent
+                    / "docs"
+                    / ".deepagents"
+                    / "skills"
+                )
                 if docs_skills_dir.is_dir():
                     for skill_dir in docs_skills_dir.iterdir():
                         if not skill_dir.is_dir():
@@ -705,15 +754,22 @@ def register_skills_routes(app) -> None:
                             if match:
                                 fm = yaml.safe_load(match.group(1)) or {}
                                 name = fm.get("name", skill_dir.name)
-                                if name not in seen_ids and skill_dir.name not in seen_ids:
-                                    skills_list.append({
-                                        "id": skill_dir.name,
-                                        "name": name,
-                                        "description": (fm.get("description") or "").strip(),
-                                        "source": "uploaded",
-                                        "is_removable": True,
-                                        "keywords": fm.get("keywords", []),
-                                    })
+                                if (
+                                    name not in seen_ids
+                                    and skill_dir.name not in seen_ids
+                                ):
+                                    skills_list.append(
+                                        {
+                                            "id": skill_dir.name,
+                                            "name": name,
+                                            "description": (
+                                                fm.get("description") or ""
+                                            ).strip(),
+                                            "source": "uploaded",
+                                            "is_removable": True,
+                                            "keywords": fm.get("keywords", []),
+                                        }
+                                    )
                                     seen_ids.add(name)
                                     seen_ids.add(skill_dir.name)
                         except Exception as err:
@@ -734,11 +790,11 @@ def register_skills_routes(app) -> None:
 
     @app.post("/skills/upload", status_code=status.HTTP_201_CREATED)
     async def upload_skill(
-            request: Request,
-            file: UploadFile | None = File(None),
-            files: list[UploadFile] | None = File(None),
-            paths: list[str] | None = Form(None),
-            x_api_key: str | None = Header(None),
+        request: Request,
+        file: UploadFile | None = File(None),
+        files: list[UploadFile] | None = File(None),
+        paths: list[str] | None = Form(None),
+        x_api_key: str | None = Header(None),
     ):
         """Upload and install a new agent skill archive (.zip), SKILL.md file, or full skill directory into ./doc/.deepagents/skills/."""
         if not is_authenticated(x_api_key, request):
@@ -747,7 +803,12 @@ def register_skills_routes(app) -> None:
                 detail="Invalid or missing API key. Provide X-API-Key header or Authorization header.",
             )
         try:
-            doc_skills_dir = Path(__file__).resolve().parent.parent / "docs" / ".deepagents" / "skills"
+            doc_skills_dir = (
+                Path(__file__).resolve().parent.parent
+                / "docs"
+                / ".deepagents"
+                / "skills"
+            )
             doc_skills_dir.mkdir(parents=True, exist_ok=True)
 
             installed_name = "custom_skill"
@@ -755,12 +816,17 @@ def register_skills_routes(app) -> None:
             # Multi-file folder upload handling
             if files and len(files) > 0:
                 for idx, upload in enumerate(files):
-                    rel_path_str = paths[idx] if (paths and idx < len(paths)) else upload.filename
+                    rel_path_str = (
+                        paths[idx] if (paths and idx < len(paths)) else upload.filename
+                    )
                     if not rel_path_str:
                         continue
                     clean_p = PurePosixPath(rel_path_str)
-                    parts = [pt for pt in clean_p.parts if
-                             pt not in ("..", ".", "__MACOSX") and not pt.startswith("._")]
+                    parts = [
+                        pt
+                        for pt in clean_p.parts
+                        if pt not in ("..", ".", "__MACOSX") and not pt.startswith("._")
+                    ]
                     if not parts:
                         continue
                     installed_name = parts[0]
@@ -778,11 +844,19 @@ def register_skills_routes(app) -> None:
                     with zipfile.ZipFile(io.BytesIO(content)) as zf:
                         members = zf.infolist()
                         valid_members = [
-                            m for m in members
-                            if not m.filename.startswith("__MACOSX") and not m.filename.startswith("._")
+                            m
+                            for m in members
+                            if not m.filename.startswith("__MACOSX")
+                            and not m.filename.startswith("._")
                         ]
-                        first_parts = {m.filename.split("/")[0] for m in valid_members if "/" in m.filename}
-                        has_root_skill_md = any(m.filename == "SKILL.md" for m in valid_members)
+                        first_parts = {
+                            m.filename.split("/")[0]
+                            for m in valid_members
+                            if "/" in m.filename
+                        }
+                        has_root_skill_md = any(
+                            m.filename == "SKILL.md" for m in valid_members
+                        )
 
                         if len(first_parts) == 1 and not has_root_skill_md:
                             zf.extractall(doc_skills_dir, members=valid_members)
@@ -793,7 +867,9 @@ def register_skills_routes(app) -> None:
                             out_dir.mkdir(parents=True, exist_ok=True)
                             zf.extractall(out_dir, members=valid_members)
                 elif filename == "SKILL.md" or filename.lower().endswith(".md"):
-                    installed_name = skill_stem if skill_stem != "SKILL" else "custom_skill"
+                    installed_name = (
+                        skill_stem if skill_stem != "SKILL" else "custom_skill"
+                    )
                     out_dir = doc_skills_dir / installed_name
                     out_dir.mkdir(parents=True, exist_ok=True)
                     (out_dir / "SKILL.md").write_bytes(content)
@@ -829,7 +905,9 @@ def register_skills_routes(app) -> None:
             )
 
     @app.delete("/skills/{skill_id}")
-    async def delete_skill(skill_id: str, request: Request, x_api_key: str | None = Header(None)):
+    async def delete_skill(
+        skill_id: str, request: Request, x_api_key: str | None = Header(None)
+    ):
         """Remove an uploaded skill from ./doc/.deepagents/skills/."""
         if not is_authenticated(x_api_key, request):
             raise HTTPException(
@@ -837,14 +915,21 @@ def register_skills_routes(app) -> None:
                 detail="Invalid or missing API key.",
             )
         try:
-            doc_skills_dir = Path(__file__).resolve().parent.parent / "docs" / ".deepagents" / "skills"
+            doc_skills_dir = (
+                Path(__file__).resolve().parent.parent
+                / "docs"
+                / ".deepagents"
+                / "skills"
+            )
             skill_dir = doc_skills_dir / skill_id
             if not skill_dir.exists() or not skill_dir.is_dir():
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Uploaded skill '{skill_id}' not found in ./docs/.deepagents/skills/ or cannot be removed.",
                 )
-            await asyncio.to_thread(shutil.rmtree, str(skill_dir), ignore_errors=True, onerror=None)
+            await asyncio.to_thread(
+                shutil.rmtree, str(skill_dir), ignore_errors=True, onerror=None
+            )
 
             registry = get_skill_registry()
             if registry:
@@ -911,6 +996,7 @@ def _cleanup_expired() -> None:
 
 def register_chat_thread_routes(app) -> None:
     """Register chat thread state and management endpoints."""
+
     @app.get("/chat_threads/{thread_id}/state")
     async def get_chat_thread_state(thread_id: str):
         """Return thread state values.  No auth — thread ID is the access key."""
@@ -975,6 +1061,7 @@ def register_chat_thread_routes(app) -> None:
 
 
 # ── Convenience: register everything at once ────────────────────────────────────
+
 
 def register_all_routes(app) -> None:
     """Register health, storage, document, OAuth, skills, and chat-thread routes on *app*."""

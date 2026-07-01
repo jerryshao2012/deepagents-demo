@@ -35,7 +35,9 @@ def get_cached_webpage(url: str) -> str | None:
         return _web_page_cache.get(url)
 
 
-def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float = 60.0) -> dict:
+def _run_tavily_search(
+    query: str, max_results: int, topic: str, timeout: float = 60.0
+) -> dict:
     """Execute a raw search request against the Tavily API.
 
     Args:
@@ -80,9 +82,9 @@ def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float 
 
 
 def fetch_webpage_content_impl(
-        url: str,
-        timeout: float = 10.0,
-        state: Annotated[dict, InjectedState] = None,
+    url: str,
+    timeout: float = 10.0,
+    state: Annotated[dict, InjectedState] = None,
 ) -> str:
     """Fetch and convert webpage content to markdown.
 
@@ -131,10 +133,12 @@ def fetch_webpage_content_impl(
 
 
 def tavily_search_impl(
-        query: str,
-        max_results: Annotated[int, InjectedToolArg] = 1,
-        topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
-        state: Annotated[dict, InjectedState] = None,
+    query: str,
+    max_results: Annotated[int, InjectedToolArg] = 1,
+    topic: Annotated[
+        Literal["general", "news", "finance"], InjectedToolArg
+    ] = "general",
+    state: Annotated[dict, InjectedState] = None,
 ) -> str:
     """Search the web for information on a given query.
 
@@ -157,7 +161,11 @@ def tavily_search_impl(
     if state:
         messages = state.get("messages", [])
         for msg in messages:
-            content = getattr(msg, "content", "") if not isinstance(msg, dict) else msg.get("content", "")
+            content = (
+                getattr(msg, "content", "")
+                if not isinstance(msg, dict)
+                else msg.get("content", "")
+            )
             if isinstance(content, str) and "Do NOT use web search" in content:
                 return "Note: Web search is disabled for this research task. Please use local documents or internal knowledge only."
 
