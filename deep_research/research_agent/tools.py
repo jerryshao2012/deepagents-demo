@@ -8,23 +8,22 @@ from typing import Annotated, Literal
 
 from deepagents.backends.utils import create_file_data
 from dotenv import load_dotenv
-from langchain_core.tools import InjectedToolArg
-from langchain_core.tools import tool
+from langchain_core.tools import InjectedToolArg, tool
 from langgraph.prebuilt import InjectedState
 
 from logger_utils import setup_logger
 from research_agent.utils.knowledge_filesystem import (
-    ls_impl,
     glob_impl,
-    read_file_impl,
+    ls_impl,
     read_docs_folder_impl,
-    write_file_impl,
+    read_file_impl,
     send_files_to_state,
+    write_file_impl,
 )
 from research_agent.utils.skill_registry import get_skill_registry
 from research_agent.utils.web_search import (
     fetch_webpage_content_impl,
-    tavily_search_impl
+    tavily_search_impl,
 )
 
 # Load environment variables
@@ -35,11 +34,10 @@ logger = setup_logger(__name__)
 
 # --- Web Search Tools ---
 
+
 @tool(parse_docstring=True)
 def fetch_webpage_content(
-        url: str,
-        state: Annotated[dict, InjectedState],
-        timeout: float = 10.0
+    url: str, state: Annotated[dict, InjectedState], timeout: float = 10.0
 ) -> str:
     """Fetch and convert webpage content to markdown.
 
@@ -63,10 +61,12 @@ def fetch_webpage_content(
 
 @tool(parse_docstring=True)
 def tavily_search(
-        query: str,
-        state: Annotated[dict, InjectedState],
-        max_results: Annotated[int, InjectedToolArg] = 1,
-        topic: Annotated[Literal["general", "news", "finance"], InjectedToolArg] = "general",
+    query: str,
+    state: Annotated[dict, InjectedState],
+    max_results: Annotated[int, InjectedToolArg] = 1,
+    topic: Annotated[
+        Literal["general", "news", "finance"], InjectedToolArg
+    ] = "general",
 ) -> str:
     """Search the web for information on a given query.
 
@@ -81,7 +81,9 @@ def tavily_search(
     Returns:
         Formatted search results with full webpage content
     """
-    logger.info(f"Executing Tavily search - Query: '{query}', Max Results: {max_results}, Topic: {topic}")
+    logger.info(
+        f"Executing Tavily search - Query: '{query}', Max Results: {max_results}, Topic: {topic}"
+    )
 
     result = tavily_search_impl(query, max_results, topic, state)
     logger.info(f"Tavily search completed successfully for query: '{query}'")
@@ -90,11 +92,9 @@ def tavily_search(
 
 # --- Filesystem Tools ---
 
+
 @tool(parse_docstring=True)
-def ls(
-        path: str,
-        state: Annotated[dict, InjectedState]
-) -> str:
+def ls(path: str, state: Annotated[dict, InjectedState]) -> str:
     """List files in a directory with fallback support.
 
     Tries to list from the virtual filesystem in state first (DeepAgents backend),
@@ -115,10 +115,7 @@ def ls(
 
 
 @tool(parse_docstring=True)
-def glob(
-        pattern: str,
-        state: Annotated[dict, InjectedState]
-) -> str:
+def glob(pattern: str, state: Annotated[dict, InjectedState]) -> str:
     """Find files matching a glob pattern with fallback support.
 
     Tries to match against the virtual filesystem in state first, then falls back
@@ -139,10 +136,7 @@ def glob(
 
 
 @tool(parse_docstring=True)
-def read_file(
-        file_path: str,
-        state: Annotated[dict, InjectedState]
-) -> str:
+def read_file(file_path: str, state: Annotated[dict, InjectedState]) -> str:
     """Read the content of a file with fallback support.
 
     Tries to read from the virtual filesystem in state first (DeepAgents backend),
@@ -171,9 +165,9 @@ def read_file(
 
 @tool(parse_docstring=True)
 def read_docs_folder(
-        folder_path: str,
-        state: Annotated[dict, InjectedState],
-        specific_files: list[str] | None = None,
+    folder_path: str,
+    state: Annotated[dict, InjectedState],
+    specific_files: list[str] | None = None,
 ) -> str:
     """Read and extract text from supported documents in a given folder.
 
@@ -193,7 +187,9 @@ def read_docs_folder(
     Returns:
         Extracted text from supported documents, a summary for large folders, or an error message.
     """
-    logger.info(f"Reading documents folder: {folder_path}, Specific files: {specific_files}")
+    logger.info(
+        f"Reading documents folder: {folder_path}, Specific files: {specific_files}"
+    )
 
     result = read_docs_folder_impl(folder_path, specific_files, state)
     logger.info(f"Successfully processed documents folder: {folder_path}")
@@ -202,9 +198,9 @@ def read_docs_folder(
 
 @tool(parse_docstring=True)
 def write_file(
-        file_path: str,
-        content: str,
-        state: Annotated[dict, InjectedState],
+    file_path: str,
+    content: str,
+    state: Annotated[dict, InjectedState],
 ) -> str:
     """Write content to a file.
 
@@ -220,9 +216,13 @@ def write_file(
     """
     logger.info(f"Writing file: {file_path} ({len(content)} bytes)")
 
-    content = re.sub(r'/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b', r'/\1.\2', content)
+    content = re.sub(
+        r"/raw/([A-Za-z0-9._\-]+)\.(pdf|docx|pptx|xlsx)\.(md|txt)\b", r"/\1.\2", content
+    )
     # Also handle references to /raw/ without the trailing .md if any
-    content = re.sub(r'/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b', r'/\1', content)
+    content = re.sub(
+        r"/raw/([A-Za-z0-9._\-]+\.(?:pdf|docx|pptx|xlsx))\b", r"/\1", content
+    )
 
     result = write_file_impl(file_path, content)
     logger.info(f"Successfully wrote file: {file_path}")
@@ -231,9 +231,10 @@ def write_file(
 
 # --- Thinking Tool ---
 
+
 @tool(parse_docstring=True)
 def think_tool(
-        reflection: str,
+    reflection: str,
 ) -> str:
     """Tool for strategic reflection on research progress and decision-making.
 
@@ -266,7 +267,7 @@ def think_tool(
 
     # Log the reflection to a dedicated research log file
     now = datetime.now()
-    log_file = output_dir / f"research_reflection.log"
+    log_file = output_dir / "research_reflection.log"
     timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
     with open(log_file, "a", encoding="utf-8") as f:
@@ -277,7 +278,9 @@ def think_tool(
     # Also save reflection to state using send_files_to_state
     try:
         reflection_content = f"# Research Reflection\n\n**Timestamp:** {timestamp}\n\n---\n\n{reflection}\n"
-        send_files_to_state({"/research_reflection.md": create_file_data(reflection_content)})
+        send_files_to_state(
+            {"/research_reflection.md": create_file_data(reflection_content)}
+        )
         logger.info("Reflection saved to state: /research_reflection.md")
     except Exception as e:
         logger.warning(f"Could not save reflection to state: {e}")
@@ -286,6 +289,7 @@ def think_tool(
 
 
 # --- Skill-related Tools ---
+
 
 @tool
 def list_available_skills() -> str:
@@ -337,5 +341,7 @@ def read_skill_supporting_file(skill_id: str, filename: str) -> str:
             f"Error: File '{filename}' not found in skill '{skill_id}'.\n"
             f"Available files: {', '.join(available_files)}"
         )
-    logger.debug(f"Successfully read supporting file '{filename}' from skill '{skill_id}'")
+    logger.debug(
+        f"Successfully read supporting file '{filename}' from skill '{skill_id}'"
+    )
     return content

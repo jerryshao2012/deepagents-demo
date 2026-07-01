@@ -153,7 +153,7 @@ def test_context_budget_instructions():
     from thread_wiki.service import _build_context_budget_instructions
 
     instructions = _build_context_budget_instructions()
-    assert "retrieve_raw_documents" in instructions
+    assert "retrieve_wiki_documents" in instructions
     assert "Context budget" in instructions
 
 

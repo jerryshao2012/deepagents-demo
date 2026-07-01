@@ -108,9 +108,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 # The container tool requires the full registry host in the image name for pushing.
 FULL_IMAGE_NAME="docker.io/$DOCKER_HUB_USERNAME/deep-research-agent:latest"
-# Use Container for build and push image
-# brew install container
-# container registry login docker.io
+# Ensure container service is started
+if ! container system status &>/dev/null; then
+  echo "🚀 Container system is not running. Auto-starting..."
+  container system start --disable-kernel-install
+fi
+
 container build --platform linux/amd64 -t $FULL_IMAGE_NAME .
 container image push $FULL_IMAGE_NAME
 if [ $? -ne 0 ]; then

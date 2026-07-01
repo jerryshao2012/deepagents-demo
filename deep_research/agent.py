@@ -3,14 +3,13 @@ import concurrent.futures
 import hashlib
 import os
 import re
+import time
 import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import sys
-import time
-from deepagents import create_deep_agent, SubAgent
+from deepagents import SubAgent, create_deep_agent
 from deepagents.backends.utils import (
     create_file_data,
     file_data_to_string,
@@ -37,14 +36,14 @@ from research_agent import (
 )
 from research_agent.prompts import RESEARCHER_DESCRIPTION
 from research_agent.tools import (
-    think_tool,
-    ls,
-    glob,
-    read_file,
-    read_docs_folder,
-    write_file,
-    tavily_search,
     fetch_webpage_content,
+    glob,
+    ls,
+    read_docs_folder,
+    read_file,
+    tavily_search,
+    think_tool,
+    write_file,
 )
 from research_agent.utils.cli import (
     build_instruction,
@@ -59,8 +58,6 @@ from research_agent.utils.knowledge_filesystem import (
     _thread_wiki_queried_messages,
     _thread_wiki_query_complete,
     get_target_cited_response_path,
-)
-from research_agent.utils.knowledge_filesystem import (
     normalize_path_for_filesystem_tools,
 )
 from research_agent.utils.skill_registry import get_skill_registry
@@ -201,7 +198,7 @@ class ResearchStateMiddleware(AgentMiddleware):
                             "--- Raw Source Documents ---\n"
                             "Note: The local raw source documents are too large to display in full inline. "
                             "A local text search index has been created for this thread. "
-                            "You MUST use the `retrieve_documents` tool to query the documents and search "
+                            "You MUST use the `retrieve_wiki_documents` tool to query the documents and search "
                             "for specific factual evidence/data."
                         )
                     except Exception as e:
@@ -437,7 +434,7 @@ class ResearchStateMiddleware(AgentMiddleware):
 
     @staticmethod
     def _get_wiki_context_sync(
-        thread_id: str, question: str
+        thread_id: str, question: str, *, no_web_requested: bool = False
     ) -> tuple[SystemMessage | None, str | None]:
         """Query the thread's wiki and return a SystemMessage with the answer and the raw answer string.
 
@@ -447,6 +444,10 @@ class ResearchStateMiddleware(AgentMiddleware):
         3. If wiki ingestion or query failed → read wiki files directly.
         4. If no wiki files → extract text from uploaded PDFs (last resort,
            with warning logged).
+
+        Args:
+            no_web_requested: If True, the user explicitly asked to disable web
+                search — fallback messages should NOT suggest web search.
         """
         if not question or len(question) < 5:
             return None, None
@@ -561,18 +562,30 @@ class ResearchStateMiddleware(AgentMiddleware):
                     "Using direct wiki file fallback for thread %s",
                     thread_id,
                 )
+                web_search_guidance = (
+                    "IMPORTANT: If after thoroughly reviewing the content below you CANNOT find "
+                    "sufficient information to fully answer the user's question, you MAY use "
+                    "the `retrieve_wiki_documents` tool to search the document index, and you MAY "
+                    "use web search tools (tavily_search, task()) to supplement your findings. "
+                    "Always ground your answer in the documents first, and clearly distinguish "
+                    "between information from the uploaded documents and information from web search."
+                )
+                if no_web_requested:
+                    web_search_guidance = (
+                        "IMPORTANT: Web search has been disabled for this task. "
+                        "You MUST answer the question using ONLY the document content below. "
+                        "Use the `retrieve_wiki_documents` tool to search the document index "
+                        "for specific facts. If the documents genuinely do not contain the "
+                        "information, state that clearly rather than fabricating an answer."
+                    )
                 return SystemMessage(
                     content=(
                         "<wiki_context>\n"
                         "The following is content from the thread's ingested document wiki pages. "
-                        "You MUST use this as your PRIMARY source of truth. "
-                        "CRITICAL: If the wiki context states that data is unavailable, or that a year "
-                        "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
-                        "search the web to find the missing data. Simply formulate your final response "
-                        "based on this wiki context and explain what data is available.\n\n"
-                        "IMPORTANT: The wiki and raw document content below is ALREADY complete. "
-                        "DO NOT use read_file or any other tool to try to access /raw/ or /wiki/ files — "
-                        "they are NOT accessible from your filesystem. All content you need is inline.\n\n"
+                        "Use these documents as your PRIMARY source for answering the user's question. "
+                        "Read the wiki pages and raw document excerpts below carefully to find "
+                        "relevant facts, data, and citations.\n\n"
+                        f"{web_search_guidance}\n\n"
                         f"{fallback_content}\n"
                         "</wiki_context>"
                     )
@@ -588,21 +601,33 @@ class ResearchStateMiddleware(AgentMiddleware):
                     "(wiki not ready and LLM wiki query failed)",
                     thread_id,
                 )
+                web_search_guidance = (
+                    "IMPORTANT: If after thoroughly reviewing the content below you CANNOT find "
+                    "sufficient information to fully answer the user's question, you MAY use "
+                    "web search tools (tavily_search, task()) to supplement your findings. "
+                    "Always ground your answer in the documents first, and clearly distinguish "
+                    "between information from the uploaded documents and information from web search."
+                )
+                if no_web_requested:
+                    web_search_guidance = (
+                        "IMPORTANT: Web search has been disabled for this task. "
+                        "You MUST answer the question using ONLY the document content below. "
+                        "If the documents genuinely do not contain the information, "
+                        "state that clearly rather than fabricating an answer."
+                    )
                 return SystemMessage(
                     content=(
                         "<document_context>\n"
                         "The following is extracted text from documents uploaded by the user. "
-                        "You MUST use this as your PRIMARY source of truth. "
-                        "CRITICAL: If the document context states that data is unavailable, or that a year "
-                        "has not yet occurred, you MUST accept this as absolute fact. DO NOT attempt to "
-                        "search the web to find the missing data. Simply formulate your final response "
-                        "based on this document context and explain what data is available.\n\n"
+                        "Use these documents as your PRIMARY source for answering the user's question. "
+                        "Review the content below carefully to find relevant facts, data, and citations.\n\n"
+                        f"{web_search_guidance}\n\n"
                         f"{docs_content}\n"
                         "</document_context>"
                     )
                 ), None
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "Wiki query timed out after 120s for thread %s",
                 thread_id,
@@ -616,6 +641,39 @@ class ResearchStateMiddleware(AgentMiddleware):
 
         return None, None
 
+    # Patterns that indicate the wiki answer is a negative/absence claim
+    # (e.g. "no information available", "does not contain").
+    # These answers sound complete but are typically WRONG — the information
+    # exists in the raw documents but the query LLM failed to find it.
+    _NEGATIVE_ANSWER_PATTERNS: list[str] = [
+        r"no\s+information\s+(?:is\s+)?available",
+        r"does\s+not\s+(?:contain|include|mention|provide|have|discuss|cover|reference)",
+        r"no\s+(?:mention|data|record|evidence|detail|reference|information)",
+        r"(?:cannot|unable\s+to)\s+find",
+        r"not\s+(?:found|available|mentioned|disclosed|reported|included|covered)",
+        r"there\s+is\s+no\s+(?:information|data|mention|record|reference)",
+        r"the\s+(?:report|document|file|annual\s+report)\s+does\s+not",
+        r"nothing\s+(?:about|regarding|related\s+to|on\s+the\s+topic\s+of)",
+        r"(?:lack|absence)\s+of\s+(?:information|data|mention|reference|detail)",
+    ]
+
+    @staticmethod
+    def _is_negative_claim(answer: str) -> bool:
+        """Detect if the wiki answer is a negative/absence claim.
+
+        Returns True if the answer claims that information does not exist,
+        is not available, or could not be found — these answers are often
+        incorrect because the query LLM failed to search raw documents
+        thoroughly.
+        """
+        if not answer or not answer.strip():
+            return True
+        answer_lower = answer.lower()
+        for pattern in ResearchStateMiddleware._NEGATIVE_ANSWER_PATTERNS:
+            if re.search(pattern, answer_lower):
+                return True
+        return False
+
     @staticmethod
     def _check_if_needs_deep_research(question: str, wiki_answer: str) -> bool:
         """Evaluate if the wiki answer is sufficient to answer the user's question.
@@ -626,6 +684,16 @@ class ResearchStateMiddleware(AgentMiddleware):
         if not wiki_answer or not wiki_answer.strip():
             return True
 
+        # Fast-path: negative/absence claims are NEVER complete answers.
+        # If the wiki says "no information available", the query LLM likely
+        # failed to search raw documents — force deep research.
+        if ResearchStateMiddleware._is_negative_claim(wiki_answer):
+            logger.info(
+                "Wiki answer appears to be a negative claim — "
+                "forcing deep research to verify."
+            )
+            return True
+
         try:
             model = get_configured_model()
             prompt = (
@@ -633,6 +701,15 @@ class ResearchStateMiddleware(AgentMiddleware):
                 "retrieved from a document wiki and determine if it fully and comprehensively answers "
                 "the user's question, or if we need to conduct continuous deep research (e.g. searching "
                 "the web) to enhance it.\n\n"
+                "CRITICAL RULES:\n"
+                "- An answer that states 'no information is available', 'the document does not "
+                "contain/mention', or similar ABSENCE claims is INCOMPLETE — the information may "
+                "exist in sections the query agent did not search. Mark such answers as "
+                "needs_deep_research=true.\n"
+                "- An answer without specific page references, section citations, or document "
+                "source paths is likely unreliable — prefer needs_deep_research=true.\n"
+                "- Only mark needs_deep_research=false when the answer provides SPECIFIC facts, "
+                "data points, dates, names, or figures that directly address the question.\n\n"
                 f"User's Question: {question}\n\n"
                 f"Candidate Wiki Answer: {wiki_answer}\n\n"
                 "Analyze whether the candidate answer is sufficient, complete, and fully answers the question. "
@@ -674,6 +751,11 @@ class ResearchStateMiddleware(AgentMiddleware):
             return True
 
     def before_agent(self, state: ResearchState, runtime: Any) -> dict[str, Any] | None:
+        """Pre-process the research state and runtime environment before the agent executes.
+
+        This includes seeding the research request file, initiating progress feedback,
+        and preparing wiki queries.
+        """
         messages = state.get("messages", [])
         current_user_message = self._get_current_user_message(messages)
 
@@ -773,8 +855,18 @@ class ResearchStateMiddleware(AgentMiddleware):
             updates["wiki_query_complete"] = False
 
             if thread_id and current_user_message:
+                # Check if user explicitly requested no web search —
+                # needed by fallback messages inside _get_wiki_context_sync.
+                _no_web_from_msg = self._extract_no_web(current_user_message or "")
+                _no_web_requested = (
+                    _no_web_from_msg
+                    if _no_web_from_msg is not None
+                    else bool(state.get("no_web", False))
+                )
                 wiki_sys_msg, wiki_answer = self._get_wiki_context_sync(
-                    str(thread_id), current_user_message
+                    str(thread_id),
+                    current_user_message,
+                    no_web_requested=_no_web_requested,
                 )
                 if wiki_answer:
                     # Evaluate if we need continuous deep research to enhance it
@@ -792,6 +884,19 @@ class ResearchStateMiddleware(AgentMiddleware):
                             "Wiki answer is incomplete/insufficient. Conducting continuous deep research to enhance it."
                         )
                         updates["wiki_query_complete"] = False
+                        # Update the system message to encourage deep research
+                        if wiki_sys_msg:
+                            wiki_sys_msg.content = (
+                                "<wiki_context>\n"
+                                "The following is a partial/initial answer from the thread's "
+                                "ingested document wiki. It contains SOME useful information but is INCOMPLETE "
+                                "and does not fully answer the user's question.\n"
+                                "CRITICAL: You MUST conduct continuous deep research (e.g. use web search tools) "
+                                "to find the missing information and enhance this answer. "
+                                "Synthesize the wiki context below with your web search findings to provide a complete response.\n\n"
+                                f"{wiki_answer}\n"
+                                "</wiki_context>"
+                            )
                     if "files" not in updates:
                         updates["files"] = {}
                     state_files = state.get("files") or {}
@@ -1375,7 +1480,7 @@ research_sub_agent: SubAgent = {
 try:
     model = get_configured_model()
 except Exception as e:
-    print(f"CRITICAL ERROR INITIALIZING MODEL: {e}", file=sys.stderr)
+    logger.critical(f"CRITICAL ERROR INITIALIZING MODEL: {e}", exc_info=True)
     traceback.print_exc()
     with open("/deps/deep_research/FATAL_ERROR.log", "w") as f:
         f.write("CRITICAL ERROR: get_configured_model() failed!\n")

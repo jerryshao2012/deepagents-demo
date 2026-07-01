@@ -68,6 +68,14 @@ export MAX_CONCURRENT_RESEARCH_UNITS=3
 # Maximum number of iterations per researcher agent before stopping
 export MAX_RESEARCHER_ITERATIONS=3
 
+# Wiki Agent Timeouts
+export WIKI_AGENT_TIMEOUT_SECONDS=600
+export WIKI_INGEST_PHASE_TIMEOUT_SECONDS=300
+export WIKI_INDEX_REPAIR_TIMEOUT_SECONDS=180
+export WIKI_QUERY_TIMEOUT_SECONDS=120
+export WIKI_LINT_TIMEOUT_SECONDS=60
+export WIKI_INGEST_MAX_WAIT_SECONDS=600
+
 # Evaluation Tracking (for langgraph dev server)
 # Enable automatic metrics logging during development
 export ENABLE_EVAL_TRACKING=true
@@ -1038,6 +1046,7 @@ Ensure all packages are synced, and start the application server.
 cd deep_research
 uv sync
 langgraph dev
+langgraph dev --no-reload --no-browser
 ```
 
 **Option B: Upload API Only**

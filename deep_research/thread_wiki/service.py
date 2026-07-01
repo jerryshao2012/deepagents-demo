@@ -67,7 +67,7 @@ CONTEXT_BUDGET: dict[str, float] = {
 _DEFAULT_CONTEXT_MAX_CHARS = 128_000
 
 # Threshold above which a single raw source is considered "large" and should be
-# searched via retrieve_raw_documents rather than read directly.
+# searched via retrieve_wiki_documents rather than read directly.
 _LARGE_SOURCE_CHAR_THRESHOLD = 80_000
 
 # Content chunking: when a staged source exceeds the max chunk size, it is split
@@ -120,7 +120,7 @@ def _build_context_budget_instructions() -> str:
         "Budget enforcement:",
         "- Read `/wiki/index.md` first — it fits within the index budget.",
         "- Prioritize wiki pages by relevance. Stop reading when the wiki page budget is exhausted.",
-        "- For large raw sources (>80K chars), use the `retrieve_raw_documents` tool instead of reading files directly.",
+        "- For large raw sources (>80K chars), use the `retrieve_wiki_documents` tool instead of reading files directly.",
         "- If a source is small, read it directly.",
         "- Do NOT exhaust the response reserve — always leave room for your full answer.",
     ]
@@ -159,7 +159,7 @@ Reasoning style:
 
 Context budget awareness:
 - Respect the per-category context budgets communicated in the user prompt.
-- For large raw sources, prefer the `retrieve_raw_documents` search tool over reading entire files.
+- For large raw sources, prefer the `retrieve_wiki_documents` search tool over reading entire files.
 - Prioritize wiki pages by relevance; stop reading when the wiki page budget is exhausted.
 - Always leave room for your response within the response reserve.
 
@@ -217,7 +217,7 @@ Evidence rules:
 - Every non-trivial claim should be traceable to the ingested source set.
 - Avoid introducing unsupported external facts.
 - If evidence is weak or missing, say so directly.
-- If raw documents are too large to read in full, you may use the `retrieve_raw_documents` tool to query them and retrieve relevant snippets.
+- If raw documents are too large to read in full, you may use the `retrieve_wiki_documents` tool to query them and retrieve relevant snippets.
 
 Filesystem policy:
 - Never write to `/raw/`.
@@ -846,7 +846,7 @@ def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
     if _use_search:
         logger.info(
             "Raw content (%d chars) exceeds raw source budget (%d chars); "
-            "pre-building search index and recommending retrieve_raw_documents tool.",
+            "pre-building search index and recommending retrieve_wiki_documents tool.",
             _total_raw,
             _raw_budget,
         )
@@ -865,7 +865,7 @@ def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
     from langchain_core.tools import tool
 
     @tool
-    def retrieve_raw_documents(query: str, k: int = 5) -> str:
+    def retrieve_wiki_documents(query: str, k: int = 5) -> str:
         """Retrieve top-k relevant document snippets from the raw documents text search index.
 
         Use this tool when you need to search large raw source documents in `/raw/`
@@ -954,7 +954,7 @@ def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
 
             return "\n---\n\n".join(output_lines)
         except Exception as e:
-            logger.exception("retrieve_raw_documents failed")
+            logger.exception("retrieve_wiki_documents failed")
             return f"Error retrieving raw documents: {e}"
 
     model = _resolve_model()
@@ -963,7 +963,25 @@ def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
         backend=backend,
         permissions=permissions,
         system_prompt=_BASE_SYSTEM_PROMPT,
-        tools=[retrieve_raw_documents],
+        tools=[retrieve_wiki_documents],
+    )
+
+    # Apply a conservative recursion limit to prevent infinite tool-calling
+    # loops.  Index repair and lint passes should complete in < 30 turns;
+    # ingest review + apply may need more for large document sets.
+    from langchain_core.runnables import RunnableConfig
+
+    _WIKI_AGENT_RECURSION_LIMIT = int(
+        __import__("os").getenv("WIKI_AGENT_RECURSION_LIMIT", "50")
+    )
+    # Timeout for the entire agent invocation (seconds).
+    _WIKI_AGENT_TIMEOUT = int(
+        __import__("os").getenv("WIKI_AGENT_TIMEOUT_SECONDS", "300")
+    )
+    agent = agent.with_config(
+        RunnableConfig(
+            recursion_limit=_WIKI_AGENT_RECURSION_LIMIT,
+        )
     )
 
     # When raw content exceeds the budget, append a strong recommendation to
@@ -974,7 +992,7 @@ def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
             f"{prompt}\n\n"
             "IMPORTANT — Large raw source detected:\n"
             f"Total raw content ({_total_raw:,} chars) exceeds the raw source "
-            f"budget ({_raw_budget:,} chars).  Use the `retrieve_raw_documents` "
+            f"budget ({_raw_budget:,} chars).  Use the `retrieve_wiki_documents` "
             "tool to search for specific facts within raw sources.  Do NOT read "
             "entire large raw files directly — you will exceed the context window.\n"
         )
@@ -1026,7 +1044,7 @@ def _build_ingest_review_prompt(
         f"{budget_instructions}\n\n"
         "Analysis standards:\n"
         "- Read `/purpose.md` first for directional guidance (goals, scope, key questions).\n"
-        "- Read every staged source before proposing wiki edits (or use retrieve_raw_documents for large files).\n"
+        "- Read every staged source before proposing wiki edits (or use retrieve_wiki_documents for large files).\n"
         "- Distinguish direct evidence from inference.\n"
         "- Prefer canonical page updates over creating fragmented pages.\n"
         "- Preserve uncertainty; do not invent unsupported claims.\n"
@@ -1099,7 +1117,14 @@ Document citation format rules (MANDATORY):
 - NEVER use markdown link syntax for document paths. The following is WRONG: ([/filename.pdf](p. N))
   The correct form is: (/raw/filename.pdf.md, p. N)
 - For web URLs you MAY use markdown links: [Title](https://example.com)
-- Multiple pages: (/raw/filename.pdf.md, pp. 14, 30)
+- Page number formatting (CRITICAL — follow EXACTLY):
+  * Single page: p. 14
+  * Page range ONLY (consecutive pages): pp. 10-15
+  * List of individual pages — each MUST have its own 'p. ' prefix:
+    CORRECT:   bmo_ar2025.pdf: p. 9, p. 14, p. 20, p. 37
+    WRONG:     bmo_ar2025.pdf: pp. 9, 14, 20, 37
+    WRONG:     bmo_ar2025.pdf: 9, 14, 20, 37
+  * NEVER use 'pp. ' for a list of non-consecutive pages — 'pp. ' is ONLY for ranges.
 """
 
 
@@ -1110,13 +1135,28 @@ def _build_query_prompt(topic: str, question: str) -> str:
         "This is analysis-only. Do not create, edit, move, or delete files.\n\n"
         "Required workflow:\n"
         "1) Read `/purpose.md` first for directional guidance (goals, scope, key questions).\n"
-        "2) Read `/wiki/index.md` first and use its categorized summaries to choose candidate pages.\n"
+        "2) Read `/wiki/index.md` and use its categorized summaries to choose candidate pages.\n"
         "3) Read recent `/log.md` entries (latest ~10 `## [` headings) to understand what was ingested recently.\n"
         "4) Prefer checking relevant prior `/wiki/query/*.md` pages first.\n"
         "5) Read the canonical wiki pages before final synthesis.\n"
-        "6) CRITICAL: If the wiki pages do not contain the full answer, you MUST search and read the raw source documents in `/raw/` (using the `retrieve_raw_documents` tool if the files are too large to read directly).\n"
-        "7) Provide a grounded answer with wiki or raw file path citations.\n"
+        "6) CRITICAL: Search `/raw/` documents using the `retrieve_wiki_documents` tool with MULTIPLE query "
+        "variations (at least 3 different phrasings of the question). Do NOT rely solely on wiki pages — "
+        "raw documents often contain details that wiki pages summarised away.\n"
+        "7) Provide a grounded answer with wiki or raw file path citations. "
+        "Every factual claim MUST include a source reference.\n"
         "8) Decide whether this answer should be filed as a durable wiki page.\n\n"
+        "ANTI-HALLUCINATION RULES (MANDATORY):\n"
+        "- NEVER conclude 'no information available' or 'the document does not mention X' without first:\n"
+        "  a) Searching `/raw/` documents using `retrieve_wiki_documents` with at least 3 query variations\n"
+        "  b) Reading the top-ranked results from each search\n"
+        "  c) If still nothing found, searching for related/adjacent terms (e.g. if 'acquisition' "
+        "yields nothing, try 'purchase', 'buyout', 'takeover', 'transaction', 'M&A')\n"
+        "- If after thorough searching you genuinely cannot find the information, state EXACTLY:\n"
+        "  * Which documents you searched\n"
+        "  * Which search queries you tried\n"
+        "  * Which page ranges/sections you examined\n"
+        "  * That the information MAY still exist in unexamined sections\n"
+        "- Never present a negative claim with high confidence — always qualify it.\n\n"
         "Contradiction disclosure (MANDATORY):\n"
         "- Check wiki pages for unresolved `> **Contradiction**` callouts relevant to the question.\n"
         "- If conflicting claims exist, clearly distinguish 'established facts' from 'claims with conflicting evidence'.\n"
@@ -1124,6 +1164,7 @@ def _build_query_prompt(topic: str, question: str) -> str:
         + _DOCUMENT_CITATION_RULES
         + "\nOutput format (exact keys):\n"
         "ANSWER:\n<markdown answer with citations>\n\n"
+        "DOCUMENTS_SEARCHED:\n<list of documents searched. Each page number MUST have its own 'p. ' prefix. Format EXACTLY as: bmo_ar2025.pdf: p. 10, p. 22, p. 30.  NEVER use 'pp. ' for individual pages — 'pp. ' is ONLY for ranges like pp. 10-15. Also list the search queries used.>\n\n"
         "CONTRADICTIONS:\n<unresolved contradictions relevant to this question, or 'None'>\n\n"
         "FILING_DECISION: file|skip\n"
         "FILING_REASON: <one sentence>\n"
@@ -2241,9 +2282,21 @@ async def run_ingest(
         if chunked_sources:
             chunk_instructions = _build_chunked_processing_instructions(chunked_sources)
             review_prompt = f"{review_prompt}\n\n{chunk_instructions}"
-        review_summary = await asyncio.to_thread(
-            _run_agent, paths.wiki_dir, review_prompt, read_only=True
+        _INGEST_PHASE_TIMEOUT = int(
+            __import__("os").getenv("WIKI_INGEST_PHASE_TIMEOUT_SECONDS", "600")
         )
+        try:
+            review_summary = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _run_agent, paths.wiki_dir, review_prompt, read_only=True
+                ),
+                timeout=_INGEST_PHASE_TIMEOUT,
+            )
+        except TimeoutError:
+            logger.error(
+                "Ingest review phase timed out after %ds", _INGEST_PHASE_TIMEOUT
+            )
+            raise
         _append_log_entry(
             paths.wiki_dir,
             "ingest.review",
@@ -2263,9 +2316,18 @@ async def run_ingest(
         apply_prompt = _build_ingest_apply_prompt(
             topic, staged_names, review_summary, note, merge=merge
         )
-        apply_result = await asyncio.to_thread(
-            _run_agent, paths.wiki_dir, apply_prompt, read_only=False
-        )
+        try:
+            apply_result = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _run_agent, paths.wiki_dir, apply_prompt, read_only=False
+                ),
+                timeout=_INGEST_PHASE_TIMEOUT,
+            )
+        except TimeoutError:
+            logger.error(
+                "Ingest apply phase timed out after %ds", _INGEST_PHASE_TIMEOUT
+            )
+            raise
         _append_log_entry(
             paths.wiki_dir,
             "ingest.apply",
@@ -2279,9 +2341,24 @@ async def run_ingest(
         # Phase 4.5: Post-ingest review (read-only curation signals)
         progress.advance(IngestPhase.REVIEWING, "Generating curation review...")
         review_prompt = _build_review_prompt(topic, staged_names, note)
-        review_raw = await asyncio.to_thread(
-            _run_agent, paths.wiki_dir, review_prompt, read_only=True
-        )
+        try:
+            review_raw = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _run_agent, paths.wiki_dir, review_prompt, read_only=True
+                ),
+                timeout=_INGEST_PHASE_TIMEOUT,
+            )
+        except TimeoutError:
+            logger.warning(
+                "Post-ingest review timed out after %ds — skipping review",
+                _INGEST_PHASE_TIMEOUT,
+            )
+            review_raw = (
+                "## Missing Pages\nNone identified.\n\n"
+                "## Duplicate Suggestions\nNone identified.\n\n"
+                "## Research Questions\nNone identified.\n\n"
+                "## Knowledge Gaps\nNone identified.\n"
+            )
         progress.review_report = _parse_review_report(review_raw)
         _append_log_entry(
             paths.wiki_dir,
@@ -2295,13 +2372,22 @@ async def run_ingest(
 
         # Phase 5: Refresh index (incremental repair with full rebuild fallback)
         progress.advance(IngestPhase.REFRESHING_INDEX, "Updating wiki index...")
-        repaired = await asyncio.to_thread(
-            _repair_index, topic, paths.wiki_dir, len(staged)
+        _INDEX_REPAIR_TIMEOUT = int(
+            __import__("os").getenv("WIKI_INDEX_REPAIR_TIMEOUT_SECONDS", "120")
         )
-        if not repaired:
-            progress.detail = (
-                "Incremental repair failed, rebuilding index from scratch..."
+        try:
+            repaired = await asyncio.wait_for(
+                asyncio.to_thread(_repair_index, topic, paths.wiki_dir, len(staged)),
+                timeout=_INDEX_REPAIR_TIMEOUT,
             )
+        except TimeoutError:
+            logger.warning(
+                "Index repair timed out after %ds — falling back to full rebuild",
+                _INDEX_REPAIR_TIMEOUT,
+            )
+            repaired = False
+        if not repaired:
+            progress.detail = "Incremental repair failed or timed out, rebuilding index from scratch..."
             await asyncio.to_thread(_refresh_index, topic, paths.wiki_dir)
 
         review_count = (
@@ -2444,9 +2530,19 @@ async def run_query(
     Returns a grounded answer with optional filing into wiki/query/.
     """
     query_prompt = _build_query_prompt(topic, question)
-    raw_response = await asyncio.to_thread(
-        _run_agent, paths.wiki_dir, query_prompt, read_only=True
-    )
+    _QUERY_TIMEOUT = int(__import__("os").getenv("WIKI_QUERY_TIMEOUT_SECONDS", "180"))
+    try:
+        raw_response = await asyncio.wait_for(
+            asyncio.to_thread(_run_agent, paths.wiki_dir, query_prompt, read_only=True),
+            timeout=_QUERY_TIMEOUT,
+        )
+    except TimeoutError:
+        logger.error("Wiki query timed out after %ds", _QUERY_TIMEOUT)
+        return WikiQueryResult(
+            answer="The wiki query timed out. The document may be too large to process in the available time.",
+            filed_path=None,
+            sources_cited=[],
+        )
     answer, should_file, reason = _parse_query_decision(raw_response)
 
     _append_log_entry(
@@ -2470,17 +2566,24 @@ async def run_query(
             "4) Never write to `/raw/`.\n\n"
             f"Filing reason: {reason}\n\nQuestion: {question}\n\nAnswer draft:\n{answer}\n"
         )
-        await asyncio.to_thread(
-            _run_agent, paths.wiki_dir, file_prompt, read_only=False
-        )
-        _refresh_index(topic, paths.wiki_dir)
-        _append_log_entry(
-            paths.wiki_dir,
-            "query.apply",
-            "filed",
-            summary=f"Filed query answer at {target}.",
-        )
-        filed_path = target
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(
+                    _run_agent, paths.wiki_dir, file_prompt, read_only=False
+                ),
+                timeout=_QUERY_TIMEOUT,
+            )
+        except TimeoutError:
+            logger.warning("Wiki query filing timed out after %ds", _QUERY_TIMEOUT)
+        else:
+            _refresh_index(topic, paths.wiki_dir)
+            _append_log_entry(
+                paths.wiki_dir,
+                "query.apply",
+                "filed",
+                summary=f"Filed query answer at {target}.",
+            )
+            filed_path = target
 
     citations = _extract_citations(answer)
 
@@ -2546,9 +2649,22 @@ async def run_lint(
     # Pass 2: Read-only semantic contradiction detection.
     semantic_prompt = _build_semantic_lint_prompt(topic, note)
     logger.info("Running read-only semantic contradiction detection pass...")
-    semantic_result = await asyncio.to_thread(
-        _run_agent, paths.wiki_dir, semantic_prompt, read_only=True
-    )
+    _LINT_TIMEOUT = int(__import__("os").getenv("WIKI_LINT_TIMEOUT_SECONDS", "300"))
+    try:
+        semantic_result = await asyncio.wait_for(
+            asyncio.to_thread(
+                _run_agent, paths.wiki_dir, semantic_prompt, read_only=True
+            ),
+            timeout=_LINT_TIMEOUT,
+        )
+    except TimeoutError:
+        logger.error("Semantic lint pass timed out after %ds", _LINT_TIMEOUT)
+        semantic_result = (
+            "## Contradictions Found\nNone identified (lint timed out).\n\n"
+            "## Stale Claims\nNone identified.\n\n"
+            "## Unresolved Contradictions from Previous Passes\nNone.\n\n"
+            "## Summary\nLint semantic pass timed out.\n"
+        )
 
     # Pass 3: Mutating lint repair with both structural and semantic findings.
     lint_prompt = _build_lint_prompt(topic, note)
@@ -2559,9 +2675,14 @@ async def run_lint(
         f"Semantic Contradiction Scan Results:\n{semantic_result[:2000]}\n\n"
         f"Operator note: {note or '(none)'}\n",
     )
-    result = await asyncio.to_thread(
-        _run_agent, paths.wiki_dir, lint_prompt, read_only=False
-    )
+    try:
+        result = await asyncio.wait_for(
+            asyncio.to_thread(_run_agent, paths.wiki_dir, lint_prompt, read_only=False),
+            timeout=_LINT_TIMEOUT,
+        )
+    except TimeoutError:
+        logger.error("Lint apply pass timed out after %ds", _LINT_TIMEOUT)
+        result = "Lint apply timed out."
     await asyncio.to_thread(_refresh_index, topic, paths.wiki_dir)
     _append_log_entry(
         paths.wiki_dir,

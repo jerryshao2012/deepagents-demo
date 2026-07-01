@@ -169,7 +169,8 @@ def _resolve_wiki_base_dir(fallback_dir: Path) -> Path:
     Checks (in order):
     1. ``WIKI_BASE_DIR`` env var — explicit override for the wiki base directory.
     2. ``DOC_FOLDER`` env var — the docs folder used by the research agent;
-       its parent directory becomes the base (e.g. ``/mnt/docs`` → ``/mnt``).
+       walks up until we find the directory that *contains* ``docs/``, so that
+       ``docs/threads-wiki/`` is resolved at the same level as ``docs/threads/``.
     3. *fallback_dir* — the caller's default (usually ``Path(__file__).resolve().parent``).
     """
     import os as _os
@@ -180,7 +181,17 @@ def _resolve_wiki_base_dir(fallback_dir: Path) -> Path:
 
     doc_folder = _os.environ.get("DOC_FOLDER")
     if doc_folder:
-        return Path(doc_folder).parent
+        doc_path = Path(doc_folder).resolve()
+        # Walk up from DOC_FOLDER until we find the parent of a "docs"
+        # directory, so that docs/threads-wiki/ resolves at the same level
+        # as docs/threads/.  This handles cases where DOC_FOLDER points
+        # deep into docs/threads/<thread_id>/... without double-nesting.
+        for parent in doc_path.parents:
+            if parent.name == "docs":
+                # parent is .../docs — go one level up to the project root
+                return parent.parent
+        # Fallback: if no "docs" ancestor found, use the immediate parent.
+        return doc_path.parent
 
     return fallback_dir
 
