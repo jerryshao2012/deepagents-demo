@@ -1,3 +1,5 @@
+"""Tests for quality metrics generation."""
+
 from research_agent.skills.golden_dataset.scripts.generate_quality_metrics import build_parser
 
 from research_agent.tools import reports_output_folder

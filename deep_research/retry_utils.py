@@ -1,4 +1,8 @@
-"""Retry utilities for handling rate limits and transient errors in model calls."""
+"""Robust API retry utilities and proactive rate limiting for LLM model calls.
+
+Provides exponential backoff, jitter, and automatic retry decorators for handling
+transient network errors and rate limits (RPM/TPM constraints) across providers.
+"""
 
 from __future__ import annotations
 
@@ -190,9 +194,7 @@ def retry_on_rate_limit(
 
 
 def wrap_model_with_rate_limiting(model: Any) -> Any:
-    """
-    Apply both proactive rate shaping and reactive retries to a model.
-    """
+    """Apply both proactive rate shaping and reactive retries to a model."""
     # 1. Reactive Retries (Decorator)
     # Wrap invoke methods with retry logic using object.__setattr__ to bypass Pydantic validation
     retry_wrapped_invoke = retry_on_rate_limit(model.invoke)
@@ -222,12 +224,20 @@ def wrap_model_with_rate_limiting(model: Any) -> Any:
 
 
 class AsyncRateLimiter:
-    """
-    Proactive rate shaping to avoid 429s by controlling request flow.
+    """Proactive rate shaping to avoid 429s by controlling request flow.
+
     Supports both Token Per Minute (TPM) and Request Per Minute (RPM) limits.
     """
 
     def __init__(self, tpm: int, rpm: int, safe_margin: float = 0.8):
+        """Initialize the rate limiter with TPM and RPM constraints.
+
+        Args:
+            tpm: Maximum tokens per minute.
+            rpm: Maximum requests per minute.
+            safe_margin: Multiplier applied to limits to stay safely under
+                the hard ceiling. Defaults to 0.8 (80%).
+        """
         # Configuration
         self.safe_tpm = int(tpm * safe_margin)
         self.min_interval = 60.0 / (rpm * safe_margin)  # Calculated from RPM
@@ -281,7 +291,15 @@ class AsyncRateLimiter:
 
 
 class RetryConfig:
-    """Configuration class for retry behavior."""
+    """Configuration class for retry behavior.
+
+    Attributes:
+        max_retries: Maximum retry attempts before giving up.
+        initial_backoff: Starting backoff duration in seconds.
+        max_backoff: Upper bound for exponential backoff in seconds.
+        backoff_multiplier: Multiplier applied at each retry step.
+        jitter: Whether to add randomness to backoff timing.
+    """
 
     def __init__(
             self,
@@ -291,6 +309,15 @@ class RetryConfig:
             backoff_multiplier: float = BACKOFF_MULTIPLIER,
             jitter: bool = JITTER_ENABLED,
     ):
+        """Initialize retry configuration.
+
+        Args:
+            max_retries: Maximum retry attempts. Defaults to ``MODEL_MAX_RETRIES`` or 5.
+            initial_backoff: Starting backoff in seconds. Defaults to ``MODEL_INITIAL_BACKOFF`` or 1.0.
+            max_backoff: Maximum backoff in seconds. Defaults to ``MODEL_MAX_BACKOFF`` or 60.0.
+            backoff_multiplier: Exponential multiplier. Defaults to ``MODEL_BACKOFF_MULTIPLIER`` or 2.0.
+            jitter: Add randomness to backoff. Defaults to ``MODEL_RETRY_JITTER`` or True.
+        """
         self.max_retries = max_retries
         self.initial_backoff = initial_backoff
         self.max_backoff = max_backoff

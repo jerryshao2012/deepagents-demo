@@ -38,6 +38,12 @@ _DEPRECATION_MSG = """
 
 
 def main() -> None:
+    """DEPRECATED. Print a deprecation notice and exit.
+
+    This launcher for the custom ``server.py`` is no longer supported.
+    Use ``langgraph dev`` for the LangGraph Platform server and
+    ``uv run python -m webapp`` for the document upload API.
+    """
     print(_DEPRECATION_MSG, file=sys.stderr)
     sys.exit(1)
 

@@ -1,4 +1,8 @@
-"""CLI helpers for the deep research entrypoint."""
+"""Command-line interface (CLI) argument parsing and validation helpers.
+
+Constructs options for model configurations, document folders, web search flags,
+SSL validations, list_skills summaries, and text search integrations.
+"""
 
 from __future__ import annotations
 

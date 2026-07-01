@@ -1,3 +1,9 @@
+"""Authentication helper for LangGraph Platform.
+
+Validates incoming credentials (supporting Google/GitHub OAuth session tokens and
+standard API keys) to authorize access to thread endpoints.
+"""
+
 import os
 from typing import Set
 

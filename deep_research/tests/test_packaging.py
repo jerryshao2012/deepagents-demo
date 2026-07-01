@@ -1,3 +1,5 @@
+"""Tests for project packaging and installation."""
+
 import tomllib
 from pathlib import Path
 

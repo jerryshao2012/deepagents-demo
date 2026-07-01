@@ -1,3 +1,9 @@
+"""Web search utilities utilizing Tavily search APIs.
+
+Executes search queries, processes search responses, fetches full page contents
+via HTTP, caches results, and converts HTML pages into clean markdown formats.
+"""
+
 from __future__ import annotations
 
 import os
@@ -30,6 +36,22 @@ def get_cached_webpage(url: str) -> str | None:
 
 
 def _run_tavily_search(query: str, max_results: int, topic: str, timeout: float = 60.0) -> dict:
+    """Execute a raw search request against the Tavily API.
+
+    Args:
+        query: The search query string.
+        max_results: Maximum number of results to request.
+        topic: Topic filter (``"general"``, ``"news"``, or ``"finance"``).
+        timeout: HTTP request timeout in seconds. Defaults to 60.0.
+
+    Returns:
+        The parsed JSON response dict, guaranteed to contain a ``"results"``
+        key (defaulting to an empty list).
+
+    Raises:
+        ValueError: If ``TAVILY_API_KEY`` is not set.
+        requests.HTTPError: If the API returns a non-2xx status code.
+    """
     api_key = os.getenv("TAVILY_API_KEY")
     if not api_key:
         raise ValueError("TAVILY_API_KEY is not set")

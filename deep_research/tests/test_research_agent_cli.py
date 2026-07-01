@@ -1,3 +1,5 @@
+"""Tests for the research agent CLI module."""
+
 from research_agent.utils import skill_registry
 from research_agent.utils.cli import build_parser
 from research_agent.utils.skill_registry import get_skill_registry

@@ -1,3 +1,9 @@
+"""Document text extraction utilities supporting multiple formats.
+
+Handles text extraction and page/boundary-chunking for files of type .pdf,
+.txt, .md, .docx, .pptx, and .xlsx.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -118,6 +124,14 @@ def _extract_pdf_text(file_path: Path) -> str:
 
 
 def _extract_text_file(file_path: Path) -> str:
+    """Read a plain-text or Markdown file and return its contents.
+
+    Args:
+        file_path: Path to a ``.txt`` or ``.md`` file.
+
+    Returns:
+        The file contents as a UTF-8 string.
+    """
     return file_path.read_text(encoding="utf-8")
 
 
@@ -224,6 +238,21 @@ def _extract_xlsx_text(file_path: Path) -> str:
 
 
 def extract_supported_document(file_path: Path) -> str:
+    """Extract text content from a supported document file.
+
+    Dispatches to the appropriate extractor based on file extension.
+    Supports PDF, plain text, Markdown, DOCX, PPTX, and XLSX.
+
+    Args:
+        file_path: Path to the document file.
+
+    Returns:
+        Extracted text content, with format-specific sentinels for page
+        numbers, slide numbers, headings, or sheet/row coordinates.
+
+    Raises:
+        ValueError: If the file extension is not a supported document type.
+    """
     suffix = file_path.suffix.lower()
     if suffix == ".pdf":
         return _extract_pdf_text(file_path)

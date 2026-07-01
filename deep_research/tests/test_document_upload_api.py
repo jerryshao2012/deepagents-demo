@@ -1,3 +1,5 @@
+"""Tests for document upload API endpoints."""
+
 from fastapi.testclient import TestClient
 
 import webapp

@@ -112,6 +112,13 @@ def build_parser() -> argparse.ArgumentParser:
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    """Entry point: run the full golden-dataset scoring pipeline.
+
+    Executes a 6-step pipeline: (1) score with LLM judge, (2) convert to
+    Markdown table, (3) generate comprehensive report, (4) optionally
+    humanize, (5) write report/metrics files, (6) optionally record eval
+    tracking for regression comparison.
+    """
     args = build_parser().parse_args()
     start_time = time.time()
 

@@ -1,3 +1,5 @@
+"""Tests for agent contract validation."""
+
 from pathlib import Path
 
 

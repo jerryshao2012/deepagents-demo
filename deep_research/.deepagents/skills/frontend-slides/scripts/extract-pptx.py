@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""
-Extract all content from a PowerPoint file (.pptx).
+"""Extract all content from a PowerPoint file (.pptx).
+
 Returns a JSON structure with slides, text, and images.
 
 Usage:

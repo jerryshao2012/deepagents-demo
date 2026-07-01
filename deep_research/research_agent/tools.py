@@ -1,4 +1,9 @@
-"""Tools for the research agent."""
+"""Strategic research tools for web exploration and local document analysis.
+
+Exposes tools for web search (tavily_search, fetch_webpage_content), strategic
+planning (think_tool), and local workspace interactions (ls, glob, read_file,
+write_file, read_docs_folder). Handles state injection and directory constraints.
+"""
 
 import os
 import re
@@ -296,6 +301,10 @@ def list_available_skills() -> str:
     """List available legacy skills (golden-dataset, frontend-slides) with their descriptions.
 
     Migrated skills are auto-discovered by the system and do not appear in this list.
+
+    Returns:
+        A formatted string listing available skill names and descriptions,
+        or a message indicating no skills are available.
     """
     logger.debug("Listing available skills")
     registry = get_skill_registry()
@@ -323,6 +332,10 @@ def read_skill_supporting_file(skill_id: str, filename: str) -> str:
     Args:
         skill_id: The skill identifier (e.g., 'frontend-slides', 'golden-dataset')
         filename: The name of the supporting file to read.
+
+    Returns:
+        The content of the supporting file as a string, or an error message
+        if the skill or file is not found.
     """
     logger.debug(f"Reading supporting file '{filename}' from skill '{skill_id}'")
     registry = get_skill_registry()

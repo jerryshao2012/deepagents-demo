@@ -1,3 +1,9 @@
+"""Source citation validator for checking and grounding cited URLs.
+
+Parses generated citations, checks URL reachability, and verifies that references
+are actually grounded in the fetched source texts by comparing keywords and sentences.
+"""
+
 from __future__ import annotations
 
 import re
@@ -12,6 +18,15 @@ from utils import get_ssl_verify_config
 
 @dataclass(frozen=True)
 class ValidationResult:
+    """Result of validating a single web citation.
+
+    Attributes:
+        url: The URL that was validated.
+        reachable: Whether the URL returned a successful HTTP response.
+        grounded: Whether the claim is supported by the page content.
+        reason: Human-readable explanation of the validation outcome.
+    """
+
     url: str
     reachable: bool
     grounded: bool

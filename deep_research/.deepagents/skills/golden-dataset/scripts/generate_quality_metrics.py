@@ -22,6 +22,12 @@ from golden_dataset_metrics import (
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the quality metrics generation CLI.
+
+    Returns:
+        An ``ArgumentParser`` configured with ``input_csv``, ``--output-csv``,
+        ``--report``, and ``--report-file`` arguments.
+    """
     parser = argparse.ArgumentParser(
         description="Generate Similarity, Relevance, Coherence, and Groundedness columns for a golden dataset CSV.",
     )
@@ -43,22 +49,47 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def default_output_path(input_csv: str) -> str:
+    """Derive the default output CSV path from the input filename.
+
+    Args:
+        input_csv: Path to the input CSV file.
+
+    Returns:
+        A path like ``<input>-with-metrics.csv``.
+    """
     input_path = Path(input_csv)
     return str(input_path.with_name(f"{input_path.stem}-with-metrics{input_path.suffix}"))
 
 
 def default_report_path(input_csv: str) -> str:
+    """Derive the default content report path from the input filename.
+
+    Args:
+        input_csv: Path to the input CSV file.
+
+    Returns:
+        A path like ``<input>-content-report.txt``.
+    """
     input_path = Path(input_csv)
     return str(input_path.with_name(f"{input_path.stem}-content-report.txt"))
 
 
 def load_rows(input_csv: str) -> list[dict[str, str]]:
+    """Load CSV rows as a list of dictionaries.
+
+    Args:
+        input_csv: Path to the CSV file.
+
+    Returns:
+        A list of dicts, one per row, with column headers as keys.
+    """
     input_path = Path(input_csv)
     with input_path.open("r", encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
 
 
 def main() -> None:
+    """Entry point: score a dataset CSV and optionally generate a content report."""
     parser = build_parser()
     args = parser.parse_args()
     output_csv = args.output_csv or default_output_path(args.input_csv)

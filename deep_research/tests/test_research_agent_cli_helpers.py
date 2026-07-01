@@ -1,3 +1,5 @@
+"""Tests for CLI helper functions."""
+
 import os
 from pathlib import Path
 

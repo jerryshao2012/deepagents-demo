@@ -1,4 +1,8 @@
-"""Authentication helpers shared across all route modules."""
+"""FastAPI endpoint authentication helpers.
+
+Validates static API keys (`X-API-Key`) and session tokens from OAuth providers
+to authorize access to route modules.
+"""
 
 from __future__ import annotations
 

@@ -92,28 +92,38 @@ app.openapi = custom_openapi
 # ── Pydantic Request/Response Models ──────────────────────────────────────────
 
 class MessagePayload(BaseModel):
+    """DEPRECATED. Message payload for the legacy custom server."""
+
     role: str
     content: str
     name: str | None = None
 
 
 class RunInputPayload(BaseModel):
+    """DEPRECATED. Run input payload for the legacy custom server."""
+
     messages: list[MessagePayload] = Field(default_factory=list)
 
 
 class RunCreateRequest(BaseModel):
+    """DEPRECATED. Run creation request for the legacy custom server."""
+
     assistant_id: str = "researcher"
     input: RunInputPayload = Field(default_factory=RunInputPayload)
     multitask_strategy: str | None = None
 
 
 class ThreadCreateRequest(BaseModel):
+    """DEPRECATED. Thread creation request for the legacy custom server."""
+
     thread_id: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     if_exists: str = "raise"
 
 
 class ThreadSearchRequest(BaseModel):
+    """DEPRECATED. Thread search request for the legacy custom server."""
+
     limit: int = 10
     offset: int = 0
     sort_by: str = "updated_at"
@@ -123,14 +133,20 @@ class ThreadSearchRequest(BaseModel):
 
 
 class ThreadPatchRequest(BaseModel):
+    """DEPRECATED. Thread patch request for the legacy custom server."""
+
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ThreadStateUpdateRequest(BaseModel):
+    """DEPRECATED. Thread state update request for the legacy custom server."""
+
     values: dict[str, Any] | list[Any] | None = None
 
 
 class AssistantSearchRequest(BaseModel):
+    """DEPRECATED. Assistant search request for the legacy custom server."""
+
     limit: int = 10
     offset: int = 0
     graph_id: str | None = None
@@ -138,12 +154,16 @@ class AssistantSearchRequest(BaseModel):
 
 
 class ThreadHistoryRequest(BaseModel):
+    """DEPRECATED. Thread history request for the legacy custom server."""
+
     limit: int = 10
     before: str | None = None
     metadata: dict[str, Any] | None = None
 
 
 class RunStreamRequest(BaseModel):
+    """DEPRECATED. Run stream request for the legacy custom server."""
+
     assistant_id: str = "researcher"
     input: dict[str, Any] | list[Any] | str | int | float | bool | None = None
     config: dict[str, Any] | None = None
@@ -154,7 +174,8 @@ class RunStreamRequest(BaseModel):
 
 
 class AssistantResponse(BaseModel):
-    """Response model for an assistant."""
+    """DEPRECATED. Assistant response model for the legacy custom server."""
+
     id: str
     name: str
     description: str

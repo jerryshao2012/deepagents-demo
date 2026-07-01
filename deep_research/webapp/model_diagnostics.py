@@ -114,7 +114,6 @@ def _detect_model_provider() -> tuple[str, dict]:
 
     ``config_dict`` contains provider-specific keys with secrets masked.
     """
-
     # AWS Bedrock
     if (
             os.getenv("AWS_BEDROCK_ENDPOINT")

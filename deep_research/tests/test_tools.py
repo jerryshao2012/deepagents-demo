@@ -1,3 +1,5 @@
+"""Tests for research agent tool functions."""
+
 from pathlib import Path
 
 from langchain_core.messages import HumanMessage

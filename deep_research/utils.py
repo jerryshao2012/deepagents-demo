@@ -1,4 +1,8 @@
-"""Utility functions for displaying messages and prompts in Jupyter notebooks."""
+"""General utilities for formatting, notebook displays, and CLI configurations.
+
+Provides message rendering (rich console panels), type converters (str2bool),
+prompt display layouts, and helper functions to extract SSL verification parameters.
+"""
 import argparse
 import json
 import os
@@ -101,6 +105,26 @@ def show_prompt(prompt_text: str, title: str = "Prompt", border_style: str = "bl
 
 
 def str2bool(v, defaultValue=None):
+    """Convert a string representation of a boolean to ``bool``.
+
+    Accepts ``"yes"``, ``"true"``, ``"t"``, ``"y"``, ``"1"`` (case-
+    insensitive) as ``True`` and ``"no"``, ``"false"``, ``"f"``, ``"n"``,
+    ``"0"`` as ``False``.  Raw ``bool`` values pass through unchanged.
+
+    Args:
+        v: The value to convert. May be ``str``, ``bool``, or ``None``.
+        defaultValue: Fallback value returned when ``v`` is ``None`` or
+            does not match any known boolean representation.  If
+            ``defaultValue`` is ``None`` and ``v`` is unrecognized, an
+            ``argparse.ArgumentTypeError`` is raised.
+
+    Returns:
+        The boolean value.
+
+    Raises:
+        argparse.ArgumentTypeError: When ``v`` is unrecognized and
+            ``defaultValue`` is ``None``.
+    """
     if v is None:
         return defaultValue
     if isinstance(v, bool):
@@ -115,6 +139,14 @@ def str2bool(v, defaultValue=None):
 
 
 def _get_verify_ssl():
+    """Resolve the SSL verification flag from CLI args or environment.
+
+    Checks ``--verify_ssl`` / ``--verify_ssl=<val>`` on the command line,
+    then falls back to the ``VERIFY_SSL`` environment variable.
+
+    Returns:
+        ``True``, ``False``, or a string path to a CA bundle file.
+    """
     for i, arg in enumerate(sys.argv):
         if arg.startswith('--verify_ssl='):
             val = arg.split('=', 1)[1]
@@ -128,6 +160,15 @@ def _get_verify_ssl():
 
 
 def _get_ssl_ca_file():
+    """Resolve an SSL CA bundle file path from CLI args or environment.
+
+    Checks ``--ssl-ca-file`` / ``--ssl-ca-file=<path>`` on the command
+    line, then falls back to ``SSL_CAINFO``, ``SSL_CERT_FILE``,
+    ``REQUESTS_CA_BUNDLE``, and ``CURL_CA_BUNDLE`` environment variables.
+
+    Returns:
+        A file path string if found, or ``None``.
+    """
     for i, arg in enumerate(sys.argv):
         if arg.startswith('--ssl-ca-file='):
             return arg.split('=', 1)[1]
@@ -143,6 +184,17 @@ def _get_ssl_ca_file():
 
 
 def get_ssl_verify_config():
+    """Return the SSL verification configuration for HTTP clients.
+
+    Resolves ``--verify_ssl`` / ``--ssl-ca-file`` from CLI flags and
+    environment variables into a value suitable for ``httpx.Client(verify=...)``
+    or ``requests.Session.verify``.
+
+    Returns:
+        - ``True`` — use default system CA bundle.
+        - ``False`` — disable certificate verification entirely.
+        - A file path string — use a custom CA bundle.
+    """
     verify_ssl = _get_verify_ssl()
     if not verify_ssl:
         return False

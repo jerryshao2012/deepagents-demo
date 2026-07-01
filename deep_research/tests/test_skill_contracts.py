@@ -1,3 +1,5 @@
+"""Contract tests for skill definitions and parsing."""
+
 from research_agent.utils.cli import build_parser
 from research_agent.utils.skill_registry import get_skill_registry
 

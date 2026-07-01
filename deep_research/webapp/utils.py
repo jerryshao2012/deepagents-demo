@@ -1,6 +1,7 @@
-"""Pure utility helpers with no FastAPI route decorators.
+"""Shared filesystem utility helpers for the FastAPI webapp.
 
-These are imported by route modules and by the wiki-hooks module.
+Provides functions for resolving relative folders safely under document roots,
+performing thread-level folder sanitization, and handling directory cleanups.
 """
 
 from __future__ import annotations

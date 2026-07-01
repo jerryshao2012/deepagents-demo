@@ -1,3 +1,5 @@
+"""Tests for golden dataset metric scoring."""
+
 from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import (
     build_missing_context_report,
     build_judge_prompt,

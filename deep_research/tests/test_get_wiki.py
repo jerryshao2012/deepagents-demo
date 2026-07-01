@@ -1,3 +1,5 @@
+"""Tests for wiki content retrieval."""
+
 import asyncio
 import concurrent.futures
 from pathlib import Path

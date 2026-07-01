@@ -1,3 +1,9 @@
+"""Command-line interface (CLI) launcher for the Deep Research agent.
+
+Sets up argument parsers, tracks thread state memory, displays a console spinner
+during processing, and prints final response messages and outputs.
+"""
+
 import os
 import re
 import threading
@@ -22,19 +28,39 @@ load_dotenv()
 
 
 class Spinner:
+    """A console spinner that displays an animated progress indicator.
+
+    Runs a brailler-pattern animation in a background daemon thread,
+    over-writable with a custom status message.
+
+    Attributes:
+        message: The status text displayed next to the spinner.
+    """
+
     def __init__(self, message="Working..."):
+        """Initialize the spinner with an optional status message.
+
+        Args:
+            message: Status text to display. Defaults to ``"Working..."``.
+        """
         self.spinner = itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
         self.stop_running = threading.Event()
         self.thread = None
         self.message = message
 
     def spin(self):
+        """Run the spinner animation loop. Called from a background thread."""
         while not self.stop_running.is_set():
             sys.stdout.write(f"\r\033[K\033[36m{next(self.spinner)}\033[0m {self.message}")
             sys.stdout.flush()
             time.sleep(0.1)
 
     def start(self, message=None):
+        """Start the spinner in a daemon thread.
+
+        Args:
+            message: Optional new status message to display.
+        """
         if message:
             self.message = message
         self.stop_running.clear()
@@ -43,6 +69,7 @@ class Spinner:
         self.thread.start()
 
     def stop(self):
+        """Stop the spinner and clear the animation line from the terminal."""
         self.stop_running.set()
         if self.thread and self.thread.is_alive():
             self.thread.join()
@@ -139,6 +166,11 @@ def _message_role_name_content(message) -> tuple[str, str, str]:
 
 
 def _is_unsuccessful_tool_output(content: str) -> bool:
+    """Check whether a tool output string indicates a failure.
+
+    Returns ``True`` for empty output or output starting with known
+    error prefixes (invalid JSON, schema validation failure, etc.).
+    """
     text = content.strip()
     failure_prefixes = (
         "Invalid JSON payload:",
@@ -151,6 +183,12 @@ def _is_unsuccessful_tool_output(content: str) -> bool:
 
 
 def _looks_like_incomplete_delegation(content: str) -> bool:
+    """Check whether the agent output looks like an unfinished delegation.
+
+    Returns ``True`` if the content contains phrases indicating the agent
+    is still waiting for sub-agent results rather than delivering a final
+    answer.
+    """
     text = content.strip().lower()
     if not text:
         return True
@@ -186,6 +224,17 @@ def _has_incomplete_todos(result: dict) -> bool:
 
 
 def _truncate_for_log(content: str, max_chars: int = MAX_STREAM_DIAGNOSTIC_CHARS) -> str:
+    """Truncate and flatten content for safe inclusion in log/diagnostic messages.
+
+    Args:
+        content: The text to truncate.
+        max_chars: Maximum allowed length. Defaults to
+            ``MAX_STREAM_DIAGNOSTIC_CHARS``.
+
+    Returns:
+        The content collapsed to a single line and truncated with ``"..."``
+        if it exceeds ``max_chars``.
+    """
     text = content.strip().replace("\n", " ")
     if len(text) <= max_chars:
         return text
@@ -193,6 +242,11 @@ def _truncate_for_log(content: str, max_chars: int = MAX_STREAM_DIAGNOSTIC_CHARS
 
 
 def _is_azure_content_filter_error(error: Exception) -> bool:
+    """Detect Azure Content Safety filter errors from exception messages.
+
+    Returns ``True`` if the error text contains keywords associated with
+    Azure's content filtering or Responsible AI safety system.
+    """
     text = str(error).lower()
     markers = (
         "content filter",
@@ -204,6 +258,16 @@ def _is_azure_content_filter_error(error: Exception) -> bool:
 
 
 def _last_stream_message_diagnostics(state: dict | None) -> tuple[str, str, str]:
+    """Extract diagnostic info from the last message in a streamed state.
+
+    Used after a streaming failure to help debug what the agent was doing.
+
+    Args:
+        state: The last known agent state from streaming, or ``None``.
+
+    Returns:
+        A tuple of ``(role, name, truncated_content_preview)``.
+    """
     if not state:
         return "", "", ""
 
@@ -251,6 +315,20 @@ def should_retry_with_invoke(result: dict, skill: str | None = None) -> bool:
 
 
 def save_research_to_file(research_content, filename=None, output_folder=None):
+    """Save research output to a timestamped Markdown file.
+
+    Generates a concise title using the LLM and writes the content to
+    ``<title>-<date>.md`` inside the output folder.
+
+    Args:
+        research_content: The research text (string or message object).
+        filename: Optional explicit filename. Auto-generated if not given.
+        output_folder: Target directory path. Defaults to the current
+            working directory.
+
+    Returns:
+        The filesystem path to the saved file as a string.
+    """
     # Get current date and time
     current_date = datetime.now().strftime("%Y-%m-%d_%I_%M_%S_%p")
 
@@ -280,12 +358,34 @@ def save_research_to_file(research_content, filename=None, output_folder=None):
 
 
 def derive_output_folder(doc_folder: str | None) -> Path:
+    """Resolve the output directory for research results.
+
+    If a document folder is configured, a subdirectory named after it is
+    created inside ``REPORTS_OUTPUT_FOLDER``.
+
+    Args:
+        doc_folder: Path to the document folder, or ``None``.
+
+    Returns:
+        The resolved output directory as a ``Path``.
+    """
     if not doc_folder:
         return Path(os.environ.get("REPORTS_OUTPUT_FOLDER", "./output"))
     return Path(os.environ.get("REPORTS_OUTPUT_FOLDER", "./output")) / Path(doc_folder).name
 
 
 def configure_output_folder(doc_folder: str | None) -> Path:
+    """Set up the output folder and persist relevant environment variables.
+
+    Sets ``OUTPUT_FOLDER`` and ``DOC_FOLDER`` in the process environment so
+    that sub-agents and filesystem tools can discover the correct paths.
+
+    Args:
+        doc_folder: Path to the document folder, or ``None``.
+
+    Returns:
+        The normalized output directory path.
+    """
     output_folder = derive_output_folder(doc_folder)
     # Normalize path for deepagents filesystem tools compatibility (cross-platform)
     normalized_path = normalize_path_for_filesystem_tools(str(output_folder))
@@ -300,6 +400,13 @@ def configure_output_folder(doc_folder: str | None) -> Path:
 
 
 def main():
+    """Entry point for the Deep Research CLI.
+
+    Parses command-line arguments, sets up the output folder and thread
+    configuration, streams the agent's progress with a spinner, handles
+    streaming fallback on error, and saves the final research output to
+    a Markdown file.
+    """
     parser = build_parser()
     args = parser.parse_args()
     args.verify_ssl = str2bool(args.verify_ssl)

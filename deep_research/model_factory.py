@@ -22,6 +22,15 @@ logger = setup_logger(__name__)
 
 
 def create_config():
+    """Load environment variables from the local ``.env`` file into a config dict.
+
+    Reads ``.env`` from the same directory as this module, logs the loaded
+    variables, and returns them as a plain dictionary.  Primarily used for
+    development and debugging.
+
+    Returns:
+        A dictionary of all key-value pairs found in the ``.env`` file.
+    """
     # Load environment variables from .env file
     env_path = Path(__file__) / '.env'
     if env_path.exists():
@@ -71,13 +80,35 @@ import numpy as np
 
 class SimpleLocalEmbeddings(Embeddings):
     """A deterministic, completely local bag-of-words projection embedding model.
+
     Used as an offline fallback that works with FAISS.
+
+    Attributes:
+        size: Dimensionality of the embedding vectors. Defaults to 1536.
     """
 
     def __init__(self, size=1536):
+        """Initialize the embedding model.
+
+        Args:
+            size: Dimensionality of the embedding vectors. Defaults to 1536.
+        """
         self.size = size
 
     def _embed(self, text: str) -> list[float]:
+        """Embed a single text into a deterministic bag-of-words projection.
+
+        Each word is hashed (MD5) to a fixed index in the embedding vector
+        with a sign based on the hash bits.  The resulting vector is L2-
+        normalized so cosine similarity = dot product.
+
+        Args:
+            text: The input text to embed.
+
+        Returns:
+            A list of ``self.size`` floats representing the normalized
+            embedding vector.
+        """
         words = [w.strip(".,!?\"'()[]{}<>").lower() for w in text.split()]
         vec = np.zeros(self.size, dtype=np.float32)
         if not words:
@@ -98,9 +129,28 @@ class SimpleLocalEmbeddings(Embeddings):
         return vec.tolist()
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        """Embed a batch of documents.
+
+        Args:
+            texts: A list of document strings to embed.
+
+        Returns:
+            A list of embedding vectors, one per input document.
+        """
         return [self._embed(t) for t in texts]
 
     def embed_query(self, text: str) -> list[float]:
+        """Embed a single query string.
+
+        Delegates to :meth:`_embed` — queries and documents use the same
+        embedding space.
+
+        Args:
+            text: The query string to embed.
+
+        Returns:
+            A normalized embedding vector as a list of floats.
+        """
         return self._embed(text)
 
 

@@ -1,3 +1,5 @@
+"""End-to-end tests for the research agent CLI."""
+
 from __future__ import annotations
 
 from pathlib import Path

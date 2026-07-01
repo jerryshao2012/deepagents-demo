@@ -18,10 +18,24 @@ _cosmos_runs_container = None
 
 
 def _now_iso() -> str:
+    """Return the current UTC time as an ISO 8601 formatted string."""
     return datetime.now(UTC).isoformat()
 
 
 def _safe_json_loads(value: Any, default: Any) -> Any:
+    """Safely parse a JSON-encoded value, falling back to a default on failure.
+
+    Handles the common case where database fields may be stored as JSON
+    strings, already-parsed dicts/lists, or null.
+
+    Args:
+        value: The value to decode. May be a JSON string, dict, list, or None.
+        default: Fallback value returned when ``value`` is None or an
+            unparseable string.
+
+    Returns:
+        The parsed dict/list, or ``default`` if parsing fails.
+    """
     if value is None:
         return default
     if isinstance(value, (dict, list)):
@@ -35,6 +49,20 @@ def _safe_json_loads(value: Any, default: Any) -> Any:
 
 
 def _thread_to_dict(row: dict[str, Any]) -> dict[str, Any]:
+    """Convert a raw database row into the canonical thread dictionary format.
+
+    Extracts and parses JSON-encoded fields (messages, values, metadata)
+    and normalizes field names for consistent downstream consumption.
+
+    Args:
+        row: A dictionary representing a database row with keys like
+            ``thread_id``, ``created_at``, ``updated_at``, ``values``
+            (or ``values_json``), ``messages``, ``metadata``, ``status``,
+            and ``user_id``.
+
+    Returns:
+        A normalized thread dictionary with all JSON fields parsed.
+    """
     messages = _safe_json_loads(row.get("messages"), [])
     values = _safe_json_loads(row.get("values") if "values" in row else row.get("values_json"), {})
     metadata = _safe_json_loads(row.get("metadata"), {})
@@ -54,6 +82,17 @@ def _thread_to_dict(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _run_to_dict(row: dict[str, Any]) -> dict[str, Any]:
+    """Convert a raw database row into the canonical run dictionary format.
+
+    Args:
+        row: A dictionary representing a database row with keys like
+            ``run_id``, ``thread_id``, ``assistant_id``, ``status``,
+            ``created_at``, ``updated_at``, ``metadata``, ``kwargs``,
+            ``multitask_strategy``, and ``error``.
+
+    Returns:
+        A normalized run dictionary with JSON fields parsed.
+    """
     return {
         "run_id": row["run_id"],
         "thread_id": row["thread_id"],
@@ -69,6 +108,15 @@ def _run_to_dict(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _get_sqlite_conn():
+    """Return the module-level SQLite connection, creating it lazily on first call.
+
+    Configures WAL journal mode, a 30-second busy timeout, and row-based
+    access for dictionary-like result rows.  Access is serialized through
+    ``_sqlite_lock`` by callers, not internally.
+
+    Returns:
+        An open ``sqlite3.Connection`` with ``row_factory = sqlite3.Row``.
+    """
     global _sqlite_conn
     if _sqlite_conn is None:
         import sqlite3
@@ -85,6 +133,16 @@ def _get_sqlite_conn():
 
 
 def _init_sqlite() -> None:
+    """Initialize the SQLite database schema with migration support.
+
+    Creates the ``threads`` and ``runs`` tables if they do not exist, then
+    applies schema migrations for any missing columns (``updated_at``,
+    ``state_updated_at``, ``metadata``, ``status``, ``kwargs``,
+    ``multitask_strategy``) to support upgrades from older schemas.
+
+    Silently warns on locking errors (common on CIFS network mounts) and
+    attempts to continue with migrations.
+    """
     try:
         with _sqlite_lock:
             conn = _get_sqlite_conn()
@@ -118,6 +176,15 @@ def _init_sqlite() -> None:
 
 
 def _init_postgres() -> None:
+    """Initialize the PostgreSQL connection pool and ensure the schema exists.
+
+    Creates a ``psycopg_pool.ConnectionPool`` from ``DATABASE_URL``,
+    ``POSTGRES_URL``, or individual ``POSTGRES_*`` environment variables.
+    Then creates tables and applies schema migrations for missing columns.
+
+    Raises:
+        ImportError: If ``psycopg`` or ``psycopg_pool`` is not installed.
+    """
     global _postgres_pool
     if _postgres_pool is None:
         try:
@@ -156,6 +223,17 @@ def _init_postgres() -> None:
 
 
 def _init_cosmos_db() -> None:
+    """Initialize Azure CosmosDB containers for threads and runs.
+
+    Creates the database and ``threads``/``runs`` containers if they do not
+    already exist, partitioned by ``/id``.  Supports authentication via
+    connection string (``COSMOS_CONNECTION_STRING``) or endpoint + key
+    (``COSMOSDB_ENDPOINT``, ``COSMOSDB_KEY``).
+
+    Raises:
+        ImportError: If ``azure-cosmos`` is not installed.
+        ValueError: If no CosmosDB credentials are configured.
+    """
     global _cosmos_threads_container, _cosmos_runs_container
     if _cosmos_threads_container is not None:
         return
@@ -187,6 +265,14 @@ def _init_cosmos_db() -> None:
 
 
 def init_db() -> None:
+    """Initialize the database based on the ``DB_TYPE`` environment variable.
+
+    Dispatches to the appropriate backend-specific initializer:
+    ``sqlite`` (default), ``postgres``, or ``cosmosdb``.
+
+    Raises:
+        ValueError: If ``DB_TYPE`` is set to an unsupported value.
+    """
     db_type = os.environ.get("DB_TYPE", "sqlite").lower()
     if db_type == "sqlite":
         _init_sqlite()
@@ -199,6 +285,15 @@ def init_db() -> None:
 
 
 def get_thread(thread_id: str) -> dict[str, Any] | None:
+    """Retrieve a single thread by its ID.
+
+    Args:
+        thread_id: The unique thread identifier.
+
+    Returns:
+        A normalized thread dictionary, or ``None`` if no thread with the
+        given ID exists.
+    """
     db_type = os.environ.get("DB_TYPE", "sqlite").lower()
     if db_type == "sqlite":
         with _sqlite_lock:
@@ -248,6 +343,17 @@ def create_thread(
         status: str = "idle",
         values: dict[str, Any] | None = None,
 ) -> None:
+    """Insert a new thread record into the database.
+
+    Args:
+        thread_id: The unique thread identifier.
+        user_id: The owner of the thread.
+        created_at: ISO 8601 creation timestamp.
+        metadata: Optional key-value metadata. Defaults to empty dict.
+        status: Thread status string. Defaults to ``"idle"``.
+        values: Optional initial state values dict. An empty ``messages``
+            list is set by default.
+    """
     metadata = metadata or {}
     values = dict(values or {})
     values.setdefault("messages", [])
@@ -315,6 +421,23 @@ def update_thread(
         status: str | None = None,
         updated_at: str | None = None,
 ) -> None:
+    """Update a thread's messages, values, metadata, and status.
+
+    If the thread does not exist, the call is a no-op.  When ``metadata``
+    is ``None``, the existing metadata is preserved; otherwise it is
+    replaced.
+
+    Args:
+        thread_id: The unique thread identifier.
+        messages: The full message list to store.
+        values: State values dict.  ``values["messages"]`` is set to the
+            ``messages`` argument.
+        metadata: If provided, replaces the existing metadata. If ``None``,
+            the current metadata is kept.
+        status: New status string. Defaults to the current status or
+            ``"idle"``.
+        updated_at: ISO 8601 timestamp. Defaults to the current UTC time.
+    """
     current = get_thread(thread_id)
     if current is None:
         return
@@ -372,6 +495,16 @@ def update_thread(
 
 
 def update_thread_metadata(thread_id: str, metadata: dict[str, Any]) -> bool:
+    """Merge metadata keys into a thread's existing metadata.
+
+    Args:
+        thread_id: The unique thread identifier.
+        metadata: Key-value pairs to merge on top of the existing metadata.
+
+    Returns:
+        ``True`` if the thread exists and metadata was updated, ``False``
+        if the thread was not found.
+    """
     thread = get_thread(thread_id)
     if thread is None:
         return False
@@ -400,6 +533,16 @@ def update_thread_metadata(thread_id: str, metadata: dict[str, Any]) -> bool:
 
 
 def update_thread_state(thread_id: str, values: dict[str, Any]) -> bool:
+    """Merge state values into a thread, preserving existing messages.
+
+    Args:
+        thread_id: The unique thread identifier.
+        values: State key-value pairs to merge.
+
+    Returns:
+        ``True`` if the thread exists and state was updated, ``False``
+        if the thread was not found.
+    """
     thread = get_thread(thread_id)
     if thread is None:
         return False
@@ -418,6 +561,15 @@ def update_thread_state(thread_id: str, values: dict[str, Any]) -> bool:
 
 
 def delete_thread(thread_id: str) -> bool:
+    """Delete a thread and all its associated runs.
+
+    Args:
+        thread_id: The unique thread identifier.
+
+    Returns:
+        ``True`` if the thread existed and was deleted, ``False`` if it
+        was not found.
+    """
     thread = get_thread(thread_id)
     if thread is None:
         return False
@@ -457,6 +609,24 @@ def search_threads(
         metadata: dict[str, Any] | None = None,
         user_id: str | None = None,
 ) -> list[dict[str, Any]]:
+    """Search and filter threads with pagination and sorting.
+
+    Args:
+        limit: Maximum number of threads to return (1–1000). Defaults to 10.
+        offset: Number of threads to skip for pagination. Defaults to 0.
+        sort_by: Column to sort by. Must be one of ``"thread_id"``,
+            ``"status"``, ``"created_at"``, ``"updated_at"``, or
+            ``"state_updated_at"``. Defaults to ``"updated_at"``.
+        sort_order: ``"asc"`` or ``"desc"``. Defaults to ``"desc"``.
+        status: Optional status filter (exact match).
+        metadata: Optional metadata key-value filters (exact match on each
+            key). Only threads whose metadata contains all specified
+            key-value pairs are returned.
+        user_id: Optional user filter.
+
+    Returns:
+        A list of normalized thread dictionaries matching all filters.
+    """
     limit = max(1, min(int(limit or 10), 1000))
     offset = max(0, int(offset or 0))
     sort_by = sort_by if sort_by in {"thread_id", "status", "created_at", "updated_at",
@@ -503,6 +673,7 @@ def search_threads(
         items.sort(key=lambda x: x.get(sort_by) or "", reverse=(sort_order == "desc"))
 
     def _match(item: dict[str, Any]) -> bool:
+        """Check if a thread item matches all filter criteria."""
         if status is not None and item.get("status") != status:
             return False
         if user_id and item.get("user_id") not in {None, "", user_id}:
@@ -518,6 +689,15 @@ def search_threads(
 
 
 def get_run(run_id: str) -> dict[str, Any] | None:
+    """Retrieve a single run by its ID.
+
+    Args:
+        run_id: The unique run identifier.
+
+    Returns:
+        A normalized run dictionary, or ``None`` if no run with the given
+        ID exists.
+    """
     db_type = os.environ.get("DB_TYPE", "sqlite").lower()
     if db_type == "sqlite":
         with _sqlite_lock:
@@ -561,6 +741,16 @@ def get_run(run_id: str) -> dict[str, Any] | None:
 
 
 def list_runs(thread_id: str, limit: int = 10, offset: int = 0) -> list[dict[str, Any]]:
+    """List runs for a thread, ordered by creation time (newest first).
+
+    Args:
+        thread_id: The thread whose runs to list.
+        limit: Maximum number of runs to return (1–1000). Defaults to 10.
+        offset: Number of runs to skip for pagination. Defaults to 0.
+
+    Returns:
+        A list of normalized run dictionaries.
+    """
     limit = max(1, min(int(limit or 10), 1000))
     offset = max(0, int(offset or 0))
     db_type = os.environ.get("DB_TYPE", "sqlite").lower()
@@ -615,6 +805,15 @@ def create_run(
         created_at: str,
         multitask_strategy: str | None = None,
 ) -> None:
+    """Insert a new run record with status ``"pending"``.
+
+    Args:
+        run_id: The unique run identifier.
+        thread_id: The thread this run belongs to.
+        assistant_id: The assistant configuration ID.
+        created_at: ISO 8601 creation timestamp.
+        multitask_strategy: Queueing strategy. Defaults to ``"enqueue"``.
+    """
     strategy = multitask_strategy or "enqueue"
     db_type = os.environ.get("DB_TYPE", "sqlite").lower()
 
@@ -676,6 +875,14 @@ def create_run(
 
 
 def update_run_status(run_id: str, status: str, error: str | None = None) -> None:
+    """Update a run's status and optional error message.
+
+    Args:
+        run_id: The unique run identifier.
+        status: New status string (e.g., ``"pending"``, ``"running"``,
+            ``"success"``, ``"error"``, ``"cancelled"``).
+        error: Optional error description. Only written when not ``None``.
+    """
     now = _now_iso()
     db_type = os.environ.get("DB_TYPE", "sqlite").lower()
 
@@ -701,6 +908,14 @@ def update_run_status(run_id: str, status: str, error: str | None = None) -> Non
 
 
 def cancel_running_runs(thread_id: str) -> None:
+    """Cancel all pending or running runs for a given thread.
+
+    Sets the status of every non-terminal run belonging to ``thread_id``
+    to ``"cancelled"``.
+
+    Args:
+        thread_id: The thread whose active runs should be cancelled.
+    """
     db_type = os.environ.get("DB_TYPE", "sqlite").lower()
 
     if db_type == "sqlite":

@@ -25,7 +25,17 @@ logger = setup_logger(__name__)
 
 
 class SkillInfo:
-    """Information about a single skill."""
+    """Information about a single skill.
+
+    Attributes:
+        skill_id: Unique skill identifier (directory name).
+        name: Human-readable skill name.
+        description: Short description for routing decisions.
+        instructions: Full Markdown instructions for the agent.
+        path: Filesystem path to the skill directory.
+        keywords: List of trigger keywords for matching.
+        metadata: Arbitrary frontmatter metadata beyond name/description/keywords.
+    """
 
     def __init__(
             self,
@@ -37,6 +47,17 @@ class SkillInfo:
             keywords: list[str] | None = None,
             metadata: dict[str, Any] | None = None,
     ):
+        """Initialize a SkillInfo instance.
+
+        Args:
+            skill_id: Unique skill identifier (directory name).
+            name: Human-readable skill name.
+            description: Short description for routing decisions.
+            instructions: Full Markdown instructions for the agent.
+            path: Filesystem path to the skill directory.
+            keywords: List of trigger keywords for matching.
+            metadata: Arbitrary frontmatter metadata.
+        """
         self.skill_id = skill_id
         self.name = name
         self.description = description
@@ -378,6 +399,20 @@ class SkillRegistry:
         return f"SkillRegistry(num_skills={self.num_skills}, dirs={self.skills_dirs})"
 
     def _extract_schema_block(self, body: str, path: Path) -> tuple[str, dict[str, Any] | None]:
+        """Extract a JSON schema block from the ``## Schema`` section of a SKILL.md body.
+
+        Args:
+            body: The full Markdown body after the YAML frontmatter.
+            path: Path to the SKILL.md file (used for error messages).
+
+        Returns:
+            A tuple of ``(instructions_without_schema, schema_dict)``, or
+            ``(body, None)`` if no ``## Schema`` section is present.
+
+        Raises:
+            ValueError: If a ``## Schema`` heading exists but no JSON block
+                follows.
+        """
         schema_heading = self._SCHEMA_SECTION_RE.search(body)
         if not schema_heading:
             return body.strip(), None
@@ -392,6 +427,20 @@ class SkillRegistry:
         return instructions, schema
 
     def _extract_render_spec(self, body: str, path: Path) -> list[dict[str, Any]] | None:
+        """Extract a JSON render spec from the ``## Render Spec`` section of a SKILL.md body.
+
+        Args:
+            body: The full Markdown body after the YAML frontmatter.
+            path: Path to the SKILL.md file (used for error messages).
+
+        Returns:
+            A list of render-spec dicts, or ``None`` if no ``## Render Spec``
+            section is present.
+
+        Raises:
+            ValueError: If a ``## Render Spec`` heading exists but no valid
+                JSON array block follows.
+        """
         render_heading = self._RENDER_SPEC_SECTION_RE.search(body)
         if not render_heading:
             return None
@@ -435,7 +484,13 @@ class SkillRegistry:
             ) from exc
 
     def format_skill_catalog(self) -> str:
-        """Format a short skill catalog for prompt text."""
+        """Format a skill catalog for injection into agent prompt text.
+
+        Returns:
+            A Markdown-formatted string listing each skill's ID, type
+            (structured JSON vs. unstructured Markdown), title, and
+            description.
+        """
         lines = []
         for skill_id in self.list_skill_ids():
             definition = self.get_skill_definition(skill_id)
@@ -449,8 +504,13 @@ class SkillRegistry:
     def format_skill_quality_guidelines(self) -> str:
         """Aggregate Quality Guidelines from all skill SKILL.md files into a prompt block.
 
-        Only includes skills that have a ## Quality Guidelines section. Each skill's
-        guidelines are prefaced with the skill name so the LLM knows which skill they apply to.
+        Only includes skills that have a ``## Quality Guidelines`` section.
+        Each skill's guidelines are prefaced with the skill name so the LLM
+        knows which skill they apply to.
+
+        Returns:
+            A Markdown-formatted string with all quality guidelines, or an
+            empty string if no skills define guidelines.
         """
         blocks: list[str] = []
         for skill_id in self.list_skill_ids():

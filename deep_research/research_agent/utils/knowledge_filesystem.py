@@ -1,3 +1,9 @@
+"""Knowledge filesystem configuration and document management tools.
+
+Defines safety limits for file operations (max sizes, read limits) and provides
+routines for listing, globbing, reading, and querying document workspace sections.
+"""
+
 from __future__ import annotations
 
 import os
@@ -170,6 +176,17 @@ def _build_large_file_preview(file_path: Path, file_content: str) -> str:
 
 
 def _split_markdown_selector(file_path: str) -> tuple[str, str | None]:
+    """Split a file path into base path and optional section selector.
+
+    Supports the ``file.md#Section Title`` convention for targeting a
+    specific heading within a Markdown file.
+
+    Args:
+        file_path: A file path possibly containing a ``#`` section selector.
+
+    Returns:
+        A tuple of ``(base_path, selector_or_none)``.
+    """
     if "#" not in file_path:
         return file_path, None
     base_path, selector = file_path.split("#", 1)
@@ -178,6 +195,16 @@ def _split_markdown_selector(file_path: str) -> tuple[str, str | None]:
 
 
 def _normalize_heading_text(value: str) -> str:
+    """Normalize heading text for case-insensitive comparison.
+
+    Strips leading ``#`` markers, collapses whitespace, and lowercases.
+
+    Args:
+        value: Raw heading text (e.g., ``"##  Introduction  "``).
+
+    Returns:
+        A normalized, lowercased string suitable for comparison.
+    """
     value = value.strip()
     value = re.sub(r"^#+\s*", "", value)
     value = re.sub(r"\s+", " ", value)
@@ -185,6 +212,14 @@ def _normalize_heading_text(value: str) -> str:
 
 
 def _extract_markdown_sections(file_content: str) -> list[dict[str, str]]:
+    """Parse Markdown content into a list of heading + body sections.
+
+    Args:
+        file_content: Raw Markdown text.
+
+    Returns:
+        A list of dicts, each with ``"heading"`` and ``"content"`` keys.
+    """
     sections: list[dict[str, str]] = []
     current_heading: str | None = None
     current_lines: list[str] = []
@@ -218,6 +253,17 @@ def _extract_markdown_sections(file_content: str) -> list[dict[str, str]]:
 
 
 def _read_markdown_section(file_path: Path, file_content: str, selector: str) -> str:
+    """Return the body text of a specific Markdown section by heading.
+
+    Args:
+        file_path: Path to the file (used for error messages).
+        file_content: The full Markdown content.
+        selector: The heading text to match (case-insensitive).
+
+    Returns:
+        The section body if found, or an error message listing available
+        headings.
+    """
     sections = _extract_markdown_sections(file_content)
     normalized_selector = _normalize_heading_text(selector)
 
@@ -252,6 +298,16 @@ def _get_extracted_path(
 def _resolve_doc_output_subfolder(
         folder: Path
 ) -> Path:
+    """Resolve the output subfolder for extracted document content.
+
+    Ensures extracted files land inside the configured ``OUTPUT_FOLDER``.
+
+    Args:
+        folder: The source document folder.
+
+    Returns:
+        The resolved output directory as a ``Path``.
+    """
     reports_output_folder = os.environ.get("OUTPUT_FOLDER", "./output")
     configured_output = Path(os.environ.get("OUTPUT_FOLDER", reports_output_folder))
     if configured_output.name == folder.name:
@@ -266,6 +322,16 @@ def _save_extracted_content(
         content: str,
         output_folder: Path | None = None
 ) -> str:
+    """Save extracted document text to a cached file for reuse.
+
+    Args:
+        original_file_path: Path to the source document.
+        content: Extracted text content to save.
+        output_folder: Target directory. Defaults to ``OUTPUT_FOLDER``.
+
+    Returns:
+        The normalized path to the saved extracted file.
+    """
     if output_folder:
         output_dir = output_folder
     else:
@@ -946,6 +1012,7 @@ def get_active_cited_response_path(state_files: dict | None, existing_cited_resp
     existing_in_state = [p for p in state_files if p.startswith("/cited_response")]
     if existing_in_state:
         def get_suffix_num(path: str) -> int:
+            """Extract the numeric suffix from a cited_response path."""
             match = re.search(r'_(\d+)\.md$', path)
             if match:
                 return int(match.group(1))

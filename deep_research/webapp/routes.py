@@ -48,6 +48,7 @@ def _webapp_module():
 # ── Health ────────────────────────────────────────────────────────────────────
 
 def register_health_routes(app) -> None:
+    """Register the ``/health`` endpoint on the FastAPI app."""
     @app.get("/health")
     async def health_check():
         """Health check endpoint."""
@@ -65,6 +66,7 @@ def register_health_routes(app) -> None:
 # ── Storage ───────────────────────────────────────────────────────────────────
 
 def register_storage_routes(app) -> None:
+    """Register the ``/storage/info`` endpoint on the FastAPI app."""
     @app.get("/storage/info")
     async def storage_info(request: Request, x_api_key: str | None = Header(None)):
         """Get server storage details and model factory diagnostics."""
@@ -97,6 +99,7 @@ def register_storage_routes(app) -> None:
 # ── Document CRUD ─────────────────────────────────────────────────────────────
 
 def register_document_routes(app) -> None:
+    """Register document CRUD endpoints (view, extract, upload, list, download, delete)."""
     @app.get("/documents/view/{filename}")
     async def view_document(
             request: Request,
@@ -432,6 +435,7 @@ def register_document_routes(app) -> None:
 # ── OAuth Authentication ──────────────────────────────────────────────────────
 
 def register_oauth_routes(app) -> None:
+    """Register OAuth authentication endpoints (login, callback, validate, refresh, logout)."""
     @app.get("/auth/login/{provider}")
     async def oauth_login(provider: str, request: Request):
         """Initiate OAuth login with Google or GitHub."""
@@ -625,6 +629,7 @@ def register_oauth_routes(app) -> None:
 # ── Skills ────────────────────────────────────────────────────────────────────
 
 def register_skills_routes(app) -> None:
+    """Register skill management endpoints (list, upload, delete)."""
     @app.get("/skills")
     async def list_skills(request: Request, x_api_key: str | None = Header(None)):
         """List all available skills from deep_research."""
@@ -905,6 +910,7 @@ def _cleanup_expired() -> None:
 
 
 def register_chat_thread_routes(app) -> None:
+    """Register chat thread state and management endpoints."""
     @app.get("/chat_threads/{thread_id}/state")
     async def get_chat_thread_state(thread_id: str):
         """Return thread state values.  No auth — thread ID is the access key."""

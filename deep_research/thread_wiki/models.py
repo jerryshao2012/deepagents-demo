@@ -1,4 +1,8 @@
-"""Data models for thread-level LLM Wiki integration."""
+"""Data models and Enums for thread-level LLM Wiki integrations.
+
+Defines schemas and phases of the wiki ingest lifecycle, configuration objects,
+and citation models to trace source information across threads.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,8 @@
-"""Robust JSON parsing utilities using json-repair."""
+"""Robust JSON parsing utilities with automatic repair.
+
+Utilizes `json-repair` to automatically fix common formatting problems (like single
+quotes, missing/trailing commas, or unquoted keys) before attempting standard parsing.
+"""
 
 from __future__ import annotations
 

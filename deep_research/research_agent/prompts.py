@@ -1,4 +1,8 @@
-"""Prompt templates and tool descriptions for the research deepagent."""
+"""Prompt templates and instructional guidelines for Deep Research agents.
+
+Defines instruction strings for the orchestrator workflow, researcher protocol,
+sub-agent task delegations, report writing guidelines, and CLI agent descriptions.
+"""
 
 RESEARCH_WORKFLOW_INSTRUCTIONS = """# Research Workflow
 

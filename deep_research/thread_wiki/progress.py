@@ -132,7 +132,11 @@ async def cancel_ingest(
 
 
 async def cleanup_terminal(thread_id: str) -> None:
-    """Remove a terminal ingest entry from the registry."""
+    """Remove a terminal (finished, cancelled, or errored) ingest entry from the registry.
+
+    Args:
+        thread_id: The thread whose ingest entry should be cleaned up.
+    """
     async with _registry_lock:
         entry = _active_ingests.get(thread_id)
         if entry is not None and (entry.task.done() or entry.progress.is_terminal()):

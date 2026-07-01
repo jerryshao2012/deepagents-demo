@@ -1,3 +1,9 @@
+"""Evaluation metrics tracking and logging utilities.
+
+Compiles test manifests and logs execution run stats (including token counts,
+durations, tool invocations, and failures) to files for evaluation comparison.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -67,6 +73,19 @@ def get_git_sha(cwd: Path | None = None) -> str:
 
 
 def _message_role_name_content(message: Any) -> tuple[str, str, str]:
+    """Extract the role, name, and content text from a message object or dict.
+
+    Handles both dict-style and object-style messages, normalizing content
+    that may be a string, list of blocks, or mixed types.
+
+    Args:
+        message: A message as a dict or object with ``role``/``type``,
+            ``name``, and ``content`` attributes.
+
+    Returns:
+        A tuple of ``(role, name, content_text)`` where all values are
+        strings.
+    """
     if isinstance(message, dict):
         role = str(message.get("role", ""))
         name = str(message.get("name", "") or "")
@@ -93,6 +112,15 @@ def _message_role_name_content(message: Any) -> tuple[str, str, str]:
 
 
 def _extract_tool_call_count(message: Any) -> int:
+    """Count the number of tool calls in a message.
+
+    Args:
+        message: A message as a dict or object with an optional
+            ``tool_calls`` attribute.
+
+    Returns:
+        The number of tool calls, or 0 if none are present.
+    """
     if isinstance(message, dict):
         tool_calls = message.get("tool_calls")
     else:
@@ -660,6 +688,18 @@ def latest_baseline(records: list[dict[str, Any]], manifest_hash_value: str) -> 
 
 
 def _metric_verdict(candidate_value: float, baseline_value: float, tolerance: float) -> str:
+    """Classify a candidate metric relative to a baseline within a tolerance band.
+
+    Args:
+        candidate_value: The value measured in the current run.
+        baseline_value: The value from the baseline run.
+        tolerance: Fractional tolerance (e.g., 0.20 for ±20%).
+
+    Returns:
+        ``"worse"`` if the candidate exceeds baseline + tolerance,
+        ``"better"`` if it is below baseline − tolerance, or ``"same"``
+        otherwise.
+    """
     if candidate_value > baseline_value * (1 + tolerance):
         return "worse"
     if candidate_value < baseline_value * (1 - tolerance):
@@ -859,7 +899,15 @@ async def log_server_metrics(
 
 
 async def _write_metrics_to_file(history_path: Path, record: dict) -> None:
-    """Write metrics record to file using async I/O to avoid blocking."""
+    """Write a metrics record to a JSONL file using async I/O.
+
+    Offloads the actual file write to a thread-pool executor so the event
+    loop is never blocked by synchronous filesystem operations.
+
+    Args:
+        history_path: Path to the JSONL history file.
+        record: Metrics record dict to append as a single JSON line.
+    """
     import json
     import asyncio
 

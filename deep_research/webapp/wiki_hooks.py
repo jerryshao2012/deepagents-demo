@@ -1,7 +1,7 @@
-"""Background wiki hooks triggered by document upload / delete events.
+"""Event-driven background hooks for automatic thread wiki management.
 
-These are fire-and-forget async helpers; failures are logged but never
-propagated to the HTTP response that triggered them.
+Launches fire-and-forget asynchronous tasks to auto-ingest newly uploaded documents
+or run database lint reconciliation sweeps after document delete events.
 """
 
 from __future__ import annotations

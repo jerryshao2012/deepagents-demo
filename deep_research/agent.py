@@ -1,3 +1,10 @@
+"""Core LangGraph Deep Research agent workflow and orchestrator configuration.
+
+Coordinates multi-agent research tasks, managing state transitions, memory
+checkpointers, file reading/writing tools, sub-agent delegation, and custom
+skills mapping.
+"""
+
 import asyncio
 import concurrent.futures
 import hashlib

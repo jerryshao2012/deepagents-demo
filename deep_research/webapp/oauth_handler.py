@@ -1,4 +1,8 @@
-"""OAuth2 authentication with Google and GitHub providers."""
+"""OAuth2 authentication handlers for third-party providers.
+
+Registers clients for Google and GitHub authentication, manages active user sessions,
+and handles cookie lifetimes and state checks.
+"""
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -42,9 +46,17 @@ github = oauth.register(
 
 
 class OAuthUserManager:
-    """Manages OAuth user sessions and token storage."""
+    """Manages OAuth user sessions and token storage.
+
+    Sessions are stored in memory (a plain dict) and expire after 24 hours.
+    In production this should be backed by Redis or a database.
+
+    Attributes:
+        sessions: Dictionary mapping session tokens to user data/metadata.
+    """
 
     def __init__(self):
+        """Initialize the session store (in-memory dict)."""
         # In production, use Redis or database for session storage
         self.sessions = {}
 
@@ -102,7 +114,7 @@ class OAuthUserManager:
         return session["user_data"]
 
     def cleanup_expired_sessions(self):
-        """Remove expired sessions."""
+        """Remove all sessions whose expiry time has passed."""
         now = datetime.now(timezone.utc)
         expired = [
             token

@@ -120,8 +120,16 @@ if [ $? -ne 0 ]; then
   echo "❌ Container push failed for '$FULL_IMAGE_NAME'."
   exit 1
 fi
-#container build --platform linux/amd64 -t docker.io/$DOCKER_HUB_USERNAME/deep-research-agent:latest -t docker.io/$DOCKER_HUB_USERNAME/deep-research-agent:$BUILD_VERSION .
-#container image push docker.io/$DOCKER_HUB_USERNAME/deep-research-agent:$BUILD_VERSION
+
+VERSIONED_IMAGE_NAME="docker.io/$DOCKER_HUB_USERNAME/deep-research-agent:$BUILD_VERSION"
+echo "🏷️  Tagging versioned image: $VERSIONED_IMAGE_NAME"
+container image tag $FULL_IMAGE_NAME $VERSIONED_IMAGE_NAME
+echo "🚀 Pushing versioned image..."
+container image push $VERSIONED_IMAGE_NAME
+if [ $? -ne 0 ]; then
+  echo "❌ Container push failed for '$VERSIONED_IMAGE_NAME'."
+  exit 1
+fi
 echo "✅ Image built and pushed successfully"
 end_step
 
