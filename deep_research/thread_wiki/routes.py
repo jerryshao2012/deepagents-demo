@@ -611,6 +611,78 @@ async def get_wiki_insights(
     )
 
 
+class GraphNodeOut(BaseModel):
+    """A node in the wiki knowledge graph."""
+
+    id: str
+    title: str
+    category: str = "uncategorized"
+    tags: list[str] = []
+    community_id: int | None = None
+
+
+class GraphEdgeOut(BaseModel):
+    """An edge (link) in the wiki knowledge graph."""
+
+    source: str
+    target: str
+    weight: float = 1.0
+
+
+class CommunityOut(BaseModel):
+    """A knowledge community."""
+
+    id: int
+    cohesion: float
+    size: int
+
+
+class WikiGraphResponse(BaseModel):
+    """Response from the wiki graph endpoint."""
+
+    thread_id: str
+    nodes: list[GraphNodeOut] = []
+    edges: list[GraphEdgeOut] = []
+    communities: list[CommunityOut] = []
+    total_pages: int = 0
+    total_links: int = 0
+
+
+@router.get(
+    "/threads/{thread_id}/wiki/graph",
+    response_model=WikiGraphResponse,
+)
+async def get_wiki_graph(
+    thread_id: str,
+    current_user=Depends(_wiki_get_current_user),
+) -> WikiGraphResponse:
+    """Get the wiki knowledge graph as nodes and edges for visualization.
+
+    Returns page nodes with frontmatter metadata (title, category, tags),
+    wikilink edges between pages, and Louvain community assignments.
+    """
+    from thread_wiki.service import _build_graph_payload
+
+    paths = _resolve_paths(thread_id)
+
+    if not paths.wiki_dir.exists():
+        raise HTTPException(
+            status_code=409,
+            detail="Wiki has not been initialized. Run ingest first.",
+        )
+
+    payload = await asyncio.to_thread(_build_graph_payload, paths.wiki_dir)
+
+    return WikiGraphResponse(
+        thread_id=thread_id,
+        nodes=[GraphNodeOut(**n) for n in payload["nodes"]],
+        edges=[GraphEdgeOut(**e) for e in payload["edges"]],
+        communities=[CommunityOut(**c) for c in payload["communities"]],
+        total_pages=len(payload["nodes"]),
+        total_links=len(payload["edges"]),
+    )
+
+
 @router.delete(
     "/threads/{thread_id}/wiki",
 )

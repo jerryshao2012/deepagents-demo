@@ -22,8 +22,13 @@ async def trigger_wiki_auto_ingest(thread_id: str) -> None:
         from thread_wiki import progress as wiki_progress
         from thread_wiki.models import ThreadWikiPaths, _resolve_wiki_base_dir
 
-        base_dir = _resolve_wiki_base_dir(Path(__file__).resolve().parent.parent)
-        paths = ThreadWikiPaths.resolve(thread_id, base_dir)
+        # Path.resolve() calls os.path.realpath → os.getcwd (blocking I/O).
+        # Wrap the entire resolution in a thread to avoid blocking the event loop.
+        def _resolve_paths() -> ThreadWikiPaths:
+            base_dir = _resolve_wiki_base_dir(Path(__file__).resolve().parent.parent)
+            return ThreadWikiPaths.resolve(thread_id, base_dir)
+
+        paths = await asyncio.to_thread(_resolve_paths)
         topic = f"Thread {thread_id[:8]}"
 
         # Register progress with a placeholder task first.
@@ -90,8 +95,11 @@ async def trigger_wiki_delete_hooks(
         # Step 2 — cascade-delete references to the deleted source.
         from thread_wiki.models import _resolve_wiki_base_dir
 
-        base_dir = _resolve_wiki_base_dir(Path(__file__).resolve().parent.parent)
-        paths = ThreadWikiPaths.resolve(thread_id, base_dir)
+        def _resolve_paths() -> ThreadWikiPaths:
+            base_dir = _resolve_wiki_base_dir(Path(__file__).resolve().parent.parent)
+            return ThreadWikiPaths.resolve(thread_id, base_dir)
+
+        paths = await asyncio.to_thread(_resolve_paths)
         if paths.wiki_dir.exists() and deleted_filename:
             try:
                 report = _cascade_delete_source_references(

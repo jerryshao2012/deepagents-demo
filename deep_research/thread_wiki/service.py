@@ -1047,7 +1047,7 @@ def _run_agent(
     from langchain_core.runnables import RunnableConfig
 
     _WIKI_AGENT_RECURSION_LIMIT = int(
-        __import__("os").getenv("WIKI_AGENT_RECURSION_LIMIT", "50")
+        __import__("os").getenv("WIKI_AGENT_RECURSION_LIMIT", "100")
     )
     # Timeout for the entire agent invocation (seconds).
     _WIKI_AGENT_TIMEOUT = int(
@@ -1395,6 +1395,65 @@ def _analyze_graph(wiki_dir: Path) -> dict:
         "communities": communities,
         "relevance_edges": relevance_result.get("edges", []),
         "graph_insights": graph_insights,
+    }
+
+
+def _build_graph_payload(wiki_dir: Path) -> dict:
+    """Build a serializable node+edge graph for frontend visualization.
+
+    Returns a dict with:
+    - ``nodes``: list of {id, title, category, tags, community_id}
+    - ``edges``: list of {source, target, weight}
+    - ``communities``: list of {id, cohesion, size}
+    """
+    from .models import parse_frontmatter
+
+    wiki_content_dir = wiki_dir / "wiki"
+    G, name_to_rel, outlinks = _build_wiki_graph(wiki_dir)
+
+    communities = _detect_communities(wiki_dir)
+    node_to_community: dict[str, int] = {}
+    for comm in communities:
+        for node in comm.pages:
+            node_to_community[node] = comm.id
+
+    nodes: list[dict] = []
+    pages = [
+        p for p in sorted(wiki_content_dir.rglob("*.md")) if p.name != "index.md"
+    ]
+    for page in pages:
+        rel = page.relative_to(wiki_content_dir).as_posix()
+        try:
+            content = page.read_text(encoding="utf-8")
+        except Exception:
+            content = ""
+        meta, _ = parse_frontmatter(content)
+        nodes.append(
+            {
+                "id": rel,
+                "title": meta.title or page.stem.replace("-", " ").title(),
+                "category": meta.category,
+                "tags": meta.tags,
+                "community_id": node_to_community.get(rel),
+            }
+        )
+
+    edges: list[dict] = []
+    seen_edges: set[tuple[str, str]] = set()
+    for source, targets in outlinks.items():
+        for target in targets:
+            key = (source, target) if source < target else (target, source)
+            if key not in seen_edges:
+                seen_edges.add(key)
+                edges.append({"source": source, "target": target, "weight": 1.0})
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "communities": [
+            {"id": c.id, "cohesion": c.cohesion, "size": c.size}
+            for c in communities
+        ],
     }
 
 

@@ -129,23 +129,20 @@ class IngestProgress:
         return self.phase in TERMINAL_PHASES
 
     def _compute_elapsed_eta(self) -> tuple[float | None, float | None]:
-        """Compute elapsed seconds since phase start and estimated ETA.
+        """Compute elapsed seconds since ingest start.
 
-        Returns (elapsed_seconds, eta_seconds).  Both are None when
-        the phase start time or progress percentage is unavailable.
+        Returns (elapsed_seconds, None).  ETA is always None — phase-based
+        progress percentages are milestones, not linear work completion, so
+        linear extrapolation gives misleading estimates.
         """
         elapsed: float | None = None
-        eta: float | None = None
-        if self.phase_started_at:
+        if self.started_at:
             try:
-                phase_start = datetime.fromisoformat(self.phase_started_at)
-                elapsed = (datetime.now(UTC) - phase_start).total_seconds()
-                if self.progress > 0 and self.progress < 100:
-                    total_est = elapsed * 100.0 / self.progress
-                    eta = max(0.0, total_est - elapsed)
-            except (ValueError, TypeError, ZeroDivisionError):
+                start = datetime.fromisoformat(self.started_at)
+                elapsed = (datetime.now(UTC) - start).total_seconds()
+            except (ValueError, TypeError):
                 pass
-        return elapsed, eta
+        return elapsed, None
 
     def to_dict(self) -> dict:
         """Serialize progress state for API responses."""
