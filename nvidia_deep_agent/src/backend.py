@@ -5,6 +5,11 @@ from pathlib import Path
 import modal
 from langchain_modal import ModalSandbox
 
+__all__ = [
+    "create_backend",  # Factory function to create the Modal sandbox backend.
+]
+
+
 # --- Sandbox ---
 # Modal sandbox with NVIDIA RAPIDS image.
 # Authenticate first: `modal setup`

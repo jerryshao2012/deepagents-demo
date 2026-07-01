@@ -10,6 +10,11 @@ from markdownify import markdownify
 from tavily import TavilyClient
 from typing_extensions import Annotated, Literal
 
+__all__ = [
+    "fetch_webpage_content",  # Fetches webpage content and converts to markdown.
+    "tavily_search",          # Web search tool utilizing Tavily and fetching full pages.
+]
+
 tavily_client = TavilyClient()
 
 

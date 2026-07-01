@@ -4,6 +4,12 @@ Adapted from NVIDIA's AIQ Blueprint (orchestrator.j2, researcher.j2) and
 the LangChain deep_research example prompts.
 """
 
+__all__ = [
+    "ORCHESTRATOR_INSTRUCTIONS",    # Instructions for the orchestrator agent.
+    "RESEARCHER_INSTRUCTIONS",      # Instructions for the researcher agent.
+    "DATA_PROCESSOR_INSTRUCTIONS",  # Instructions for the data processor agent.
+]
+
 ORCHESTRATOR_INSTRUCTIONS = """You are a Deep Agent that handles research, data analysis, and optimization tasks. You produce thorough, well-structured outputs tailored to the user's request.
 
 Current date: {date}

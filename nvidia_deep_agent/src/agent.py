@@ -28,6 +28,11 @@ from src.prompts import (
 )
 from src.tools import fetch_webpage_content, tavily_search
 
+__all__ = [
+    "Context",  # Runtime configuration context.
+    "agent",    # The compiled LangGraph deep agent.
+]
+
 
 class Context(TypedDict, total=False):
     """Runtime context passed via `context=` at invoke time.
