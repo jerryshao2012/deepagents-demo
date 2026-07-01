@@ -15,7 +15,7 @@ from research_agent.tools import (
 # ── read_docs_folder tests ──
 
 def test_read_docs_folder_reads_text_and_markdown_files(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(tools, "REPORTS_OUTPUT_FOLDER", str(tmp_path / "output"))
+    monkeypatch.setenv("REPORTS_OUTPUT_FOLDER", str(tmp_path / "output"))
     (tmp_path / "notes.txt").write_text("alpha", encoding="utf-8")
     (tmp_path / "summary.md").write_text("# heading", encoding="utf-8")
 
@@ -125,7 +125,7 @@ def test_ls_lists_files_and_directories(tmp_path: Path) -> None:
     (tmp_path / "dir1").mkdir()
     (tmp_path / "dir1" / "file2.txt").touch()
 
-    result = tools.ls.invoke({"path": str(tmp_path)})
+    result = tools.ls.invoke({"path": str(tmp_path), "state": {}})
 
     assert "file1.txt" in result
     assert "dir1/" in result
@@ -133,7 +133,7 @@ def test_ls_lists_files_and_directories(tmp_path: Path) -> None:
 
 
 def test_ls_handles_nonexistent_path(tmp_path: Path) -> None:
-    result = tools.ls.invoke({"path": str(tmp_path / "nonexistent")})
+    result = tools.ls.invoke({"path": str(tmp_path / "nonexistent"), "state": {}})
     assert "Error: Path" in result
     assert "not found" in result
 
@@ -146,34 +146,34 @@ def test_glob_finds_files_matching_pattern(tmp_path: Path) -> None:
     subdir.mkdir()
     (subdir / "test3.md").touch()
 
-    result = tools.glob.invoke({"pattern": f"{tmp_path}/*.md"})
+    result = tools.glob.invoke({"pattern": f"{tmp_path}/*.md", "state": {}})
     assert "test1.md" in result
     assert "test2.md" in result
     assert "other.txt" not in result
     assert "test3.md" not in result
 
-    result = tools.glob.invoke({"pattern": f"{tmp_path}/**/*.md"})
+    result = tools.glob.invoke({"pattern": f"{tmp_path}/**/*.md", "state": {}})
     assert "test1.md" in result
     assert "test2.md" in result
     assert "test3.md" in result
 
 
 def test_glob_handles_nonexistent_base_path() -> None:
-    result = tools.glob.invoke({"pattern": "/nonexistent/path/*.md"})
+    result = tools.glob.invoke({"pattern": "/nonexistent/path/*.md", "state": {}})
     assert "Error: Base path" in result
 
 
 # ── fetch_webpage_content tests ──
 
 def test_fetch_webpage_content_returns_markdown_for_valid_url() -> None:
-    result = fetch_webpage_content.invoke({"url": "https://example.com", "timeout": 5.0})
+    result = fetch_webpage_content.invoke({"url": "https://example.com", "timeout": 5.0, "state": {}})
 
     assert not result.startswith("Error fetching content")
     assert len(result) > 0
 
 
 def test_fetch_webpage_content_handles_invalid_url() -> None:
-    result = fetch_webpage_content.invoke({"url": "https://this-domain-does-not-exist-12345.com", "timeout": 2.0})
+    result = fetch_webpage_content.invoke({"url": "https://this-domain-does-not-exist-12345.com", "timeout": 2.0, "state": {}})
 
     assert result.startswith("Error fetching content")
 

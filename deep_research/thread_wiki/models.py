@@ -78,11 +78,14 @@ class IngestProgress:
     detail: str = ""
     source_count: int = 0
     sources_processed: int = 0
+    source_names: list[str] = field(default_factory=list)
+    current_source: str = ""
     error: str | None = None
     review_report: ReviewReport | None = None
     retry_count: int = 0
     started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     completed_at: str | None = None
+    phase_started_at: str | None = None
 
     def advance(
         self, phase: IngestPhase, detail: str = "", *, extra_progress: int = 0
@@ -90,6 +93,7 @@ class IngestProgress:
         """Advance to a new phase, updating progress percentage."""
         self.phase = phase
         self.detail = detail
+        self.phase_started_at = datetime.now(UTC).isoformat()
         base = PHASE_PROGRESS.get(phase, 0)
         self.progress = max(0, min(100, base + extra_progress))
 
@@ -99,6 +103,7 @@ class IngestProgress:
         self.progress = 100
         self.detail = detail
         self.completed_at = datetime.now(UTC).isoformat()
+        self.phase_started_at = self.phase_started_at or self.started_at
 
     def mark_error(self, error: str) -> None:
         """Mark the ingest as failed."""
@@ -123,20 +128,91 @@ class IngestProgress:
         """Return True if the ingest has reached a terminal state."""
         return self.phase in TERMINAL_PHASES
 
+    def _compute_elapsed_eta(self) -> tuple[float | None, float | None]:
+        """Compute elapsed seconds since phase start and estimated ETA.
+
+        Returns (elapsed_seconds, eta_seconds).  Both are None when
+        the phase start time or progress percentage is unavailable.
+        """
+        elapsed: float | None = None
+        eta: float | None = None
+        if self.phase_started_at:
+            try:
+                phase_start = datetime.fromisoformat(self.phase_started_at)
+                elapsed = (datetime.now(UTC) - phase_start).total_seconds()
+                if self.progress > 0 and self.progress < 100:
+                    total_est = elapsed * 100.0 / self.progress
+                    eta = max(0.0, total_est - elapsed)
+            except (ValueError, TypeError, ZeroDivisionError):
+                pass
+        return elapsed, eta
+
     def to_dict(self) -> dict:
         """Serialize progress state for API responses."""
-        return {
+        elapsed, eta = self._compute_elapsed_eta()
+        result: dict = {
             "thread_id": self.thread_id,
             "phase": self.phase.value,
             "progress": self.progress,
             "detail": self.detail,
             "source_count": self.source_count,
             "sources_processed": self.sources_processed,
+            "source_names": self.source_names,
+            "current_source": self.current_source,
             "error": self.error,
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "is_active": self.is_active(),
+            "elapsed_seconds": round(elapsed, 1) if elapsed is not None else None,
+            "eta_seconds": round(eta, 1) if eta is not None else None,
         }
+        # Include review report when available (for SSE and polling consumers).
+        if self.review_report is not None:
+            result["review_report"] = {
+                "missing_pages": [
+                    {
+                        "item_type": ri.item_type,
+                        "title": ri.title,
+                        "description": ri.description,
+                        "suggested_action": ri.suggested_action,
+                        "search_query": ri.search_query,
+                    }
+                    for ri in self.review_report.missing_pages
+                ],
+                "duplicate_suggestions": [
+                    {
+                        "item_type": ri.item_type,
+                        "title": ri.title,
+                        "description": ri.description,
+                        "suggested_action": ri.suggested_action,
+                        "search_query": ri.search_query,
+                    }
+                    for ri in self.review_report.duplicate_suggestions
+                ],
+                "research_questions": [
+                    {
+                        "item_type": ri.item_type,
+                        "title": ri.title,
+                        "description": ri.description,
+                        "suggested_action": ri.suggested_action,
+                        "search_query": ri.search_query,
+                    }
+                    for ri in self.review_report.research_questions
+                ],
+                "gaps": [
+                    {
+                        "item_type": ri.item_type,
+                        "title": ri.title,
+                        "description": ri.description,
+                        "suggested_action": ri.suggested_action,
+                        "search_query": ri.search_query,
+                    }
+                    for ri in self.review_report.gaps
+                ],
+                "total_items": self.review_report.total_items,
+                "is_empty": self.review_report.is_empty,
+            }
+        return result
 
 
 @dataclass(frozen=True)

@@ -56,19 +56,21 @@ _ALLOWED_SOURCE_SUFFIXES = _ALLOWED_TEXT_SUFFIXES | _BINARY_EXTRACT_SUFFIXES
 # 30% history + system prompt overhead.
 CONTEXT_BUDGET: dict[str, float] = {
     "index": 0.05,
-    "wiki_pages": 0.50,
-    "raw_sources": 0.25,
-    "response_reserve": 0.15,
+    "wiki_pages": 0.45,
+    "raw_sources": 0.35,
+    "response_reserve": 0.10,
     "history_system": 0.05,
 }
 
 # Default context window size in characters when WIKI_CONTEXT_MAX_CHARS is not set.
-# Conservative estimate for modern LLMs (~32K tokens ≈ 128K chars at 4 chars/token).
-_DEFAULT_CONTEXT_MAX_CHARS = 128_000
+# 512K chars ≈ 128K tokens at 4 chars/token — safe for all modern LLMs
+# (Claude, GPT-4, DeepSeek all support 128K+ token context windows).
+_DEFAULT_CONTEXT_MAX_CHARS = 512_000
 
 # Threshold above which a single raw source is considered "large" and should be
 # searched via retrieve_wiki_documents rather than read directly.
-_LARGE_SOURCE_CHAR_THRESHOLD = 80_000
+# Raised to match the larger default context window (was 80K).
+_LARGE_SOURCE_CHAR_THRESHOLD = 200_000
 
 # Content chunking: when a staged source exceeds the max chunk size, it is split
 # into overlapping chunks for reliable LLM processing.  Chunk boundaries follow
@@ -398,9 +400,18 @@ def _stage_sources(source_paths: list[Path], raw_dir: Path) -> list[Path]:
     Text-based formats (.md, .txt, .json, .yaml, .yml, .csv) are read directly.
     Binary formats (.pdf, .docx, .pptx, .xlsx) are extracted to markdown/text
     via ``content_extractors`` and saved as ``.md`` in the raw directory.
+
+    Binary extractions run in parallel via a thread pool to reduce wall-clock
+    time when multiple PDFs or office documents are staged together.
     """
+    import concurrent.futures
+
     raw_dir.mkdir(parents=True, exist_ok=True)
     staged: list[Path] = []
+
+    # Separate text and binary sources — text is instant, binary is CPU-bound.
+    text_sources: list[tuple[Path, Path, str, str, str]] = []
+    binary_sources: list[tuple[Path, Path]] = []
 
     for source in source_paths:
         if not source.exists() or not source.is_file():
@@ -414,19 +425,22 @@ def _stage_sources(source_paths: list[Path], raw_dir: Path) -> list[Path]:
 
         is_binary = suffix in _BINARY_EXTRACT_SUFFIXES
         if is_binary:
-            text = _extract_binary_source(source)
             destination = raw_dir / f"{source.name}.md"
-            out_suffix = ".md"
             stem = f"{source.stem}.{suffix.lstrip('.')}"
+            binary_sources.append((source, destination))
         else:
-            try:
-                text = source.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                logger.warning("Non-UTF-8 source, skipping: %s", source)
-                continue
             destination = raw_dir / source.name
             out_suffix = source.suffix
             stem = source.stem
+            text_sources.append((source, destination, stem, out_suffix, ""))
+
+    # Process text sources sequentially (instant I/O).
+    for source, destination, stem, out_suffix, _ in text_sources:
+        try:
+            text = source.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            logger.warning("Non-UTF-8 source, skipping: %s", source)
+            continue
 
         counter = 2
         while destination.exists():
@@ -435,6 +449,35 @@ def _stage_sources(source_paths: list[Path], raw_dir: Path) -> list[Path]:
 
         destination.write_text(text, encoding="utf-8")
         staged.append(destination)
+
+    # Process binary sources in parallel (CPU-bound extraction).
+    if binary_sources:
+
+        def _extract_one(src: Path, dest: Path) -> tuple[Path, str] | None:
+            """Extract one binary source; returns (final_dest, stem) or None."""
+            text = _extract_binary_source(src)
+            stem = f"{src.stem}.{src.suffix.lstrip('.')}"
+            counter = 2
+            while dest.exists():
+                dest = raw_dir / f"{stem}-{counter}.md"
+                counter += 1
+            dest.write_text(text, encoding="utf-8")
+            return (dest, stem)
+
+        max_workers = min(len(binary_sources), 4)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(_extract_one, src, dest): src
+                for src, dest in binary_sources
+            }
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    result = future.result()
+                    if result is not None:
+                        staged.append(result[0])
+                except Exception:
+                    src = futures[future]
+                    logger.exception("Failed to extract binary source: %s", src)
 
     return staged
 
@@ -784,13 +827,25 @@ def _resolve_model():
         sys.path.pop(0)
 
 
-def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
+def _run_agent(
+    wiki_dir: Path,
+    prompt: str,
+    *,
+    read_only: bool = False,
+    search_index: object | None = None,
+    total_raw_size: int | None = None,
+    progress_callback: object | None = None,
+) -> str:
     """Execute one deepagents pass against the wiki workspace.
 
     Args:
         wiki_dir: Root of the wiki workspace (contains raw/, wiki/, log.md, AGENTS.md).
         prompt: The instruction prompt to send to the agent.
         read_only: If True, deny all write permissions (review-only mode).
+        search_index: Pre-built search index for raw documents. If None, built lazily.
+        total_raw_size: Pre-computed total size of raw sources in chars. If None,
+            computed on demand (reads all raw files).
+        progress_callback: Optional callable(str) for sub-phase progress updates.
     """
     from deepagents import create_deep_agent
     from deepagents.backends import CompositeBackend, FilesystemBackend
@@ -840,10 +895,15 @@ def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
 
     # ── Budget-aware: pre-build search index when raw content is large ─────
     _raw_dir = wiki_dir / "raw"
-    _total_raw = _total_raw_size(_raw_dir)
+    _total_raw = (
+        total_raw_size if total_raw_size is not None else _total_raw_size(_raw_dir)
+    )
     _raw_budget = _calculate_context_budget()["raw_sources"]
     _use_search = _total_raw > _raw_budget
-    if _use_search:
+    _cached_index = search_index  # May be None (build on demand)
+    if _use_search and _cached_index is not None:
+        logger.info("Using cached search index for raw content (%d chars).", _total_raw)
+    elif _use_search:
         logger.info(
             "Raw content (%d chars) exceeds raw source budget (%d chars); "
             "pre-building search index and recommending retrieve_wiki_documents tool.",
@@ -855,7 +915,7 @@ def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
             from research_agent.utils.text_search import load_or_build_search_index
 
             _index_dir = wiki_dir / "index"
-            load_or_build_search_index(_raw_dir, _index_dir)
+            _cached_index = load_or_build_search_index(_raw_dir, _index_dir)
             logger.info("Search index built successfully for %s", _raw_dir)
         except Exception:
             logger.exception(
@@ -872,6 +932,8 @@ def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
         for specific facts.  Returns ranked snippets with source file paths, page
         numbers, and relevance scores.
         """
+        nonlocal _cached_index
+
         try:
             from research_agent.utils.text_search import (
                 load_or_build_search_index,
@@ -881,7 +943,20 @@ def _run_agent(wiki_dir: Path, prompt: str, *, read_only: bool = False) -> str:
             index_dir = wiki_dir / "index"
             raw_dir = wiki_dir / "raw"
 
-            search_idx = load_or_build_search_index(raw_dir, index_dir)
+            # Use cached index if available, otherwise build on demand.
+            if _cached_index is not None:
+                search_idx = _cached_index
+            else:
+                search_idx = load_or_build_search_index(raw_dir, index_dir)
+                _cached_index = search_idx  # Cache for subsequent calls.
+
+            # Notify progress callback with the search query.
+            if progress_callback is not None:
+                try:
+                    progress_callback(f"Searching documents for: {query[:120]}...")
+                except Exception:
+                    pass  # Progress callback failures must not break the tool.
+
             if not search_idx:
                 return (
                     "Error: No search index is available or could be built. "
@@ -2247,13 +2322,16 @@ async def run_ingest(
         staged = await asyncio.to_thread(_stage_sources, source_files, paths.raw_dir)
         staged_names = [p.name for p in staged]
         progress.sources_processed = len(staged)
+        progress.source_names = [s.name for s in source_files]
 
         # Detect and chunk large sources (>80K chars by default).
         # Chunk files are written alongside the originals in raw/ and
         # the review prompt includes chunk-aware processing instructions.
         chunked_sources: dict[str, list[dict]] = {}
         for name in staged_names:
-            chunks = _chunk_large_source(paths.raw_dir, name)
+            chunks = await asyncio.to_thread(
+                _chunk_large_source, paths.raw_dir, name
+            )
             if chunks:
                 chunked_sources[name] = chunks
                 # Add chunk file names to staged_names so the LLM can read them.
@@ -2274,8 +2352,45 @@ async def run_ingest(
         await check_cancellation(cancel_event, phase_name="staging_sources")
         await save_progress(progress, paths.wiki_dir)
 
-        # Phase 3: Review (read-only LLM analysis)
-        progress.advance(IngestPhase.ANALYZING, f"Analyzing {len(staged)} sources...")
+        # ── Pre-build shared resources for all agent passes ─────────────────
+        # Build the search index once and cache total raw size so subsequent
+        # _run_agent calls don't redundantly rebuild the index or re-read files.
+        _total_raw = await asyncio.to_thread(_total_raw_size, paths.raw_dir)
+        _raw_budget = _calculate_context_budget()["raw_sources"]
+        _use_search = _total_raw > _raw_budget
+        _cached_index: object | None = None
+        if _use_search:
+            try:
+                from research_agent.utils.text_search import (
+                    load_or_build_search_index,
+                )
+
+                _index_dir = paths.wiki_dir / "index"
+                _cached_index = await asyncio.to_thread(
+                    load_or_build_search_index, paths.raw_dir, _index_dir
+                )
+                logger.info(
+                    "Pre-built search index for raw content (%d chars) — "
+                    "will reuse across all ingest phases.",
+                    _total_raw,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to pre-build search index; each phase will build on demand."
+                )
+
+        # Sub-phase progress callback: updates detail when the LLM searches.
+        def _progress_callback(msg: str) -> None:
+            progress.detail = msg
+
+        # ── Phase 3: Review (read-only LLM analysis) ────────────────────────
+        progress.advance(
+            IngestPhase.ANALYZING,
+            f"Analyzing {len(staged)} sources: {', '.join(staged_names[:5])}"
+            + (
+                f" and {len(staged_names) - 5} more..." if len(staged_names) > 5 else ""
+            ),
+        )
         review_prompt = _build_ingest_review_prompt(topic, staged_names, note)
 
         # Append chunked-source instructions when large sources were split.
@@ -2288,7 +2403,13 @@ async def run_ingest(
         try:
             review_summary = await asyncio.wait_for(
                 asyncio.to_thread(
-                    _run_agent, paths.wiki_dir, review_prompt, read_only=True
+                    _run_agent,
+                    paths.wiki_dir,
+                    review_prompt,
+                    read_only=True,
+                    search_index=_cached_index,
+                    total_raw_size=_total_raw,
+                    progress_callback=_progress_callback,
                 ),
                 timeout=_INGEST_PHASE_TIMEOUT,
             )
@@ -2297,7 +2418,8 @@ async def run_ingest(
                 "Ingest review phase timed out after %ds", _INGEST_PHASE_TIMEOUT
             )
             raise
-        _append_log_entry(
+        await asyncio.to_thread(
+            _append_log_entry,
             paths.wiki_dir,
             "ingest.review",
             "completed",
@@ -2307,7 +2429,7 @@ async def run_ingest(
         await check_cancellation(cancel_event, phase_name="analyzing")
         await save_progress(progress, paths.wiki_dir)
 
-        # Phase 4: Apply (mutating LLM pass)
+        # ── Phase 4: Apply (mutating LLM pass) ──────────────────────────────
         apply_phase = IngestPhase.MERGING if merge else IngestPhase.APPLYING
         progress.advance(
             apply_phase,
@@ -2319,7 +2441,13 @@ async def run_ingest(
         try:
             apply_result = await asyncio.wait_for(
                 asyncio.to_thread(
-                    _run_agent, paths.wiki_dir, apply_prompt, read_only=False
+                    _run_agent,
+                    paths.wiki_dir,
+                    apply_prompt,
+                    read_only=False,
+                    search_index=_cached_index,
+                    total_raw_size=_total_raw,
+                    progress_callback=_progress_callback,
                 ),
                 timeout=_INGEST_PHASE_TIMEOUT,
             )
@@ -2328,7 +2456,8 @@ async def run_ingest(
                 "Ingest apply phase timed out after %ds", _INGEST_PHASE_TIMEOUT
             )
             raise
-        _append_log_entry(
+        await asyncio.to_thread(
+            _append_log_entry,
             paths.wiki_dir,
             "ingest.apply",
             "applied",
@@ -2338,79 +2467,77 @@ async def run_ingest(
         await check_cancellation(cancel_event, phase_name="applying")
         await save_progress(progress, paths.wiki_dir)
 
-        # Phase 4.5: Post-ingest review (read-only curation signals)
-        progress.advance(IngestPhase.REVIEWING, "Generating curation review...")
-        review_prompt = _build_review_prompt(topic, staged_names, note)
-        try:
-            review_raw = await asyncio.wait_for(
-                asyncio.to_thread(
-                    _run_agent, paths.wiki_dir, review_prompt, read_only=True
-                ),
-                timeout=_INGEST_PHASE_TIMEOUT,
-            )
-        except TimeoutError:
-            logger.warning(
-                "Post-ingest review timed out after %ds — skipping review",
-                _INGEST_PHASE_TIMEOUT,
-            )
-            review_raw = (
-                "## Missing Pages\nNone identified.\n\n"
-                "## Duplicate Suggestions\nNone identified.\n\n"
-                "## Research Questions\nNone identified.\n\n"
-                "## Knowledge Gaps\nNone identified.\n"
-            )
-        progress.review_report = _parse_review_report(review_raw)
-        _append_log_entry(
-            paths.wiki_dir,
-            "ingest.review",
-            "completed",
-            summary=f"Review found {progress.review_report.total_items} curation items.",
-        )
+        # ── Phase 4.5: Post-ingest review (fire-and-forget background) ──────
+        # Run the curation review as a background task so it doesn't block
+        # the ingest from completing for the frontend.
+        _run_review_bg = True  # default: enabled
 
-        await check_cancellation(cancel_event, phase_name="reviewing")
-        await save_progress(progress, paths.wiki_dir)
+        def _post_ingest_review_sync() -> None:
+            """Run post-ingest review synchronously in a daemon thread."""
+            try:
+                review_prompt_bg = _build_review_prompt(topic, staged_names, note)
+                review_raw = _run_agent(
+                    paths.wiki_dir,
+                    review_prompt_bg,
+                    read_only=True,
+                    search_index=_cached_index,
+                    total_raw_size=_total_raw,
+                )
+                report = _parse_review_report(review_raw)
+                progress.review_report = report
+                _append_log_entry(
+                    paths.wiki_dir,
+                    "ingest.review",
+                    "completed",
+                    summary=f"Review found {report.total_items} curation items.",
+                )
+                logger.info(
+                    "Post-ingest review completed: %d curation items for thread %s",
+                    report.total_items,
+                    paths.thread_id,
+                )
+            except Exception:
+                logger.exception(
+                    "Post-ingest review failed for thread %s", paths.thread_id
+                )
 
-        # Phase 5: Refresh index (incremental repair with full rebuild fallback)
-        progress.advance(IngestPhase.REFRESHING_INDEX, "Updating wiki index...")
-        _INDEX_REPAIR_TIMEOUT = int(
-            __import__("os").getenv("WIKI_INDEX_REPAIR_TIMEOUT_SECONDS", "120")
-        )
-        try:
-            repaired = await asyncio.wait_for(
-                asyncio.to_thread(_repair_index, topic, paths.wiki_dir, len(staged)),
-                timeout=_INDEX_REPAIR_TIMEOUT,
-            )
-        except TimeoutError:
-            logger.warning(
-                "Index repair timed out after %ds — falling back to full rebuild",
-                _INDEX_REPAIR_TIMEOUT,
-            )
-            repaired = False
-        if not repaired:
-            progress.detail = "Incremental repair failed or timed out, rebuilding index from scratch..."
-            await asyncio.to_thread(_refresh_index, topic, paths.wiki_dir)
+        if _run_review_bg:
+            import threading
 
-        review_count = (
-            progress.review_report.total_items if progress.review_report else 0
-        )
-        progress.mark_complete(
-            f"Ingested {len(staged)} sources successfully"
-            + (f" ({review_count} curation items flagged)." if review_count else ".")
-        )
+            _review_thread = threading.Thread(
+                target=_post_ingest_review_sync,
+                daemon=True,
+                name=f"wiki-review-{paths.thread_id}",
+            )
+            _review_thread.start()
+            logger.info(
+                "Launched background post-ingest review for thread %s",
+                paths.thread_id,
+            )
+
+        # ── Phase 5: Refresh index (direct rebuild, skip LLM repair) ────────
+        progress.advance(IngestPhase.REFRESHING_INDEX, "Rebuilding wiki index...")
+        await asyncio.to_thread(_refresh_index, topic, paths.wiki_dir)
+
+        progress.mark_complete(f"Ingested {len(staged)} sources successfully.")
         await remove_progress_snapshot(paths.wiki_dir)
         return apply_result
 
     except asyncio.CancelledError:
         progress.mark_cancelled()
         await save_progress(progress, paths.wiki_dir)
-        _append_log_entry(
-            paths.wiki_dir, "ingest", "cancelled", summary="Ingest cancelled by client."
+        await asyncio.to_thread(
+            _append_log_entry,
+            paths.wiki_dir, "ingest", "cancelled", summary="Ingest cancelled by client.",
         )
         raise
     except Exception as exc:
         progress.mark_error(str(exc))
         await save_progress(progress, paths.wiki_dir)
-        _append_log_entry(paths.wiki_dir, "ingest", "error", summary=str(exc)[:320])
+        await asyncio.to_thread(
+            _append_log_entry,
+            paths.wiki_dir, "ingest", "error", summary=str(exc)[:320],
+        )
         logger.exception("Ingest failed for thread %s", paths.thread_id)
         raise
 
@@ -2545,7 +2672,8 @@ async def run_query(
         )
     answer, should_file, reason = _parse_query_decision(raw_response)
 
-    _append_log_entry(
+    await asyncio.to_thread(
+        _append_log_entry,
         paths.wiki_dir,
         "query.review",
         "file" if should_file else "skip",
@@ -2576,8 +2704,9 @@ async def run_query(
         except TimeoutError:
             logger.warning("Wiki query filing timed out after %ds", _QUERY_TIMEOUT)
         else:
-            _refresh_index(topic, paths.wiki_dir)
-            _append_log_entry(
+            await asyncio.to_thread(_refresh_index, topic, paths.wiki_dir)
+            await asyncio.to_thread(
+                _append_log_entry,
                 paths.wiki_dir,
                 "query.apply",
                 "filed",
@@ -2684,7 +2813,8 @@ async def run_lint(
         logger.error("Lint apply pass timed out after %ds", _LINT_TIMEOUT)
         result = "Lint apply timed out."
     await asyncio.to_thread(_refresh_index, topic, paths.wiki_dir)
-    _append_log_entry(
+    await asyncio.to_thread(
+        _append_log_entry,
         paths.wiki_dir,
         "lint.apply",
         "applied",

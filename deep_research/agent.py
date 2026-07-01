@@ -353,10 +353,11 @@ class ResearchStateMiddleware(AgentMiddleware):
         return True
 
     # Maximum seconds to wait for an in-progress wiki ingest to complete.
-    # Large documents (200+ page PDFs with OCR) can take 3-5 minutes:
-    #   ~60s PDF extraction + ~120s review pass + ~90s apply pass = ~270s
+    # With per-phase timeouts of 600s each and up to 3 LLM phases (review,
+    # apply, post-ingest review fire-and-forget), ingest can take 5-15 minutes
+    # for large documents.  Default 900s gives comfortable headroom.
     # Configurable via WIKI_INGEST_MAX_WAIT_SECONDS env var.
-    _WIKI_INGEST_MAX_WAIT = int(os.environ.get("WIKI_INGEST_MAX_WAIT_SECONDS", "300"))
+    _WIKI_INGEST_MAX_WAIT = int(os.environ.get("WIKI_INGEST_MAX_WAIT_SECONDS", "900"))
 
     @staticmethod
     def _wait_for_wiki_ready(
@@ -370,7 +371,7 @@ class ResearchStateMiddleware(AgentMiddleware):
         becomes ready within *max_wait* seconds, ``False`` otherwise (ingest
         failed, was cancelled, timed out, or no ingest was running).
 
-        Default max_wait is ``WIKI_INGEST_MAX_WAIT_SECONDS`` (300s).
+        Default max_wait is ``WIKI_INGEST_MAX_WAIT_SECONDS`` (900s).
         """
         if max_wait is None:
             max_wait = ResearchStateMiddleware._WIKI_INGEST_MAX_WAIT

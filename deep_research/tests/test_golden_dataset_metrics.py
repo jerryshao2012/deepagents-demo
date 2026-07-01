@@ -1,6 +1,12 @@
-"""Tests for golden dataset metric scoring."""
+import sys
+from pathlib import Path
 
-from research_agent.skills.golden_dataset.scripts.golden_dataset_metrics import (
+# Add golden-dataset scripts to python path
+_scripts_dir = Path(__file__).resolve().parent.parent / ".deepagents" / "skills" / "golden-dataset" / "scripts"
+if str(_scripts_dir) not in sys.path:
+    sys.path.insert(0, str(_scripts_dir))
+
+from golden_dataset_metrics import (
     build_missing_context_report,
     build_judge_prompt,
     parse_metric_scores,
@@ -78,13 +84,13 @@ def test_parse_metric_scores_rejects_out_of_range_values() -> None:
 def test_build_missing_content_report_flags_rows_without_content() -> None:
     report = build_missing_context_report(
         [
-            {"ID": "Q1", "Question": "What is parental leave?", "Content": ""},
-            {"ID": "Q2", "Question": "How do I enroll in benefits?", "Content": "Benefits guide section 4"},
-            {"ID": "Q3", "Question": "How do I request PTO?", "Content": "   "},
+            {"ID": "Q1", "Question": "What is parental leave?", "Context": ""},
+            {"ID": "Q2", "Question": "How do I enroll in benefits?", "Context": "Benefits guide section 4"},
+            {"ID": "Q3", "Question": "How do I request PTO?", "Context": "   "},
         ]
     )
 
-    assert "2 row(s) are missing Content" in report
+    assert "2 row(s) are missing Context" in report
     assert "Q1" in report
     assert "Q3" in report
     assert "Q2" not in report

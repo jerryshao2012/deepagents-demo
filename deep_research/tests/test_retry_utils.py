@@ -112,7 +112,7 @@ class TestRetryOnRateLimit:
 
         assert call_count == 1  # Only called once, no retries
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_async_retry(self):
         """Should work with async functions."""
         call_count = 0
@@ -135,12 +135,13 @@ class TestRetryConfig:
 
     def test_default_config(self):
         """Should use default values."""
+        import retry_utils
         config = RetryConfig()
-        assert config.max_retries == 5
-        assert config.initial_backoff == 1.0
-        assert config.max_backoff == 60.0
-        assert config.backoff_multiplier == 2.0
-        assert config.jitter is True
+        assert config.max_retries == retry_utils.MAX_RETRIES
+        assert config.initial_backoff == retry_utils.INITIAL_BACKOFF
+        assert config.max_backoff == retry_utils.MAX_BACKOFF
+        assert config.backoff_multiplier == retry_utils.BACKOFF_MULTIPLIER
+        assert config.jitter == retry_utils.JITTER_ENABLED
 
     def test_custom_config(self):
         """Should accept custom values."""

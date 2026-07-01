@@ -97,7 +97,7 @@ def test_full_lifecycle(client):
         run_id = run["run_id"]
 
         # Let the background task finish.
-        asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.5))
+        asyncio.run(asyncio.sleep(0.5))
 
     # Check run status — should be success.
     status_resp = client.get(f"/threads/{thread_id}/runs/{run_id}")
@@ -161,7 +161,7 @@ def test_interrupt_strategy(client):
         ).json()
 
         # Let the first run start.
-        asyncio.get_event_loop().run_until_complete(asyncio.sleep(0.1))
+        asyncio.run(asyncio.sleep(0.1))
 
     with patch.object(server, "agent") as mock_agent:
         mock_agent.ainvoke = _make_ainvoke_mock()

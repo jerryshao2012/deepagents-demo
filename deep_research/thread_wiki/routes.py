@@ -370,9 +370,13 @@ async def stream_wiki_progress(
     """
 
     async def event_stream():
+        import time as _time
+
         seq = 0
         last_phase = None
         last_progress = None
+        last_emit_time = _time.monotonic()
+        _HEARTBEAT_INTERVAL = 15.0  # seconds between heartbeat pings
 
         while True:
             prog = await progress_tracker.get_progress(thread_id)
@@ -393,17 +397,23 @@ async def stream_wiki_progress(
                 )
                 return
 
+            emitted = False
+
             # Emit on phase change.
             if prog.phase != last_phase:
                 yield _sse_frame("progress", prog.to_dict(), event_id=seq)
                 seq += 1
                 last_phase = prog.phase
+                last_emit_time = _time.monotonic()
+                emitted = True
 
             # Emit on progress percentage change.
             if prog.progress != last_progress:
                 yield _sse_frame("progress", prog.to_dict(), event_id=seq)
                 seq += 1
                 last_progress = prog.progress
+                last_emit_time = _time.monotonic()
+                emitted = True
 
             # Terminal state → emit end and close stream.
             if prog.is_terminal():
@@ -417,6 +427,22 @@ async def stream_wiki_progress(
                     event_id=seq,
                 )
                 return
+
+            # Send heartbeat if no event was emitted for a while.
+            if not emitted and (
+                _time.monotonic() - last_emit_time >= _HEARTBEAT_INTERVAL
+            ):
+                yield _sse_frame(
+                    "heartbeat",
+                    {
+                        "thread_id": thread_id,
+                        "phase": prog.phase.value,
+                        "progress": prog.progress,
+                    },
+                    event_id=seq,
+                )
+                seq += 1
+                last_emit_time = _time.monotonic()
 
             await asyncio.sleep(0.5)
 

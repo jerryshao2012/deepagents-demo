@@ -164,20 +164,24 @@ def test_jsonl_append_and_load(tmp_path: Path) -> None:
 
 
 def test_parser_accepts_eval_arguments() -> None:
-    parser = build_parser()
+    import sys
+    from pathlib import Path
+    _scripts_dir = Path(__file__).resolve().parent.parent / ".deepagents" / "skills" / "golden-dataset" / "scripts"
+    if str(_scripts_dir) not in sys.path:
+        sys.path.insert(0, str(_scripts_dir))
+    from score_dataset import build_parser as build_score_parser
+
+    parser = build_score_parser()
     args = parser.parse_args(
         [
-            "Generate 10 pairs",
-            "--skill",
-            "golden-dataset",
-            "--eval-golden-dataset",
+            "dataset.csv",
             "--eval-mode",
             "baseline",
-            "--eval-history-file",
-            "./output/eval_history/runs.jsonl",
+            "--output-dir",
+            "./output",
         ]
     )
 
-    assert args.eval_golden_dataset is True
+    assert args.input_csv == "dataset.csv"
     assert args.eval_mode == "baseline"
-    assert args.eval_history_file == "./output/eval_history/runs.jsonl"
+    assert args.output_dir == "./output"

@@ -244,11 +244,13 @@ def register_document_routes(app) -> None:
 
         # Auto-trigger wiki ingest for thread folders
         thread_id = extract_thread_id_from_folder(str(relative_folder))
+        wiki_ingest_started = False
         if thread_id:
             asyncio.create_task(
                 trigger_wiki_auto_ingest(thread_id),
                 name=f"wiki-auto-ingest-trigger-{thread_id}",
             )
+            wiki_ingest_started = True
 
         return {
             "folder": str(relative_folder),
@@ -257,6 +259,8 @@ def register_document_routes(app) -> None:
             "total_uploaded_bytes": total_uploaded_size,
             "free_space_bytes": free_space,
             "free_space_human": format_bytes(free_space),
+            "wiki_ingest_started": wiki_ingest_started,
+            "wiki_ingest_thread_id": thread_id if wiki_ingest_started else None,
         }
 
     @app.get("/documents/list")
