@@ -457,7 +457,9 @@ def register_oauth_routes(app) -> None:
     """Register OAuth authentication endpoints (login, callback, validate, refresh, logout)."""
 
     @app.get("/auth/login/{provider}")
-    async def oauth_login(provider: str, request: Request):
+    async def oauth_login(
+        provider: str, request: Request, redirect_url: str | None = None
+    ):
         """Initiate OAuth login with Google or GitHub."""
         if not _cfg.OAUTH_ENABLED:
             raise HTTPException(
@@ -470,6 +472,35 @@ def register_oauth_routes(app) -> None:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Unsupported OAuth provider: {provider}. Use 'google' or 'github'.",
             )
+
+        # Dynamically detect target frontend URL
+        target_frontend = None
+        if redirect_url:
+            cleaned_url = redirect_url.rstrip("/")
+            if cleaned_url in _cfg.FRONTEND_ORIGINS:
+                target_frontend = cleaned_url
+
+        if not target_frontend:
+            referer = request.headers.get("referer")
+            if referer:
+                from urllib.parse import urlparse
+
+                try:
+                    parsed = urlparse(referer)
+                    origin = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+                    if origin in _cfg.FRONTEND_ORIGINS:
+                        target_frontend = origin
+                except Exception:
+                    pass
+
+        if not target_frontend:
+            target_frontend = (
+                _cfg.FRONTEND_ORIGINS[0]
+                if _cfg.FRONTEND_ORIGINS
+                else "http://localhost:3000"
+            )
+
+        request.session["oauth_frontend_url"] = target_frontend
 
         forwarded_proto = request.headers.get("x-forwarded-proto", "http")
         forwarded_host = request.headers.get(
@@ -512,9 +543,15 @@ def register_oauth_routes(app) -> None:
             else:
                 user_data = await _cfg.handle_github_callback(request)
 
-            frontend_url = os.environ.get(
-                "FRONTEND_URL", "http://localhost:3000"
-            ).rstrip("/")
+            frontend_url = request.session.pop("oauth_frontend_url", None)
+            if not frontend_url:
+                frontend_url = (
+                    _cfg.FRONTEND_ORIGINS[0]
+                    if _cfg.FRONTEND_ORIGINS
+                    else "http://localhost:3000"
+                )
+            frontend_url = frontend_url.rstrip("/")
+
             session_token = user_data["session_token"]
             return RedirectResponse(
                 url=f"{frontend_url}/login/success?token={session_token}"
@@ -651,7 +688,7 @@ def register_oauth_routes(app) -> None:
 
         if identity in _logged_oauth_users:
             _logged_oauth_users.discard(identity)
-            print(f"✅ Cleaned up logged user tracking for: {identity}")
+            logger.info(f"✅ Cleaned up logged user tracking for: {identity}")
 
         return {
             "success": True,

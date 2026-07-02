@@ -1002,6 +1002,10 @@ To configure OAuth client credentials for local development and production, foll
      - **Homepage URL**: `https://d600y3wyk0xvf.cloudfront.net` (your frontend URL)
      - **Authorization callback URL**: `https://bh3z333bky.us-east-1.awsapprunner.com/auth/callback/github` (your backend URL)
      - **Enable Device Flow**: Optional - check this if needed for your deployment
+   - **Application name**: `BMO Deep Agent Vercel`
+     - **Homepage URL**: `https://bmo-deepagent-ui.vercel.app` (your frontend URL)
+     - **Authorization callback URL**: `https://deep-research-agent-0312.salmonrock-b46ff20d.canadacentral.azurecontainerapps.io/auth/callback/github` (your backend URL)
+     - **Enable Device Flow**: Optional - check this if needed for your deployment
 3. Click **Register application**.
 4. Copy the **Client ID** and **Client Secret** for production use.
 
@@ -1021,14 +1025,14 @@ GOOGLE_CLIENT_ID="your_google_client_id_here"
 GOOGLE_CLIENT_SECRET="your_google_client_secret_here"
 
 # GitHub OAuth Credentials
-GITHUB_CLIENT_ID="your_github_client_id_here"
-GITHUB_CLIENT_SECRET="your_github_client_secret_here"
+GITHUB_CLIENT_IDS="your_github_client_id_here"
+GITHUB_CLIENT_SECRETS="your_github_client_secret_here"
 
 # OAuth Session Secret Key (for token verification and signing)
 OAUTH_SECRET_KEY="generate-a-random-secret-string-here"
 
-# Target Frontend URL to redirect to after successful callback
-FRONTEND_URL="http://localhost:3000"
+# Target Frontend URLs to redirect to after successful callback
+FRONTEND_URLS="http://localhost:3000"
 ```
 > [!TIP]
 > You can generate a strong random secret key by running:

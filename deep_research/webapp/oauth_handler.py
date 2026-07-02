@@ -3,6 +3,7 @@
 Registers clients for Google and GitHub authentication, manages active user sessions,
 and handles cookie lifetimes and state checks.
 """
+
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -33,11 +34,49 @@ google = oauth.register(
     client_kwargs={"scope": "openid email profile"},
 )
 
-# Register GitHub OAuth provider
+
+# Register GitHub OAuth providers dynamically
+def _parse_multi_env(env_str: str) -> dict[str, str]:
+    res = {}
+    if not env_str:
+        return res
+    for item in env_str.split(","):
+        if ":" in item:
+            parts = item.split(":", 1)
+            res[parts[0].strip()] = parts[1].strip()
+    return res
+
+
+github_ids = _parse_multi_env(os.environ.get("GITHUB_CLIENT_IDS", ""))
+github_secrets = _parse_multi_env(os.environ.get("GITHUB_CLIENT_SECRETS", ""))
+
+# Register specific domain clients
+for domain, client_id in github_ids.items():
+    client_secret = github_secrets.get(domain, "")
+    client_name = f"github_{domain.replace('.', '_').replace('-', '_')}"
+    oauth.register(
+        name=client_name,
+        client_id=client_id,
+        client_secret=client_secret,
+        access_token_url="https://github.com/login/oauth/access_token",
+        authorize_url="https://github.com/login/oauth/authorize",
+        api_base_url="https://api.github.com/",
+        client_kwargs={"scope": "user:email"},
+    )
+
+# Register default/fallback GitHub OAuth provider
+default_github_id = config("GITHUB_CLIENT_ID")
+default_github_secret = config("GITHUB_CLIENT_SECRET")
+
+if not default_github_id and github_ids:
+    first_domain = list(github_ids.keys())[0]
+    default_github_id = github_ids[first_domain]
+    default_github_secret = github_secrets.get(first_domain, "")
+
 github = oauth.register(
     name="github",
-    client_id=config("GITHUB_CLIENT_ID"),
-    client_secret=config("GITHUB_CLIENT_SECRET"),
+    client_id=default_github_id,
+    client_secret=default_github_secret,
     access_token_url="https://github.com/login/oauth/access_token",
     authorize_url="https://github.com/login/oauth/authorize",
     api_base_url="https://api.github.com/",
@@ -170,14 +209,17 @@ async def handle_google_callback(request: Request) -> dict:
 async def handle_github_callback(request: Request) -> dict:
     """Handle GitHub OAuth callback and return user info."""
     try:
-        token = await github.authorize_access_token(request)
+        client_name = request.session.pop("oauth_github_client_name", "github")
+        github_client = getattr(oauth, client_name, github)
+
+        token = await github_client.authorize_access_token(request)
 
         # Get user info from GitHub API
-        resp = await github.get("user", token=token)
+        resp = await github_client.get("user", token=token)
         user_info = resp.json()
 
         # Get user emails
-        email_resp = await github.get("user/emails", token=token)
+        email_resp = await github_client.get("user/emails", token=token)
         emails = email_resp.json()
 
         # Find primary email
@@ -214,15 +256,44 @@ async def handle_github_callback(request: Request) -> dict:
         raise Exception(f"GitHub OAuth failed: {str(e)}")
 
 
-async def get_oauth_login_url(request: Request, provider: str, redirect_uri: str) -> str:
+async def get_oauth_login_url(
+    request: Request, provider: str, redirect_uri: str
+) -> str:
     """Generate OAuth login URL for the specified provider."""
     if provider == "google":
         rv = await google.create_authorization_url(redirect_uri=redirect_uri)
         await google.save_authorize_data(request, redirect_uri=redirect_uri, **rv)
         return rv["url"]
     elif provider == "github":
-        rv = await github.create_authorization_url(redirect_uri=redirect_uri)
-        await github.save_authorize_data(request, redirect_uri=redirect_uri, **rv)
+        from urllib.parse import urlparse
+
+        frontend_url = request.session.get("oauth_frontend_url", "")
+        domain = ""
+        if frontend_url:
+            try:
+                domain = urlparse(frontend_url).netloc.lower()
+            except Exception:
+                pass
+
+        github_client = github
+        target_domain = None
+        for d in github_ids.keys():
+            if d != "default" and (
+                domain == d or domain.endswith("." + d) or d.endswith("." + domain)
+            ):
+                target_domain = d
+                break
+
+        if target_domain:
+            client_name = f"github_{target_domain.replace('.', '_').replace('-', '_')}"
+            github_client = getattr(oauth, client_name, github)
+
+        request.session["oauth_github_client_name"] = github_client.name
+
+        rv = await github_client.create_authorization_url(redirect_uri=redirect_uri)
+        await github_client.save_authorize_data(
+            request, redirect_uri=redirect_uri, **rv
+        )
         return rv["url"]
     else:
         raise ValueError(f"Unsupported provider: {provider}")
@@ -230,7 +301,7 @@ async def get_oauth_login_url(request: Request, provider: str, redirect_uri: str
 
 def handle_logout(session_token: str) -> Optional[str]:
     """Handle user logout by removing session and returning user identity.
-    
+
     Returns the user identity if the session was found and removed, None otherwise.
     The caller (auth.py) should use this identity to clean up _logged_oauth_users.
     """

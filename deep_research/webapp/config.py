@@ -38,7 +38,7 @@ else:
     DOCS_ROOT: Path = _BASE / "docs"
 
 # Semantic API version — bump on every public-facing change
-API_VERSION: str = "1.8.95"
+API_VERSION: str = "1.8.97"
 
 # ── Authentication ────────────────────────────────────────────────────────────
 
@@ -84,7 +84,7 @@ _frontend_origins: list[str] = [
     "https://bmo-deepagent-qqkdniiw0-agentic-ui.vercel.app",
 ]
 
-_env_frontend_urls = os.environ.get("FRONTEND_URL", "")
+_env_frontend_urls = os.environ.get("FRONTEND_URLS", "")
 if _env_frontend_urls:
     _frontend_origins.extend(
         origin.strip().rstrip("/")
